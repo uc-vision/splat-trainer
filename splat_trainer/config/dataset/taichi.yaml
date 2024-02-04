@@ -1,0 +1,9 @@
+# @package _global_
+
+dataset:
+  _target_: taichi_3d_gaussian_splatting.datasets.TaichiDataset
+  train_dataset_json_path: ???
+  val_dataset_json_path: ???
+  pointcloud_parquet_path: ???
+
+  scene_config: ${scene_config}

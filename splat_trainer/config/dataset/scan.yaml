@@ -1,0 +1,16 @@
+# @package _global_
+
+
+dataset:
+  _target_: splat_trainer.ScanDataset
+  filename: ???
+  scene_config: ${scene_config}
+
+  image_scale: 0.5
+  val_count: 10
+
+scan_dir: ${dirname:${dataset.filename}}
+
+trainer:
+  output_model_dir: ${..scan_dir}/gaussian
+  output_log_dir: ${..scan_dir}/gaussian
