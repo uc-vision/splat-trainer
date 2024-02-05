@@ -11,7 +11,11 @@ setup(
     packages=find_packages(),
     install_requires = [
         'taichi-splatting',
-        'tqdm'
+        'tqdm',
+        'plyfile',
+        'pypcd4',
+        'hydra-core',
+        'omegaconf',
     ],
 
     entry_points={

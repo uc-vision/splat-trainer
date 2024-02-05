@@ -1,4 +1,5 @@
 from pathlib import Path
+from typing import Tuple
 from camera_geometry import FrameSet
 
 from camera_geometry.transforms import translate_44
@@ -10,17 +11,15 @@ import numpy as np
 from splat_trainer.camera_pose import CameraRigTable
 
 from splat_trainer.scan.loading import PreloadedImages, preload_images
-
+from splat_trainer.scene.gaussians import Scene
+from splat_trainer.util.pointcloud import PointCloud
 from .visibility import visibility
-from pyntcloud import PyntCloud
 
-
-def load_cloud(scan:FrameSet) -> PyntCloud:
+def load_cloud(scan:FrameSet) -> Tuple[np.ndarray, np.ndarray]:
   assert 'sparse' in scan.models, "No sparse model found in scene.json"
-  pcd_file = scan.find_file(scan.models.sparse.filename)
+  cloud_file = Path(scan.find_file(scan.models.sparse.filename))
 
-  return PyntCloud.from_file(pcd_file)
-
+  return PointCloud.load_cloud(cloud_file)
 
 def camera_extents(scan:FrameSet):
     cam_centers = np.stack([camera.location for camera in scan.expand_cameras()])
@@ -48,7 +47,7 @@ class ScanDataset:
           offset=(-self.centre).tolist() )
        )
 
-    cameras = {k: optimal_undistorted(camera, alpha=0)
+    cameras = {k: optimal_undistorted(camera, alpha=0).scale_image(image_scale)
       for k, camera in scan.cameras.items()}
 
     print("Undistorted cameras:")
@@ -83,17 +82,10 @@ class ScanDataset:
 
   def scene(self) -> Scene:
     pcd = load_cloud(self.scan)    
-    rgb = self.pyntcloud.points[[
-            "red", "green", "blue"]].values.astype(np.float32)
     
-    xyz = pcd.xyz - self.centre
 
-    vis = visibility(self.scan.expand_cameras(), pcd.xyz)
+    vis = visibility(self.scan.expand_cameras(), pcd.points)
     print(f"Visible {(vis > 0).sum()} of {len(vis)} points")
     # pcd = pcd.select_by_index(np.flatnonzero(vis > 0))
     
-    xyz, rgb  = xyz[vis], rgb[vis]
-    scene =  Scene(xyz, rgb, self.centre)
-
-
-    return scene
+    return Scene.initialize(pcd[vis], self.centre)
