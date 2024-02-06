@@ -22,3 +22,7 @@ class Scene:
   @staticmethod
   def initialize(self, points: PointCloud, centre: torch.Tensor):
     pass
+
+  @staticmethod 
+  def load_model(self, workspace_path:str):
+    pass

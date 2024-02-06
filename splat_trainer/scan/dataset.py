@@ -82,7 +82,6 @@ class ScanDataset:
 
   def scene(self) -> Scene:
     pcd = load_cloud(self.scan)    
-    
 
     vis = visibility(self.scan.expand_cameras(), pcd.points)
     print(f"Visible {(vis > 0).sum()} of {len(vis)} points")

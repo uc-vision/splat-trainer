@@ -4,6 +4,9 @@ defaults:
   - _self_
   - dataset: scan
 
+
 trainer:
-  _target_: splat_trainer.trainer
+  _target_: splat_trainer.Trainer
   
+  dataset: ${..dataset}
+  load_model: null

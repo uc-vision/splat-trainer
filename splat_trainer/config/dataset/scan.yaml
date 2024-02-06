@@ -3,13 +3,13 @@
 
 dataset:
   _target_: splat_trainer.ScanDataset
-  filename: ???
-  scan_file: ${scene_config}
+  scan_file: ${..scan_file}
 
   image_scale: 0.5
   val_count: 10
 
-scan_dir: ${dirname:${dataset.filename}}
+scan_dir: ${dirname:${dataset.scan_file}}
+
 
 trainer:
   output_model_dir: ${..scan_dir}/gaussian
