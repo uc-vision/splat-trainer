@@ -1,8 +1,11 @@
-from typing import Tuple
+
 from torch import nn
 import torch
+import torch.nn.functional as F
 
 from taichi_splatting.torch_ops.transforms import split_rt
+
+from splat_trainer.util.transforms import join_rt, mat_to_quat, quat_to_mat
 
 
 
@@ -34,9 +37,11 @@ class CameraRigTable(nn.Module):
     self.rig_t_world.normalize()
 
   
-  def forward(self, camera_index:torch.Tensor, rig_index:torch.Tensor):
-    assert camera_index.shape == rig_index.shape, \
-      f"{camera_index.shape} != {rig_index.shape}"
+  def forward(self, camera_index:torch.Tensor):
+    assert camera_index.dim() == 2 and camera_index.shape[1] == 2, \
+      f"Expected (rig_index, camera_index) N, 2 tensor, got: {camera_index.shape}"
+
+    rig_index, camera_index = camera_index.unbind(-1)
 
     camera_t_rig = self.camera_t_rig(camera_index)
     rig_t_world = self.rig_t_world(rig_index)
@@ -49,15 +54,16 @@ class PoseTable(nn.Module):
     super().__init__()
 
     R, t = split_rt(m)
-
-    rot_axis, angle = rot_to_quat(R)
+    q = mat_to_quat(R)
 
     self.t = nn.Parameter(t.to(torch.float32))
     self.q = nn.Parameter(q.to(torch.float32))
 
 
   def forward(self, indices):
-    q, t = self.q[indices].contiguous(), self.t[indices].contiguous()
+
+    q, t = F.normalize(self.q[indices], dim=-1), self.t[indices]
+    return join_rt(quat_to_mat(q), t)
   
   def normalize(self):
     self.q.data /= torch.norm(self.q.data, dim=-1, keepdim=True)

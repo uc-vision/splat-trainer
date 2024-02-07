@@ -40,7 +40,7 @@ def preload_images(scan:FrameSet, undistorted:Dict[str, Camera]) -> List[CameraI
     camera_id = camera_names.index(camera_name)
     return CameraImage(
         camera=undistortion.undistorted.transform(rig_pose),
-        image=torch.from_numpy(image).permute(2, 0, 1).pin_memory(),
+        image=torch.from_numpy(image).pin_memory(),
         frame_id=frame_index,
         camera_id=camera_id,
         filename=image_file
@@ -60,7 +60,9 @@ class PreloadedImages(torch.utils.data.Dataset):
   def __getitem__(self, index):
     camera_image:CameraImage = self.camera_images[index]
 
-    idx = torch.tensor([camera_image.frame_id, camera_image.image_id], dtype=torch.long)
+    idx = torch.tensor([camera_image.frame_id, camera_image.camera_id], dtype=torch.long)
     return camera_image.filename, camera_image.image, idx
      
+  def __iter__(self):
+    return iter(self.camera_images)
 

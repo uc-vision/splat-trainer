@@ -35,9 +35,11 @@ def camera_extents(scan:FrameSet):
 class ScanDataset:
   def __init__(self, scan_file:str,                
         image_scale:float=1.0,
-        val_count:int=10):
+        val_count:int=10,
+        depth_range:Tuple[float, float] = (0.1, 100.0)):
 
     scan = FrameSet.load_file(Path(scan_file))
+    self.depth_range = depth_range
 
     self.centre, self.scene_scale = camera_extents(scan)    
     t = translate_44(*(-self.centre))
@@ -63,9 +65,10 @@ class ScanDataset:
     self.val_cameras = self.all_cameras[::len(self.all_cameras) // val_count]
     self.train_cameras = [c for c in self.all_cameras if c not in self.val_cameras]
 
-  def train(self):
-    return PreloadedImages(self.train_cameras)
-  
+  def train(self, shuffle=True):
+    images = PreloadedImages(self.train_cameras)
+    return torch.utils.data.DataLoader(images, shuffle=shuffle, batch_size=1)  
+
   def val(self):
      return PreloadedImages(self.val_cameras)
   
@@ -78,7 +81,10 @@ class ScanDataset:
     return CameraRigTable(
       rig_t_world=torch.linalg.inv(world_t_rig),
       camera_t_rig=torch.from_numpy(camera_t_rig).to(torch.float32))
-
+  
+  def camera_projection(self):
+    projections = np.array([camera.intrinsic for camera in self.scan.cameras.values()])
+    return torch.from_numpy(projections).to(torch.float32)
 
   def scene(self) -> Scene:
     pcd = load_cloud(self.scan)    

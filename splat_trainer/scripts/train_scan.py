@@ -34,6 +34,8 @@ def main():
 
   print(train_config)
   trainer = Trainer(dataset, train_config)
+
+  trainer.train()
   
 if __name__ == "__main__":
   main()

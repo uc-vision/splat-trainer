@@ -11,6 +11,8 @@ dataset:
   image_scale: 0.5
   val_count: 10
 
+  depth_range: [0.1, 100.0]
+
 
 
 
