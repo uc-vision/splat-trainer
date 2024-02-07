@@ -21,12 +21,14 @@ class Trainer:
     self.model_path = Path(config.model_path)
 
     self.dataset = dataset
-    self.logger = SummaryWriter(config.model_path)
-
+    self.config = config
+    
 
   def train(self):
 
     print("Using model path", self.model_path)
     self.model_path.mkdir(parents=True, exist_ok=True)
 
-    pass
+    self.logger = SummaryWriter(log_dir = str(self.model_path))
+
+    
