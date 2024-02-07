@@ -51,8 +51,9 @@ def preload_images(scan:FrameSet, undistorted:Dict[str, Camera]) -> List[CameraI
 
 class PreloadedImages(torch.utils.data.Dataset):
   @beartype
-  def __init__(self, camera_images:List[CameraImage]):
+  def __init__(self, camera_images:List[CameraImage], shuffle:bool=False):
     self.camera_images = camera_images
+    self.shuffle = shuffle
 
   def __len__(self):
       return len(self.camera_images)
@@ -64,5 +65,9 @@ class PreloadedImages(torch.utils.data.Dataset):
     return camera_image.filename, camera_image.image, idx
      
   def __iter__(self):
-    return iter(self.camera_images)
+    order = torch.randperm(len(self)) if self.shuffle else torch.arange(len(self))
+    for idx in order:
+      yield self[idx]  
+
+    
 

@@ -32,8 +32,8 @@ class Trainer:
       near, far = self.dataset.depth_range
 
       return perspective.CameraParams(
-          T_camera_world=self.camera_poses(cam_idx),
-          T_image_camera=self.camera_projection[cam_idx[:, 1]].squeeze(0),
+          T_camera_world=self.camera_poses(cam_idx.unsqueeze(0)),
+          T_image_camera=self.camera_projection[cam_idx[1]],
           image_size=(image.shape[1], image.shape[0]),
           near_plane=near,
           far_plane=far
@@ -50,11 +50,11 @@ class Trainer:
     while True:
 
       for filename, image, cam_idx in self.dataset.train():
-        # print(filename, image.shape, cam_idx)
-        # break
-        image = image.to(self.device, non_blocking=True).squeeze(0)
+
+      
+        image = image.to(self.device, non_blocking=True)
 
         camera_params = self.camera_params(cam_idx, image)
-        print(camera_params)
+        print(filename, image.shape, camera_params)
 
         

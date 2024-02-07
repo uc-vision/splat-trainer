@@ -66,12 +66,14 @@ class ScanDataset:
     self.train_cameras = [c for c in self.all_cameras if c not in self.val_cameras]
 
   def train(self, shuffle=True):
-    images = PreloadedImages(self.train_cameras)
-    return torch.utils.data.DataLoader(images, shuffle=shuffle, batch_size=1)  
-
+    images = PreloadedImages(self.train_cameras, shuffle=shuffle)
+    return iter(images)
+    
   def val(self):
-     return PreloadedImages(self.val_cameras)
-  
+    images = PreloadedImages(self.val_cameras)
+    return iter(images)
+
+
   def camera_poses(self):
     camera_t_rig = np.array(
        [camera.camera_t_parent for camera in self.scan.cameras.values()])
