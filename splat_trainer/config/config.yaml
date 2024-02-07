@@ -6,7 +6,9 @@ defaults:
 
 
 trainer:
-  _target_: splat_trainer.Trainer
+  _target_: splat_trainer.TrainConfig
   
-  dataset: ${..dataset}
   load_model: null
+  model_path: ???
+
+  device: "cuda:0"

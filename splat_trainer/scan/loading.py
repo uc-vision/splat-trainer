@@ -11,16 +11,17 @@ from camera_geometry.scan.views import load_frames_with, Undistortion
 from beartype import beartype
 import numpy as np
 
-def concat_lists(xs):
-  return [x for x in xs for x in x]
-
-@dataclass 
+@dataclass
 class CameraImage:
+   camera : Camera
    image : torch.Tensor
    frame_id: int
    camera_id: int
-
    filename: str
+
+def concat_lists(xs):
+  return [x for x in xs for x in x]
+
 
 @beartype
 def preload_images(scan:FrameSet, undistorted:Dict[str, Camera]) -> List[CameraImage]:

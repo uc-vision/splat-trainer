@@ -33,17 +33,17 @@ def camera_extents(scan:FrameSet):
 
 
 class ScanDataset:
-  def __init__(self, filename:str,                
+  def __init__(self, scan_file:str,                
         image_scale:float=1.0,
         val_count:int=10):
 
-    scan = FrameSet.load_file(Path(filename))
+    scan = FrameSet.load_file(Path(scan_file))
 
     self.centre, self.scene_scale = camera_extents(scan)    
     t = translate_44(*(-self.centre))
     self.scan = scan.transform(t).copy(
         metadata=dict(
-          source=filename,
+          source=scan_file,
           offset=(-self.centre).tolist() )
        )
 

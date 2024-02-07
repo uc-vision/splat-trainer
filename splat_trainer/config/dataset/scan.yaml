@@ -1,16 +1,19 @@
 # @package _global_
 
+scan_name: ${without_ext:${basename:${dataset.scan_file}}}
+model_path: ${dirname:${dataset.scan_file}}/gaussian_${scan_name}
+
 
 dataset:
-  _target_: splat_trainer.ScanDataset
+  _target_: splat_trainer.scan.ScanDataset
   scan_file: ${..scan_file}
 
   image_scale: 0.5
   val_count: 10
 
-scan_dir: ${dirname:${dataset.scan_file}}
+
+
 
 
 trainer:
-  output_model_dir: ${..scan_dir}/gaussian
-  output_log_dir: ${..scan_dir}/gaussian
+  model_path: ${..model_path}

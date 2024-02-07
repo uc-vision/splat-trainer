@@ -1,10 +1,6 @@
 from pathlib import Path
 from setuptools import find_packages, setup
 
-scripts = [f'{script.stem} = splat_trainer.scripts.{script.stem}:main'
-  for script in Path('splat_trainer/scripts').glob('*.py') if script.stem != '__init__']
-
-
 setup(
     name='splat_trainer',
     version='0.1',
@@ -19,11 +15,10 @@ setup(
     ],
 
     entry_points={
-      'console_scripts': scripts
+      'console_scripts': 
+      [
+        'train-scan=splat_trainer.scripts.train_scan:main',
+      ],
     },
-
-    include_package_data=True,
-    package_data={'': ['*.ui', '*.yaml']},
-
 
 )
