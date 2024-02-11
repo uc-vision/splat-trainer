@@ -68,6 +68,8 @@ class ScanDataset:
   def train(self, shuffle=True):
     images = PreloadedImages(self.train_cameras, shuffle=shuffle)
     return iter(images)
+    # images = PreloadedImages(self.train_cameras)
+    # return torch.utils.data.DataLoader(images, batch_size=1, shuffle=shuffle, pin_memory=True, num_workers=2)
     
   def val(self):
     images = PreloadedImages(self.val_cameras)

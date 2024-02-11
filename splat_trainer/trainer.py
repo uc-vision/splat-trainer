@@ -6,12 +6,18 @@ import torch
 from torch.utils.tensorboard import SummaryWriter
 
 from taichi_splatting import perspective
+from tqdm import tqdm
+
+from splat_trainer.scene.gaussians import Scene, LearningRates
 
 @dataclass 
 class TrainConfig:
   model_path: str
   device: str
   load_model: Optional[str] = None
+  iterations: int = 30000
+
+  learning_rates: LearningRates
 
 
 
@@ -26,6 +32,14 @@ class Trainer:
 
     self.camera_poses = dataset.camera_poses().to(self.device)
     self.camera_projection = dataset.camera_projection().to(self.device)
+
+    if config.load_model:
+      self.scene = Scene.load_model(
+        self.model_path, config.load_model, lr=config.learning_rates)
+    else:
+      self.scene = dataset.scene(lr=config.learning_rates)
+      
+    self.scene.to(self.device)
     
 
   def camera_params(self, cam_idx, image):
@@ -47,14 +61,16 @@ class Trainer:
 
     self.logger = SummaryWriter(log_dir = str(self.model_path))
 
+    pbar = tqdm(total=self.config.iterations, desc="Training")
+    iteration = 0
+
     while True:
-
       for filename, image, cam_idx in self.dataset.train():
-
-      
-        image = image.to(self.device, non_blocking=True)
-
+        image, idx = [x.to(self.device, non_blocking=True) for x in (image, cam_idx)]
         camera_params = self.camera_params(cam_idx, image)
-        print(filename, image.shape, camera_params)
+        
+        iteration += 1
+        if iteration % 10 == 0:
+          pbar.update(10)
 
         

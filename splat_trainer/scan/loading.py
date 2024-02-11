@@ -61,7 +61,7 @@ class PreloadedImages(torch.utils.data.Dataset):
   def __getitem__(self, index):
     camera_image:CameraImage = self.camera_images[index]
 
-    idx = torch.tensor([camera_image.frame_id, camera_image.camera_id], dtype=torch.long)
+    idx = torch.tensor([camera_image.frame_id, camera_image.camera_id], dtype=torch.long).pin_memory()
     return camera_image.filename, camera_image.image, idx
      
   def __iter__(self):

@@ -5,10 +5,21 @@ defaults:
   - dataset: scan
 
 
+lr:
+  _target_: splat_trainer.LearningRates
+  position: 0.001
+  log_scaling: 0.005
+  rotation: 0.001
+  alpha_logit: 0.05
+
+  base_sh: 0.0025
+  higher_sh: 0.0002
+    
 trainer:
   _target_: splat_trainer.TrainConfig
   
   load_model: null
-  model_path: ???
+  model_path: null
 
   device: "cuda:0"
+  learning_rates: ${..lr}
