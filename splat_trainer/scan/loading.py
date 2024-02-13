@@ -1,6 +1,6 @@
 
 from dataclasses import dataclass
-from typing import Dict, List
+from typing import Dict, Iterator, List
 
 import cv2
 import torch
@@ -11,6 +11,8 @@ from camera_geometry.scan.views import load_frames_with, Undistortion
 from beartype import beartype
 import numpy as np
 
+from splat_trainer.dataset import CameraView
+
 @dataclass
 class CameraImage:
    camera : Camera
@@ -18,6 +20,7 @@ class CameraImage:
    frame_id: int
    camera_id: int
    filename: str
+
 
 def concat_lists(xs):
   return [x for x in xs for x in x]
@@ -58,13 +61,13 @@ class PreloadedImages(torch.utils.data.Dataset):
   def __len__(self):
       return len(self.camera_images)
 
-  def __getitem__(self, index):
+  def __getitem__(self, index) -> CameraView:
     camera_image:CameraImage = self.camera_images[index]
 
     idx = torch.tensor([camera_image.frame_id, camera_image.camera_id], dtype=torch.long).pin_memory()
     return camera_image.filename, camera_image.image, idx
      
-  def __iter__(self):
+  def __iter__(self) -> Iterator[CameraView]:
     order = torch.randperm(len(self)) if self.shuffle else torch.arange(len(self))
     for idx in order:
       yield self[idx]  

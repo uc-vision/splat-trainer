@@ -16,8 +16,7 @@ class TrainConfig:
   device: str
   load_model: Optional[str] = None
   iterations: int = 30000
-
-  learning_rates: LearningRates
+  learning_rates: LearningRates = LearningRates()
 
 
 
@@ -37,7 +36,8 @@ class Trainer:
       self.scene = Scene.load_model(
         self.model_path, config.load_model, lr=config.learning_rates)
     else:
-      self.scene = dataset.scene(lr=config.learning_rates)
+      pcd = dataset.pointcloud()
+      self.scene = Scene.from_pointcloud(pcd, lr=config.learning_rates)
       
     self.scene.to(self.device)
     

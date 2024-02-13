@@ -8,7 +8,7 @@ dataset:
   _target_: splat_trainer.scan.ScanDataset
   scan_file: ${..scan_file}
 
-  image_scale: 0.5
+  image_scale: 1.0
   val_count: 10
 
   depth_range: [0.1, 100.0]
