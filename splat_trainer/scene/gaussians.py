@@ -10,8 +10,9 @@ from splat_trainer.util.pointcloud import PointCloud
 from splat_viewer.gaussians import Workspace
 
 from taichi_splatting.misc.parameter_class import ParameterClass
-from taichi_splatting import Gaussians3D
+from taichi_splatting import Gaussians3D, RasterConfig, render_gaussians
     
+
 
 @dataclass(frozen=True)
 class LearningRates:
@@ -53,24 +54,47 @@ class PackedPoints:
 
 
 class Scene:
-  def __init__(self, points: Gaussians3D, lr:LearningRates, device=torch.device('cuda', 0)):
+  def __init__(self, points: Gaussians3D, lr:LearningRates):
 
     self.lr = lr
     
-    packed = TensorDict(
+    packed = TensorDict(dict(
       gaussians3d=points.packed(),
-      sh_feature=points.feature
-    ).to(device)
+      sh_feature=points.feature),
+
+      batch_size = points.batch_size
+    )
+
+    self.raster_config = RasterConfig()
 
     self.points = ParameterClass.create(packed, 
       learning_rates=dict(gaussians3d = 1.0, sh_feature = 1.0))
 
+  def to(self, device):
+    self.points = self.points.to(device)
+    return self
 
   def step(self):
 
     scale_gradients(self.points.gaussians3d, self.points.sh_feature, self.lr)
     self.points.step()
 
+  def render(self, camera_params):
+    return render_gaussians(self.points.gaussians3d, 
+                     features=self.points.sh_feature,
+                     use_sh=True,
+                     config=self.raster_config,
+                     camera_params=camera_params)
+
+  @staticmethod
+  def load_model(workspace_path, model_name = None, lr:LearningRates = LearningRates()):
+    workspace = Workspace.load(workspace_path)
+    gaussians = workspace.load_model(model=model_name).to_gaussians3d()
+
+    return Scene(gaussians, lr)
+  
+
+  @staticmethod
   def from_pointcloud(pcd:PointCloud, lr:LearningRates, 
           num_neighbors:int = 3, initial_alpha:float = 0.5,
           sh_degree:int = 2):
@@ -86,15 +110,12 @@ class Scene:
       alpha_logit=torch.full( (pcd.points.shape[0], 1), 
                              fill_value=inverse_sigmoid(initial_alpha)),
 
-      feature=sh_features
+      feature=sh_features,
+      batch_size=(pcd.points.shape[0],)
     )
-
     return Scene(gaussians, lr)
 
 
-def load_model(workspace_path, model_name = None):
-    workspace = Workspace.load(workspace_path)
-    return workspace.load_model(model_name=model_name)
 
 
 

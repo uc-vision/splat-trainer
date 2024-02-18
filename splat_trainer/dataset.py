@@ -1,11 +1,10 @@
 
-from abc import ABCMeta, abstractmethod
+from abc import ABCMeta, abstractmethod, abstractproperty
 from collections import namedtuple
-from typing import Iterator
+from beartype.typing import Iterator
 
 import torch
 
-from splat_trainer.camera_pose import CameraRigTable
 from splat_trainer.util.pointcloud import PointCloud
 
 
@@ -13,6 +12,7 @@ CameraView = namedtuple('CameraView',
   ('filename', 'image', 'index'))
 
 class Dataset(metaclass=ABCMeta):
+
     
   @abstractmethod
   def train(self, shuffle=True) -> Iterator[CameraView]:

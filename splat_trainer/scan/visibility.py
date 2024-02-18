@@ -1,4 +1,4 @@
-from typing import List
+from beartype.typing import List
 import torch
 import numpy as np
 

@@ -13,6 +13,7 @@ class PointCloud:
   points : torch.Tensor # (N, 3)
   colors : torch.Tensor # (N, 3)
 
+
   @staticmethod
   def from_numpy(xyz:np.ndarray, rgb:np.ndarray) -> 'PointCloud':
     return PointCloud(
@@ -23,7 +24,7 @@ class PointCloud:
   
   
   @staticmethod
-  def load_cloud(filename:str | Path):
+  def load(filename:str | Path):
     filename = Path(filename)
 
     if filename.suffix == ".pcd": 

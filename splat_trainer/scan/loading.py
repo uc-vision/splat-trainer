@@ -1,6 +1,6 @@
 
 from dataclasses import dataclass
-from typing import Dict, Iterator, List
+from beartype.typing import Dict, Iterator, List
 
 import cv2
 import torch

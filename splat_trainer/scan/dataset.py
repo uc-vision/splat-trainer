@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import Iterator, Tuple
+from beartype.typing import Iterator, Tuple
 from camera_geometry import FrameSet
 
 from camera_geometry.transforms import translate_44
@@ -15,11 +15,10 @@ from splat_trainer.scan.loading import  PreloadedImages, preload_images
 from splat_trainer.util.pointcloud import PointCloud
 from .visibility import visibility
 
-def load_cloud(scan:FrameSet) -> Tuple[np.ndarray, np.ndarray]:
+def find_cloud(scan:FrameSet) -> Tuple[np.ndarray, np.ndarray]:
   assert 'sparse' in scan.models, "No sparse model found in scene.json"
-  cloud_file = Path(scan.find_file(scan.models.sparse.filename))
+  return Path(scan.find_file(scan.models.sparse.filename))
 
-  return PointCloud.load_cloud(cloud_file)
 
 def camera_extents(scan:FrameSet):
     cam_centers = np.stack([camera.location for camera in scan.expand_cameras()])
@@ -37,6 +36,9 @@ class ScanDataset(Dataset):
         image_scale:float=1.0,
         val_count:int=10,
         depth_range:Tuple[float, float] = (0.1, 100.0)):
+
+    self.scan_file = scan_file
+    self.image_scale = image_scale
 
     scan = FrameSet.load_file(Path(scan_file))
     self.depth_range = depth_range
@@ -65,15 +67,18 @@ class ScanDataset(Dataset):
     self.val_cameras = self.all_cameras[::len(self.all_cameras) // val_count]
     self.train_cameras = [c for c in self.all_cameras if c not in self.val_cameras]
 
+  def __repr__(self) -> str:
+    return f"ScanDataset({self.scan_file}, image_scale={self.image_scale} cloud={find_cloud(self.scan)})"
+
   def train(self, shuffle=True) -> Iterator[CameraView]:
     images = PreloadedImages(self.train_cameras, shuffle=shuffle)
-    return iter(images)
+    return images
     # images = PreloadedImages(self.train_cameras)
     # return torch.utils.data.DataLoader(images, batch_size=1, shuffle=shuffle, pin_memory=True, num_workers=2)
     
   def val(self) -> Iterator[CameraView]:
     images = PreloadedImages(self.val_cameras)
-    return iter(images)
+    return images
 
 
   def camera_poses(self) -> CameraRigTable:
@@ -91,7 +96,9 @@ class ScanDataset(Dataset):
     return torch.from_numpy(projections).to(torch.float32)
 
   def pointcloud(self) -> PointCloud:
-    pcd = load_cloud(self.scan)    
+    pcd_filename = find_cloud(self.scan)    
+    pcd = PointCloud.load(pcd_filename)
+
 
     vis = visibility(self.scan.expand_cameras(), pcd.points)
     print(f"Visible {(vis > 0).sum()} of {len(vis)} points")

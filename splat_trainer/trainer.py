@@ -1,14 +1,18 @@
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
+from beartype.typing import Optional
 import torch
 
-from torch.utils.tensorboard import SummaryWriter
 
 from taichi_splatting import perspective
 from tqdm import tqdm
 
+from splat_trainer.dataset import Dataset
+from splat_trainer.logger import Logger
+
 from splat_trainer.scene.gaussians import Scene, LearningRates
+
+
 
 @dataclass 
 class TrainConfig:
@@ -18,31 +22,47 @@ class TrainConfig:
   iterations: int = 30000
   learning_rates: LearningRates = LearningRates()
 
+  eval_iterations: int = 1000
+
+  num_neighbors: int = 3
+  initial_alpha: float = 0.5
+  sh_degree: int = 2
+
+  num_logged_images: int = 5
 
 
 class Trainer:
-  def __init__(self, dataset, config):
+  def __init__(self, dataset:Dataset, config:TrainConfig, logger:Logger):
 
     self.device = torch.device(config.device)
     self.model_path = Path(config.model_path)
 
     self.dataset = dataset
     self.config = config
+    self.step = 0
+
+    self.logger = logger
 
     self.camera_poses = dataset.camera_poses().to(self.device)
     self.camera_projection = dataset.camera_projection().to(self.device)
 
     if config.load_model:
+      print("Loading model from", self.model_path)
       self.scene = Scene.load_model(
-        self.model_path, config.load_model, lr=config.learning_rates)
+        config.load_model, lr=config.learning_rates)
     else:
       pcd = dataset.pointcloud()
-      self.scene = Scene.from_pointcloud(pcd, lr=config.learning_rates)
+      print(f"Initializing model from {dataset}")
+
+      self.scene = Scene.from_pointcloud(pcd, lr=config.learning_rates,
+                                        num_neighbors=config.num_neighbors,
+                                        initial_alpha=config.initial_alpha,
+                                        sh_degree=config.sh_degree)
       
     self.scene.to(self.device)
     
 
-  def camera_params(self, cam_idx, image):
+  def camera_params(self, cam_idx:torch.Tensor, image:torch.Tensor):
       near, far = self.dataset.depth_range
 
       return perspective.CameraParams(
@@ -54,23 +74,71 @@ class Trainer:
       ).to(self.device)
 
 
+  def evaluate(self, name, data, limit_log_images:Optional[int]=None):
+    def compute_psnr(a, b):
+      return -10 * torch.log10(1 / torch.nn.functional.mse_loss(a, b))  
+    
+    total_psnr = 0
+    n = 0
+
+    with torch.no_grad():
+      pbar = tqdm(total=len(data), desc=f"rendering {name}", leave=False)
+      for filename, image, camera_params in self.iter_data(data):
+        rendering = self.scene.render(camera_params)
+        psnr = compute_psnr(rendering.image, image)
+
+        if limit_log_images and n < limit_log_images or limit_log_images is None:
+          self.logger.log_eval(name, filename, image, rendering.image, total_psnr)
+
+        total_psnr += psnr
+        n += 1
+
+        pbar.update(1)
+        pbar.set_postfix(psnr=total_psnr / n)
+
+
+
+    return total_psnr / n
+
+
+  def iter_train(self):
+    while True:
+      train = self.iter_data(self.dataset.train())
+      yield from train
+
+  
+
+
+  def iter_data(self, iter):
+    for filename, image, cam_idx in iter:
+      image, cam_idx = [x.to(self.device, non_blocking=True) 
+                    for x in (image, cam_idx)]
+
+      camera_params = self.camera_params(cam_idx, image)
+      yield filename, image, camera_params
+
+
   def train(self):
 
     print("Writing to model path", self.model_path)
     self.model_path.mkdir(parents=True, exist_ok=True)
 
-    self.logger = SummaryWriter(log_dir = str(self.model_path))
+    pbar = tqdm(total=self.config.iterations, desc="training")
+    self.step = 0
 
-    pbar = tqdm(total=self.config.iterations, desc="Training")
-    iteration = 0
+    iter_train = self.iter_train()
 
     while True:
-      for filename, image, cam_idx in self.dataset.train():
-        image, idx = [x.to(self.device, non_blocking=True) for x in (image, cam_idx)]
-        camera_params = self.camera_params(cam_idx, image)
-        
-        iteration += 1
-        if iteration % 10 == 0:
-          pbar.update(10)
+      if self.step % self.config.eval_iterations == 0:
+        n_logged = self.config.num_logged_images
 
-        
+        self.evaluate("train", self.dataset.train(shuffle=False), limit_log_images=n_logged)
+        self.evaluate("val", self.dataset.val(), limit_log_images=n_logged)
+
+      filename, image, camera_params = next(iter_train)
+
+      
+      self.step += 1
+      if self.step % 10 == 0:
+        pbar.update(10)
+      
