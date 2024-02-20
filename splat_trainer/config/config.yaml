@@ -4,20 +4,23 @@ defaults:
   - _self_
   - dataset: scan
 
+hydra:
+  job: 
+    chdir: True
+
 logger:
   _target_: splat_trainer.logger.WandbLogger
   project: "splat-trainer"
   name: null
 
 trainer:
-  _target_: splat_trainer.TrainConfig
-  
+  _target_: splat_trainer.trainer.TrainConfig
+  output_path: null
   load_model: null
-  model_path: null
 
   device: "cuda:0"
   learning_rates: 
-    _target_: splat_trainer.LearningRates
+    _target_: splat_trainer.scene.LearningRates
     position: 0.001
     log_scaling: 0.005
     rotation: 0.001

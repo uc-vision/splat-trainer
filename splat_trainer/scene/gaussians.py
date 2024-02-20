@@ -53,7 +53,7 @@ class PackedPoints:
   sh_feature: torch.Tensor  # (N, (D+1)**2)
 
 
-class Scene:
+class GaussianScene:
   def __init__(self, points: Gaussians3D, lr:LearningRates):
 
     self.lr = lr
@@ -73,6 +73,10 @@ class Scene:
   def to(self, device):
     self.points = self.points.to(device)
     return self
+  
+
+  def __repr__(self):
+    return f"GaussianScene({self.points.gaussians3d.shape[0]} points)"
 
   def step(self):
 
@@ -91,7 +95,7 @@ class Scene:
     workspace = Workspace.load(workspace_path)
     gaussians = workspace.load_model(model=model_name).to_gaussians3d()
 
-    return Scene(gaussians, lr)
+    return GaussianScene(gaussians, lr)
   
 
   @staticmethod
@@ -113,13 +117,15 @@ class Scene:
       feature=sh_features,
       batch_size=(pcd.points.shape[0],)
     )
-    return Scene(gaussians, lr)
+    return GaussianScene(gaussians, lr)
 
 
 
 
 
 def sigmoid(x):
+
+
   return 1 / (1 + np.exp(-x))
 
 def inverse_sigmoid(x):

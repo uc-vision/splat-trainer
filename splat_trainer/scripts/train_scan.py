@@ -1,45 +1,25 @@
-from hydra import initialize, compose
-from hydra.utils import instantiate
+import hydra
 import argparse
 
 from omegaconf import OmegaConf
-
 from splat_trainer.util import config
-from splat_trainer.trainer import Trainer
-import taichi as ti
+
+config.add_resolvers()
 
 
-def main():
-  parser = argparse.ArgumentParser("Train a Gaussian Point Cloud Scene")
-  parser.add_argument("scan_file", type=str)
-  
+@hydra.main(config_name="config", config_path="../config", version_base="1.2")
+def main(cfg):
+  import taichi as ti
+  from splat_trainer.trainer import Trainer
 
-  parser.add_argument(
-      'overrides',
-      nargs='*',
-      help=(
-        'Any key=value arguments to override config values '
-        '(use dots for.nested=overrides)'
-      ),
-  )
-
-  
-  args = parser.parse_args()
-  print(args)
-
-  config.add_resolvers()
-  initialize('../config', version_base="1.2")
-  cfg = compose('config.yaml', 
-                [*args.overrides, "dataset=scan", f"dataset.scan_file={args.scan_file}"] )
-  
   print(config.pretty(cfg))
-
+  
   ti.init(arch=ti.cuda, debug=cfg.debug)
 
-  logger = instantiate(cfg.logger, _partial_=True)(log_config=OmegaConf.to_container(cfg, resolve=True))
+  logger = hydra.utils.instantiate(cfg.logger, _partial_=True)(log_config=OmegaConf.to_container(cfg, resolve=True))
   
-  train_config = instantiate(cfg.trainer)
-  dataset = instantiate(cfg.dataset)
+  train_config = hydra.utils.instantiate(cfg.trainer)
+  dataset = hydra.utils.instantiate(cfg.dataset)
 
 
   trainer = Trainer(dataset, train_config, logger)

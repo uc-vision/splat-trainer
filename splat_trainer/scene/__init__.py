@@ -1,8 +1,8 @@
-from .gaussians import Scene, PackedPoints, LearningRates
+from .gaussians import GaussianScene, PackedPoints, LearningRates
 
 
 __all__ = [
-    "Scene",
+    "GaussianScene",
     "PackedPoints",
     "LearningRates"
 

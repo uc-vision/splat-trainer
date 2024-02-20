@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+import os
 from pathlib import Path
 from beartype.typing import Optional
 import torch
@@ -10,13 +11,13 @@ from tqdm import tqdm
 from splat_trainer.dataset import Dataset
 from splat_trainer.logger import Logger
 
-from splat_trainer.scene.gaussians import Scene, LearningRates
+from splat_trainer.scene.gaussians import GaussianScene, LearningRates
 
 
 
 @dataclass 
 class TrainConfig:
-  model_path: str
+  output_path: str
   device: str
   load_model: Optional[str] = None
   iterations: int = 30000
@@ -35,7 +36,6 @@ class Trainer:
   def __init__(self, dataset:Dataset, config:TrainConfig, logger:Logger):
 
     self.device = torch.device(config.device)
-    self.model_path = Path(config.model_path)
 
     self.dataset = dataset
     self.config = config
@@ -47,17 +47,19 @@ class Trainer:
     self.camera_projection = dataset.camera_projection().to(self.device)
 
     if config.load_model:
-      print("Loading model from", self.model_path)
-      self.scene = Scene.load_model(
+      print("Loading model from", config.load_model)
+      self.scene = GaussianScene.load_model(
         config.load_model, lr=config.learning_rates)
     else:
       pcd = dataset.pointcloud()
       print(f"Initializing model from {dataset}")
 
-      self.scene = Scene.from_pointcloud(pcd, lr=config.learning_rates,
+      self.scene = GaussianScene.from_pointcloud(pcd, lr=config.learning_rates,
                                         num_neighbors=config.num_neighbors,
                                         initial_alpha=config.initial_alpha,
                                         sh_degree=config.sh_degree)
+      
+      print(self.scene)
       
     self.scene.to(self.device)
     
@@ -78,7 +80,7 @@ class Trainer:
     def compute_psnr(a, b):
       return -10 * torch.log10(1 / torch.nn.functional.mse_loss(a, b))  
     
-    total_psnr = 0
+    total_psnr = 0.
     n = 0
 
     with torch.no_grad():
@@ -88,7 +90,7 @@ class Trainer:
         psnr = compute_psnr(rendering.image, image)
 
         if limit_log_images and n < limit_log_images or limit_log_images is None:
-          self.logger.log_eval(name, filename, image, rendering.image, total_psnr)
+          self.logger.log_eval(name, filename, image, rendering.image, psnr.item())
 
         total_psnr += psnr
         n += 1
@@ -120,8 +122,8 @@ class Trainer:
 
   def train(self):
 
-    print("Writing to model path", self.model_path)
-    self.model_path.mkdir(parents=True, exist_ok=True)
+    print(f"Writing to model path {os.getcwd()}")
+
 
     pbar = tqdm(total=self.config.iterations, desc="training")
     self.step = 0
