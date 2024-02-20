@@ -1,7 +1,7 @@
 # @package _global_
 
 dataset:
-  _target_: splat_trainer.scan.ScanDataset
+  _target_: splat_trainer.datasets.ScanDataset
   scan_file: ???
 
   image_scale: 1.0

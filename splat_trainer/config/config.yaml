@@ -29,7 +29,7 @@ trainer:
     base_sh: 0.0025
     higher_sh: 0.0002
       
-  iterations : 30000
+  iterations : 2000
   eval_iterations: 1000
 
   num_neighbors: 3

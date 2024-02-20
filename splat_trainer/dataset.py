@@ -1,5 +1,5 @@
 
-from abc import ABCMeta, abstractmethod, abstractproperty
+from abc import ABCMeta, abstractmethod
 from collections import namedtuple
 from beartype.typing import Iterator
 

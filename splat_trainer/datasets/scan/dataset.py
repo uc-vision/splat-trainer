@@ -11,7 +11,7 @@ import numpy as np
 from splat_trainer.camera_pose import CameraRigTable
 from splat_trainer.dataset import CameraView, Dataset
 
-from splat_trainer.scan.loading import  PreloadedImages, preload_images
+from .loading import  PreloadedImages, preload_images
 from splat_trainer.util.pointcloud import PointCloud
 from .visibility import visibility
 
