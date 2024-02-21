@@ -5,7 +5,8 @@ import torch.nn.functional as F
 
 from taichi_splatting.torch_ops.transforms import split_rt
 
-from splat_trainer.util.transforms import join_rt, mat_to_quat, quat_to_mat
+from splat_trainer.util.transforms import join_rt
+import roma
 
 
 
@@ -54,26 +55,30 @@ class PoseTable(nn.Module):
     super().__init__()
 
     R, t = split_rt(m)
-    q = mat_to_quat(R)
+    q = roma.rotmat_to_unitquat(R)
 
     self.t = nn.Parameter(t.to(torch.float32))
     self.q = nn.Parameter(q.to(torch.float32))
 
 
   def forward(self, indices):
-
     q, t = F.normalize(self.q[indices], dim=-1), self.t[indices]
-    return join_rt(quat_to_mat(q), t)
+    return join_rt(roma.unitquat_to_rotmat(q), t)
   
   def normalize(self):
-    self.q.data /= torch.norm(self.q.data, dim=-1, keepdim=True)
+    self.q.data = F.normalize(self.q.data, dim=-1)
     return self
-
-
 
 
 
   
 
 if __name__ == '__main__':
-  pass
+  torch.set_printoptions(precision=6, sci_mode=False)
+  torch.manual_seed(0)
+
+  for i in range(10):
+    q = F.normalize(torch.randn(10, 4))
+    m = roma.unitquat_to_rotmat(q)
+
+    assert roma.rotmat_to_unitquat(m).allclose(q), f"{roma.rotmat_to_unitquat(m)} != {q}"

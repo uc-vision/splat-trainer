@@ -1,7 +1,7 @@
 
 from dataclasses import dataclass
 import numpy as np
-from sklearn.neighbors import KDTree
+from scipy.spatial import cKDTree
 from tensordict import TensorDict, tensorclass
 import torch
 import torch.nn.functional as F
@@ -12,6 +12,8 @@ from splat_viewer.gaussians import Workspace
 from taichi_splatting.misc.parameter_class import ParameterClass
 from taichi_splatting import Gaussians3D, RasterConfig, render_gaussians
     
+import open3d as o3d
+
 
 
 @dataclass(frozen=True)
@@ -26,12 +28,12 @@ class LearningRates:
   
 
 def estimate_scale(pointcloud : PointCloud, num_neighbors:int = 3):
-  valid_point_cloud_np = pointcloud.points.cpu().numpy()
-  nearest_neighbor_tree = KDTree(valid_point_cloud_np)
-  nearest_three_neighbor_distance, _ = nearest_neighbor_tree.query(
-      valid_point_cloud_np, k=num_neighbors + 1)
+  points = pointcloud.points.cpu().numpy()
+  tree = cKDTree(points)
+
+  dist, idx = tree.query(points, k=num_neighbors + 1, workers=-1)
   
-  distance = np.mean(nearest_three_neighbor_distance[:, 1:], axis=1)
+  distance = np.mean(dist[:, 1:], axis=1)
   return torch.from_numpy(distance).float()
 
 
@@ -100,10 +102,14 @@ class GaussianScene:
 
   @staticmethod
   def from_pointcloud(pcd:PointCloud, lr:LearningRates, 
-          num_neighbors:int = 3, initial_alpha:float = 0.5,
+          num_neighbors:int = 3, 
+          initial_scale:float = 0.5,
+          initial_alpha:float = 0.5,
           sh_degree:int = 2):
     
-    scales = estimate_scale(pcd, num_neighbors=num_neighbors)
+    scales = estimate_scale(pcd, num_neighbors=num_neighbors) * initial_scale
+
+
     sh_features = torch.zeros(pcd.points.shape[0], 3, (sh_degree + 1)**2)
     sh_features[:, :, 0] = rgb_to_sh(pcd.colors)
 

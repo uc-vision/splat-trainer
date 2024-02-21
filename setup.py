@@ -12,6 +12,7 @@ setup(
         'pypcd4',
         'hydra-core',
         'omegaconf',
+        'roma>=1.4'
     ],
 
     entry_points={

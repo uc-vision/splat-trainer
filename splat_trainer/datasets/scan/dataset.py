@@ -8,7 +8,7 @@ import torch
 
 
 import numpy as np
-from splat_trainer.camera_pose import CameraRigTable
+from splat_trainer.modules.pose_table import CameraRigTable
 from splat_trainer.dataset import CameraView, Dataset
 
 from .loading import  PreloadedImages, preload_images
@@ -45,7 +45,7 @@ class ScanDataset(Dataset):
 
     self.centre, self.scene_scale = camera_extents(scan)    
     t = translate_44(*(-self.centre))
-    self.scan = scan.transform(t).copy(
+    scan = scan.transform(t).copy(
         metadata=dict(
           source=scan_file,
           offset=(-self.centre).tolist() )
@@ -99,9 +99,10 @@ class ScanDataset(Dataset):
     pcd_filename = find_cloud(self.scan)    
     pcd = PointCloud.load(pcd_filename)
 
+    pcd.points -= self.centre
 
-    vis = visibility(self.scan.expand_cameras(), pcd.points)
-    print(f"Visible {(vis > 0).sum()} of {len(vis)} points")
+    counts = visibility(self.scan.expand_cameras(), pcd.points)
+    print(f"Visible {(counts > 0).sum()} of {len(counts)} points")
     # pcd = pcd.select_by_index(np.flatnonzero(vis > 0))
     
-    return pcd[vis]
+    return pcd[counts > 0]

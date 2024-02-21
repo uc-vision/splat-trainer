@@ -8,6 +8,8 @@ import numpy as np
 import pypcd4
 import plyfile
 
+
+
 @tensorclass 
 class PointCloud:
   points : torch.Tensor # (N, 3)
@@ -16,10 +18,22 @@ class PointCloud:
 
   @staticmethod
   def from_numpy(xyz:np.ndarray, rgb:np.ndarray) -> 'PointCloud':
+    if rgb.dtype == np.uint8:
+      rgb = rgb.astype(np.float32) / 255.0
+
     return PointCloud(
         points = torch.from_numpy(xyz), 
         colors = torch.from_numpy(rgb),
         batch_size = (xyz.shape[0],))
+
+  def show(self):
+    import open3d as o3d
+          
+    pcl = o3d.geometry.PointCloud()
+    pcl.points = o3d.utility.Vector3dVector(self.points.cpu().numpy())
+    pcl.colors = o3d.utility.Vector3dVector(self.colors.cpu().numpy())
+
+    o3d.visualization.draw_geometries([pcl])
 
   
   

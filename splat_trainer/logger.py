@@ -1,4 +1,5 @@
 from abc import ABCMeta, abstractmethod
+from functools import partial
 from beartype.typing import Dict, List
 from beartype import beartype
 import torch
@@ -7,7 +8,10 @@ import logging
 from pathlib import Path
 from threading import Thread
 from queue import Queue
-import cv2
+
+import os
+
+# os.environ["WANDB_SILENT"] = "true"
 
 class Logger(metaclass=ABCMeta):
 
@@ -26,13 +30,7 @@ class Logger(metaclass=ABCMeta):
   
 
 
-def numpy_image(tensor:torch.Tensor, caption:str | None = None):
-  image = (tensor * 255).to(torch.uint8).cpu().numpy()
-  cv2.imshow("image", image)
-  cv2.waitKey(0)
 
-
-  return wandb.Image(image, mode="RGB", caption=caption)
 
 class WandbLogger:
   def __init__(self, project:str | None, name:str | None, log_config:dict, dir:str | None = None):
@@ -40,8 +38,8 @@ class WandbLogger:
       dir = Path(dir).mkdir(parents=True, exist_ok=True)
 
     self.run = wandb.init(project=project, name=name, config=log_config, dir=dir)
-    logger = logging.getLogger("wandb")
-    logger.setLevel(logging.WARNING)
+    # logger = logging.getLogger("wandb")
+    # logger.setLevel(logging.WARNING)
 
     self.queue = Queue()
     self.log_thread = Thread(target=self.log_loop)
@@ -51,16 +49,16 @@ class WandbLogger:
   def log_loop(self):
     item = self.queue.get()
     while item is not None:
-      data, step = item
+      item()
 
-      self.run.log(data, step=step, commit=True)
       item = self.queue.get()
 
 
   def close(self):
     self.queue.put(None)
     self.log_thread.join()
-    self.run.finish()
+
+    self.run.finish(quiet=True)
     
 
     
@@ -75,5 +73,17 @@ class WandbLogger:
 
   @beartype
   def log(self, data:dict, step:int):
-    self.queue.put((data, step))
+    self.queue.put(partial(self.run.log, data, step=step) )
 
+  @beartype
+  def log_image(self, name:str, image:torch.Tensor, caption:str | None = None, step:int = 0):
+    
+    def log():
+      nonlocal image, caption, step
+      
+      image = (image * 255).to(torch.uint8).cpu().numpy()
+      image = wandb.Image(image, mode="RGB", caption=caption)
+
+      self.run.log({name : image}, step=step)
+
+    self.queue.put(log)

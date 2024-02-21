@@ -10,7 +10,7 @@ from taichi_splatting import perspective
 from tqdm import tqdm
 
 from splat_trainer.dataset import Dataset
-from splat_trainer.logger import Logger, numpy_image
+from splat_trainer.logger import Logger
 
 from splat_trainer.scene.gaussians import GaussianScene, LearningRates
 
@@ -80,13 +80,17 @@ class Trainer:
   def log_table(self, name, rows:List[Dict]):
     return self.logger.log_table(name, rows, step=self.step)
 
+  def log_image(self, name, image, caption=None):
+    return self.logger.log_image(name, image, caption=caption, step=self.step)
+
   def log(self, data):
     return self.logger.log(data, step=self.step) 
+  
 
 
   def evaluate_dataset(self, name, data, limit_log_images:Optional[int]=None):
     def compute_psnr(a, b):
-      return -10 * torch.log10(1 / torch.nn.functional.mse_loss(a, b))  
+      return 10 * torch.log10(1 / torch.nn.functional.mse_loss(a, b))  
     
     total_psnr = 0.
     n = 0
@@ -104,9 +108,9 @@ class Trainer:
         
 
         if limit_log_images and n < limit_log_images or limit_log_images is None:
-          self.log({f"render/{name}/{filename}/": numpy_image(rendering.image, caption=filename)})
+          self.log_image(f"{name}/{filename}/render", rendering.image, caption=f"{filename} PSNR={psnr:.2f} L1={l1:.2f}")
           if self.step == 0:
-            self.log({f"image/{name}/{filename}": numpy_image(image, caption=filename)})
+            self.log_image(f"{name}/{filename}/image", image, caption=filename)
         
           
         total_psnr += psnr
@@ -115,7 +119,7 @@ class Trainer:
         pbar.update(1)
         pbar.set_postfix(psnr=total_psnr / n)
 
-    # self.log_table(f"{name}/evals", rows)
+    self.log_table(f"{name}/evals", rows)
     self.log({f"{name}/psnr": total_psnr / n})
 
     return total_psnr / n
@@ -167,4 +171,9 @@ class Trainer:
         pbar.update(10)
       
     self.evaluate()
+    self.logger.close()
+
+
+  def close(self):
+    print("Closing trainer")
     self.logger.close()
