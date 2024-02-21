@@ -9,9 +9,8 @@ hydra:
     chdir: True
 
 logger:
-  _target_: splat_trainer.logger.WandbLogger
-  project: "splat-trainer"
-  name: null
+  _target_: splat_trainer.logger.TensorboardLogger
+  dir: log
 
 trainer:
   _target_: splat_trainer.trainer.TrainConfig

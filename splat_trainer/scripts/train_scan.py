@@ -13,8 +13,6 @@ import torch
 config.add_resolvers()
 
 
-
-
 @hydra.main(config_name="config", config_path="../config", version_base="1.2")
 def main(cfg):
   import taichi as ti
@@ -26,7 +24,6 @@ def main(cfg):
   print(config.pretty(cfg))
   
   ti.init(arch=ti.cuda, debug=cfg.debug)
-
   logger = hydra.utils.instantiate(cfg.logger, _partial_=True)(log_config=OmegaConf.to_container(cfg, resolve=True))
   
   train_config = hydra.utils.instantiate(cfg.trainer)

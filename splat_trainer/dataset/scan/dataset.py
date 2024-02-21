@@ -9,7 +9,7 @@ import torch
 
 import numpy as np
 from splat_trainer.modules.pose_table import CameraRigTable
-from splat_trainer.dataset import CameraView, Dataset
+from splat_trainer.dataset.dataset import CameraView, Dataset
 
 from .loading import  PreloadedImages, preload_images
 from splat_trainer.util.pointcloud import PointCloud

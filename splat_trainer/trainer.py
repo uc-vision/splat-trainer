@@ -1,10 +1,9 @@
 from dataclasses import dataclass
 import os
-from pathlib import Path
-from typing import Dict, List
-from beartype.typing import Optional
-import torch
 
+from beartype.typing import Optional
+import numpy as np
+import torch
 
 from taichi_splatting import perspective
 from tqdm import tqdm
@@ -13,8 +12,7 @@ from splat_trainer.dataset import Dataset
 from splat_trainer.logger import Logger
 
 from splat_trainer.scene.gaussians import GaussianScene, LearningRates
-
-
+from splat_trainer.util.containers import transpose_rows
 
 @dataclass 
 class TrainConfig:
@@ -77,14 +75,11 @@ class Trainer:
       ).to(self.device)
 
 
-  def log_table(self, name, rows:List[Dict]):
-    return self.logger.log_table(name, rows, step=self.step)
-
   def log_image(self, name, image, caption=None):
     return self.logger.log_image(name, image, caption=caption, step=self.step)
 
-  def log(self, data):
-    return self.logger.log(data, step=self.step) 
+  def log_value(self, name, value):
+    return self.logger.log_value(name, value, step=self.step) 
   
 
 
@@ -92,8 +87,6 @@ class Trainer:
     def compute_psnr(a, b):
       return 10 * torch.log10(1 / torch.nn.functional.mse_loss(a, b))  
     
-    total_psnr = 0.
-    n = 0
     rows = []
 
     with torch.no_grad():
@@ -103,26 +96,23 @@ class Trainer:
         psnr = compute_psnr(rendering.image, image)
         l1 = torch.nn.functional.l1_loss(rendering.image, image)
 
-        eval = dict(filename=filename, psnr = psnr.item(), l1 = l1.item())
-        rows.append(eval)
-        
-
-        if limit_log_images and n < limit_log_images or limit_log_images is None:
+        if limit_log_images and len(rows) < limit_log_images or limit_log_images is None:
           self.log_image(f"{name}/{filename}/render", rendering.image, caption=f"{filename} PSNR={psnr:.2f} L1={l1:.2f}")
           if self.step == 0:
             self.log_image(f"{name}/{filename}/image", image, caption=filename)
         
-          
-        total_psnr += psnr
-        n += 1
-
+        eval = dict(filename=filename, psnr = psnr.item(), l1 = l1.item())
+        rows.append(eval)
+        
         pbar.update(1)
-        pbar.set_postfix(psnr=total_psnr / n)
+        pbar.set_postfix(psnr=psnr)
 
-    self.log_table(f"{name}/evals", rows)
-    self.log({f"{name}/psnr": total_psnr / n})
+    self.logger.log_evaluations(f"{name}/evals", rows, step=self.step)
+    totals = transpose_rows(rows)
 
-    return total_psnr / n
+    self.log_value(f"{name}/psnr", np.mean(totals['psnr']) )
+    self.log_value(f"{name}/l1", np.mean(totals['l1']) )
+
 
 
   def evaluate(self):
@@ -138,7 +128,6 @@ class Trainer:
 
   
 
-
   def iter_data(self, iter):
     for filename, image, cam_idx in iter:
       image, cam_idx = [x.to(self.device, non_blocking=True) 
@@ -151,7 +140,6 @@ class Trainer:
 
 
   def train(self):
-
     print(f"Writing to model path {os.getcwd()}")
 
 

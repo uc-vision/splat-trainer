@@ -12,8 +12,7 @@ CameraView = namedtuple('CameraView',
   ('filename', 'image', 'index'))
 
 class Dataset(metaclass=ABCMeta):
-
-    
+  
   @abstractmethod
   def train(self, shuffle=True) -> Iterator[CameraView]:
     raise NotImplementedError
