@@ -23,6 +23,9 @@ class Logger(metaclass=ABCMeta):
   def log_value(self, name:str, value:float, step:int):
     raise NotImplementedError
   
+  def log_histogram(self, name:str, values:torch.Tensor, step:int):
+    raise NotImplementedError
+
   @abstractmethod
   def close(self):
     raise NotImplementedError

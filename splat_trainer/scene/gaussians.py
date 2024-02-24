@@ -37,16 +37,16 @@ def estimate_scale(pointcloud : PointCloud, num_neighbors:int = 3):
   return torch.from_numpy(distance).float()
 
 
-def scale_gradients(packed, sh_features, lr:LearningRates):
-  scales = torch.tensor(3 * [lr['position']] +
-                        3 * [lr['log_scaling']] +
-                        4 * [lr['rotation']] +
-                        [lr['alpha_logit']], device=packed.position.device)
+def scale_gradients(packed, sh_feature, lr:LearningRates):
+  scales = torch.tensor(3 * [lr.position] +
+                        3 * [lr.log_scaling] +
+                        4 * [lr.rotation] +
+                        [lr.alpha_logit], device=packed.device)
 
   packed.grad *= scales.unsqueeze(0)
 
-  sh_features.grad[..., 0] *= lr['base_sh']
-  sh_features.grad[..., 1:] *= lr['higher_sh']
+  sh_feature.grad[..., 0] *= lr.base_sh
+  sh_feature.grad[..., 1:] *= lr.higher_sh
 
 
 @tensorclass
@@ -74,6 +74,7 @@ class GaussianScene:
 
   def to(self, device):
     self.points = self.points.to(device)
+    
     return self
   
 
@@ -81,9 +82,12 @@ class GaussianScene:
     return f"GaussianScene({self.points.gaussians3d.shape[0]} points)"
 
   def step(self):
-
+    
     scale_gradients(self.points.gaussians3d, self.points.sh_feature, self.lr)
     self.points.step()
+
+  def zero_grad(self):
+    self.points.zero_grad()
 
   def render(self, camera_params):
     return render_gaussians(self.points.gaussians3d, 
@@ -110,8 +114,8 @@ class GaussianScene:
     scales = estimate_scale(pcd, num_neighbors=num_neighbors) * initial_scale
 
 
-    sh_features = torch.zeros(pcd.points.shape[0], 3, (sh_degree + 1)**2)
-    sh_features[:, :, 0] = rgb_to_sh(pcd.colors)
+    sh_feature = torch.zeros(pcd.points.shape[0], 3, (sh_degree + 1)**2)
+    sh_feature[:, :, 0] = rgb_to_sh(pcd.colors)
 
     gaussians = Gaussians3D(
       position=pcd.points,
@@ -120,7 +124,7 @@ class GaussianScene:
       alpha_logit=torch.full( (pcd.points.shape[0], 1), 
                              fill_value=inverse_sigmoid(initial_alpha)),
 
-      feature=sh_features,
+      feature=sh_feature,
       batch_size=(pcd.points.shape[0],)
     )
     return GaussianScene(gaussians, lr)

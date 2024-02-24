@@ -61,6 +61,7 @@ class Trainer:
       print(self.scene)
       
     self.scene.to(self.device)
+    self.pbar = None
     
 
   def camera_params(self, cam_idx:torch.Tensor, image:torch.Tensor):
@@ -80,7 +81,12 @@ class Trainer:
 
   def log_value(self, name, value):
     return self.logger.log_value(name, value, step=self.step) 
-  
+
+  def log_values(self, name, values):
+    return self.logger.log_values(name, values, step=self.step)  
+
+  def log_histogram(self, name, values):
+    return self.logger.log_histogram(name, values, step=self.step)
 
 
   def evaluate_dataset(self, name, data, limit_log_images:Optional[int]=None):
@@ -113,6 +119,8 @@ class Trainer:
     self.log_value(f"{name}/psnr", np.mean(totals['psnr']) )
     self.log_value(f"{name}/l1", np.mean(totals['l1']) )
 
+    self.log_histogram(f"{name}/psnr_hist", torch.tensor(totals['psnr']))
+
 
 
   def evaluate(self):
@@ -130,38 +138,58 @@ class Trainer:
 
   def iter_data(self, iter):
     for filename, image, cam_idx in iter:
-      image, cam_idx = [x.to(self.device, non_blocking=True) 
-                    for x in (image, cam_idx)]
-      
-      image = image.to(dtype=torch.float) / 255.0
+      with torch.no_grad():
+        image, cam_idx = [x.to(self.device, non_blocking=True) 
+                      for x in (image, cam_idx)]
+        
+        image = image.to(dtype=torch.float) / 255.0
 
-      camera_params = self.camera_params(cam_idx, image)
+        camera_params = self.camera_params(cam_idx, image)
+      
       yield filename, image, camera_params
+
+
+  def training_step(self, filename, image, camera_params):
+    self.scene.zero_grad()
+
+    rendering = self.scene.render(camera_params)
+    loss = torch.nn.functional.l1_loss(rendering.image, image)
+    loss.backward()
+
+    self.scene.step()
+    self.log_values("loss", dict(l1 = loss.item()))
+
+
 
 
   def train(self):
     print(f"Writing to model path {os.getcwd()}")
 
 
-    pbar = tqdm(total=self.config.iterations, desc="training")
+    self.pbar = tqdm(total=self.config.iterations, desc="training")
     self.step = 0
 
     iter_train = self.iter_train()
 
     while self.step < self.config.iterations:
-      if self.step % self.config.eval_iterations == 0:
-        self.evaluate()
+      # if self.step % self.config.eval_iterations == 0:
+      #   self.evaluate()
 
-      filename, image, camera_params = next(iter_train)
-
+      self.training_step(*next(iter_train))
+      
       self.step += 1
       if self.step % 10 == 0:
-        pbar.update(10)
+        self.pbar.update(10)
       
+    self.pbar.close()
+
     self.evaluate()
     self.logger.close()
 
 
   def close(self):
+    if self.pbar is not None:
+      self.pbar.close()
+
     print("Closing trainer")
     self.logger.close()

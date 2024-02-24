@@ -18,27 +18,24 @@ def main(cfg):
   import taichi as ti
   from splat_trainer.trainer import Trainer
 
-  torch.set_printoptions(precision=4, sci_mode=False)
-  np.set_printoptions(precision=4, suppress=True)
+  with torch.no_grad():
+    torch.set_printoptions(precision=4, sci_mode=False)
+    np.set_printoptions(precision=4, suppress=True)
 
-  print(config.pretty(cfg))
-  
-  ti.init(arch=ti.cuda, debug=cfg.debug)
-  logger = hydra.utils.instantiate(cfg.logger, _partial_=True)(log_config=OmegaConf.to_container(cfg, resolve=True))
-  
-  train_config = hydra.utils.instantiate(cfg.trainer)
-  dataset = hydra.utils.instantiate(cfg.dataset)
+    print(config.pretty(cfg))
+    
+    ti.init(arch=ti.cuda, debug=cfg.debug)
+    logger = hydra.utils.instantiate(cfg.logger, _partial_=True)(log_config=OmegaConf.to_container(cfg, resolve=True))
+    
+    train_config = hydra.utils.instantiate(cfg.trainer)
+    dataset = hydra.utils.instantiate(cfg.dataset)
 
-  trainer = Trainer(dataset, train_config, logger)
+    trainer = Trainer(dataset, train_config, logger)
 
-  def signal_handler(sig, frame):
-      trainer.close()
-      sys.exit(0)
-
-  signal.signal(signal.SIGINT, signal_handler)
-
-
-  trainer.train()
-  
+  try:
+    trainer.train()
+  except KeyboardInterrupt:
+    trainer.close()
+    
 if __name__ == "__main__":
   main()

@@ -18,7 +18,7 @@ class TensorboardLogger(Logger):
   def __init__(self, log_config:dict, 
                dir:str | None = None, 
                flush_secs:int = 30,
-               start_server:bool = True):
+               start_server:bool = False):
     if dir is not None:
       dir = Path(dir).mkdir(parents=True, exist_ok=True)
 
@@ -28,9 +28,11 @@ class TensorboardLogger(Logger):
     self.log_thread = Thread(target=self.worker)
     self.log_thread.start()
 
+
     if start_server:
       self.process = subprocess.Popen(["tensorboard", "--logdir", dir or "."]) 
-  
+    else:
+      self.process = None
 
     config_str = pformat(log_config)
     self.enqueue(self.writer.add_text, "config", config_str, global_step=0)
@@ -45,11 +47,16 @@ class TensorboardLogger(Logger):
 
 
   def close(self):
+    print("Ending logging thread...")
     self.queue.put(None)
     self.log_thread.join()
 
+    print("Done, closing writer...")
+
     self.writer.close()
-    self.process.terminate()
+
+    if self.process is not None:
+      self.process.terminate()
     
   @beartype
   def log_evaluations(self, name, rows:List[Dict], step):
@@ -79,4 +86,7 @@ class TensorboardLogger(Logger):
                  global_step=step)
     
 
+  @beartype
+  def log_histogram(self, name:str, values:torch.Tensor, step:int):
+    self.enqueue(self.writer.add_histogram, name, values, global_step=step)
   
