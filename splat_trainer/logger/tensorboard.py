@@ -12,7 +12,16 @@ from queue import Queue
 from torch.utils.tensorboard import SummaryWriter
 import tabulate
 
+from splat_trainer.logger.histogram import Histogram
+
 from .logger import Logger
+
+
+
+
+
+
+
 
 class TensorboardLogger(Logger):
   def __init__(self, log_config:dict, 
@@ -87,6 +96,20 @@ class TensorboardLogger(Logger):
     
 
   @beartype
-  def log_histogram(self, name:str, values:torch.Tensor, step:int):
-    self.enqueue(self.writer.add_histogram, name, values, global_step=step)
-  
+  def log_histogram(self, name:str, values:torch.Tensor | Histogram, step:int):
+    if isinstance(values, torch.Tensor):
+      self.enqueue(self.writer.add_histogram, name, values, global_step=step)
+    elif isinstance(values, Histogram):
+      self.enqueue(write_histogram, self.writer, name, values, step)  
+
+
+def write_histogram(writer:SummaryWriter, name:str, hist:Histogram, step:int):
+  writer.add_histogram_raw(
+    name, 
+    min=hist.range[0], max=hist.range[1], 
+    num=hist.counts.sum().item(),
+    sum=hist.sum,
+    sum_squares=hist.sum_squares,
+    bucket_limits=hist.bins[1:],
+    bucket_counts=hist.counts,  
+    global_step=step)

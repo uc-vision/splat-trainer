@@ -89,12 +89,14 @@ class GaussianScene:
   def zero_grad(self):
     self.points.zero_grad()
 
-  def render(self, camera_params):
+  def render(self, camera_params, compute_radii=False, render_depth=False):
     return render_gaussians(self.points.gaussians3d, 
                      features=self.points.sh_feature,
                      use_sh=True,
                      config=self.raster_config,
-                     camera_params=camera_params)
+                     camera_params=camera_params,
+                     compute_radii=compute_radii,
+                     render_depth=render_depth)
 
   @staticmethod
   def load_model(workspace_path, model_name = None, lr:LearningRates = LearningRates()):

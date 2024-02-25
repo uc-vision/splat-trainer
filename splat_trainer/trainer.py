@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+import math
 import os
 
 from beartype.typing import Optional
@@ -10,6 +11,7 @@ from tqdm import tqdm
 
 from splat_trainer.dataset import Dataset
 from splat_trainer.logger import Logger
+from splat_trainer.logger.histogram import Histogram
 
 from splat_trainer.scene.gaussians import GaussianScene, LearningRates
 from splat_trainer.util.containers import transpose_rows
@@ -95,12 +97,16 @@ class Trainer:
     
     rows = []
 
+    radius_hist = Histogram.empty(range=(-1, 3), num_bins=20, device=self.device) 
+
     with torch.no_grad():
       pbar = tqdm(total=len(data), desc=f"rendering {name}", leave=False)
       for filename, image, camera_params in self.iter_data(data):
-        rendering = self.scene.render(camera_params)
+        rendering = self.scene.render(camera_params, compute_radii=True)
         psnr = compute_psnr(rendering.image, image)
         l1 = torch.nn.functional.l1_loss(rendering.image, image)
+
+        radius_hist = radius_hist.append(rendering.radii.log() / math.log(10.0), trim=False)
 
         if limit_log_images and len(rows) < limit_log_images or limit_log_images is None:
           self.log_image(f"{name}/{filename}/render", rendering.image, caption=f"{filename} PSNR={psnr:.2f} L1={l1:.2f}")
@@ -120,6 +126,9 @@ class Trainer:
     self.log_value(f"{name}/l1", np.mean(totals['l1']) )
 
     self.log_histogram(f"{name}/psnr_hist", torch.tensor(totals['psnr']))
+    self.log_histogram(f"{name}/radius_hist", radius_hist)
+
+    
 
 
 
@@ -159,6 +168,8 @@ class Trainer:
     self.scene.step()
     self.log_values("loss", dict(l1 = loss.item()))
 
+    return loss.item()
+
 
 
 
@@ -172,8 +183,8 @@ class Trainer:
     iter_train = self.iter_train()
 
     while self.step < self.config.iterations:
-      # if self.step % self.config.eval_iterations == 0:
-      #   self.evaluate()
+      if self.step % self.config.eval_iterations == 0:
+        self.evaluate()
 
       self.training_step(*next(iter_train))
       

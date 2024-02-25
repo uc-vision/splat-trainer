@@ -2,6 +2,8 @@ from abc import ABCMeta, abstractmethod
 from beartype.typing import  List
 import torch
 
+from splat_trainer.logger.histogram import Histogram
+
 # os.environ["WANDB_SILENT"] = "true"
 
 class Logger(metaclass=ABCMeta):
@@ -23,7 +25,8 @@ class Logger(metaclass=ABCMeta):
   def log_value(self, name:str, value:float, step:int):
     raise NotImplementedError
   
-  def log_histogram(self, name:str, values:torch.Tensor, step:int):
+  @abstractmethod
+  def log_histogram(self, name:str, values:torch.Tensor | Histogram, step:int):
     raise NotImplementedError
 
   @abstractmethod

@@ -1,10 +1,7 @@
 import hydra
-import argparse
 
 from omegaconf import OmegaConf
 from splat_trainer.util import config
-import signal
-import sys
 
 import numpy as np
 import torch

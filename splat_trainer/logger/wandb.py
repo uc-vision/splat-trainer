@@ -8,6 +8,8 @@ from pathlib import Path
 from threading import Thread
 from queue import Queue
 
+from splat_trainer.logger.histogram import Histogram
+
 from .logger import Logger
 
 class WandbLogger(Logger):
@@ -69,5 +71,16 @@ class WandbLogger(Logger):
 
     self.queue.put(log)
 
+
+  @beartype
+  def log_histogram(self, name:str, values:torch.Tensor | Histogram, step:int):
+    if isinstance(values, Histogram):
+      hist = wandb.Histogram(np_histogram=
+        (values.counts.cpu().numpy(), values.bins.cpu().numpy()))
+      
+      self.log_data({name:hist}, step=step)
+
+    elif isinstance(values, torch.Tensor):
+      self.log_data({name:wandb.Histogram(values)}, step=step)
 
   
