@@ -161,14 +161,17 @@ class Trainer:
   def training_step(self, filename, image, camera_params):
     self.scene.zero_grad()
 
-    rendering = self.scene.render(camera_params)
+    rendering = self.scene.render(camera_params, compute_split_heuristic=True)
     loss = torch.nn.functional.l1_loss(rendering.image, image)
     loss.backward()
 
     self.scene.step()
     self.log_values("loss", dict(l1 = loss.item()))
 
-    return loss.item()
+    (visible, in_view) =  self.scene.add_training_statistics(rendering)
+    self.log_values("points_rendered", dict(in_view=in_view, visible=visible))
+
+    self.pbar.set_postfix(loss=loss.item())
 
 
 
@@ -179,6 +182,7 @@ class Trainer:
 
     self.pbar = tqdm(total=self.config.iterations, desc="training")
     self.step = 0
+    since_densify = 0
 
     iter_train = self.iter_train()
 
@@ -186,11 +190,16 @@ class Trainer:
       if self.step % self.config.eval_iterations == 0:
         self.evaluate()
 
+      if since_densify >= 100:
+        self.scene.log_point_statistics(self.logger)
+        since_densify = 0
+
       self.training_step(*next(iter_train))
       
       self.step += 1
-      if self.step % 10 == 0:
-        self.pbar.update(10)
+      since_densify += 1
+
+      self.pbar.update(1)
       
     self.pbar.close()
 

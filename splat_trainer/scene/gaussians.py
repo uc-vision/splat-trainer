@@ -12,8 +12,6 @@ from splat_viewer.gaussians import Workspace
 from taichi_splatting.misc.parameter_class import ParameterClass
 from taichi_splatting import Gaussians3D, RasterConfig, render_gaussians
     
-import open3d as o3d
-
 
 
 @dataclass(frozen=True)
@@ -54,6 +52,9 @@ class PackedPoints:
   gaussians3d: torch.Tensor  # (N, 11)
   sh_feature: torch.Tensor  # (N, (D+1)**2)
 
+  split_heuristics : torch.Tensor  # (N, 2) - accumulated split heuristics
+  visible : torch.Tensor  # (N, 1) - number of times the point was rasterized
+  in_view : torch.Tensor  # (N, 1) - number of times the point was in the view frustum
 
 class GaussianScene:
   def __init__(self, points: Gaussians3D, lr:LearningRates):
@@ -62,7 +63,12 @@ class GaussianScene:
     
     packed = TensorDict(dict(
       gaussians3d=points.packed(),
-      sh_feature=points.feature),
+      sh_feature=points.feature,
+
+      split_heuristics=torch.zeros(points.batch_size, 2, dtype=torch.float32),
+
+      visible=torch.zeros(points.batch_size, dtype=torch.int16)),
+      in_view=torch.zeros(points.batch_size, dtype=torch.int16),
 
       batch_size = points.batch_size
     )
@@ -89,14 +95,38 @@ class GaussianScene:
   def zero_grad(self):
     self.points.zero_grad()
 
-  def render(self, camera_params, compute_radii=False, render_depth=False):
+  def render(self, camera_params, compute_radii=False, 
+             render_depth=False, compute_split_heuristics=False):
+    
     return render_gaussians(self.points.gaussians3d, 
                      features=self.points.sh_feature,
                      use_sh=True,
                      config=self.raster_config,
                      camera_params=camera_params,
                      compute_radii=compute_radii,
-                     render_depth=render_depth)
+                     render_depth=render_depth,
+                     compute_split_heuristics=compute_split_heuristics)
+  
+  def add_training_statistics(self, rendering):
+    idx = rendering.point_indexes
+    self.points.split_heuristics[idx] += rendering.split_heuristics
+
+    visible = rendering.split_heuristics[:, 1] > 0
+    self.points.rendered[idx] += visible
+    self.points.in_view[idx] += 1
+
+    return (visible.sum(), idx.shape[0])
+
+
+  def log_point_statistics(self, logger):
+    logger.log_histogram("view_gradient", self.points.split_heuristics[:, 0])
+    logger.log_histogram("prune_cost", self.points.split_heuristics[:, 1])
+
+
+    logger.log_histogram("visible", self.points.visible)
+    logger.log_histogram("in_view", self.points.in_view)
+
+
 
   @staticmethod
   def load_model(workspace_path, model_name = None, lr:LearningRates = LearningRates()):
@@ -132,12 +162,7 @@ class GaussianScene:
     return GaussianScene(gaussians, lr)
 
 
-
-
-
 def sigmoid(x):
-
-
   return 1 / (1 + np.exp(-x))
 
 def inverse_sigmoid(x):
