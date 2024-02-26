@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import math
 import os
 
@@ -47,6 +47,9 @@ class Trainer:
     self.camera_poses = dataset.camera_poses().to(self.device)
     self.camera_projection = dataset.camera_projection().to(self.device)
 
+    lr = config.learning_rates
+    lr = replace(lr, position = lr.position * dataset.scene_scale())
+
     if config.load_model:
       print("Loading model from", config.load_model)
       self.scene = GaussianScene.load_model(
@@ -92,11 +95,8 @@ class Trainer:
 
 
   def evaluate_dataset(self, name, data, limit_log_images:Optional[int]=None):
-    def compute_psnr(a, b):
-      return 10 * torch.log10(1 / torch.nn.functional.mse_loss(a, b))  
-    
-    rows = []
 
+    rows = []
     radius_hist = Histogram.empty(range=(-1, 3), num_bins=20, device=self.device) 
 
     with torch.no_grad():
@@ -117,7 +117,7 @@ class Trainer:
         rows.append(eval)
         
         pbar.update(1)
-        pbar.set_postfix(psnr=psnr)
+        pbar.set_postfix(psnr=f"{psnr.item():.2f}", l1=f"{l1.item():.4f}")
 
     self.logger.log_evaluations(f"{name}/evals", rows, step=self.step)
     totals = transpose_rows(rows)
@@ -164,6 +164,8 @@ class Trainer:
     rendering = self.scene.render(camera_params, compute_split_heuristics=True)
     loss = torch.nn.functional.l1_loss(rendering.image, image)
     loss.backward()
+    
+    psnr = compute_psnr(rendering.image, image)
 
     self.scene.step()
     self.log_values("loss", dict(l1 = loss.item()))
@@ -171,8 +173,9 @@ class Trainer:
     (visible, in_view) =  self.scene.add_training_statistics(rendering)
     self.log_values("points_rendered", dict(in_view=in_view, visible=visible))
 
-    self.pbar.set_postfix(loss=loss.item())
+    self.step += 1
 
+    return dict(l1 = loss.item(), psnr = psnr.item())
 
 
 
@@ -187,19 +190,26 @@ class Trainer:
     iter_train = self.iter_train()
 
     while self.step < self.config.iterations:
-      if self.step % self.config.eval_iterations == 0:
-        self.evaluate()
+      # if self.step % self.config.eval_iterations == 0:
+      #   self.evaluate()
 
       if since_densify >= 100:
         self.scene.log_point_statistics(self.logger, self.step)
         since_densify = 0
 
-      self.training_step(*next(iter_train))
-      
-      self.step += 1
+      steps = [self.training_step(*next(iter_train))
+                for _ in range(10)]
+
       since_densify += 1
 
-      self.pbar.update(1)
+      if self.step % 10  == 0:
+        steps = transpose_rows(steps)
+
+        self.pbar.update(10)
+        self.pbar.set_postfix(
+          loss=f"{np.mean(steps['l1']):.4f}",
+          psnr = f"{np.mean(steps['psnr']):.2f}")
+
       
     self.pbar.close()
 
@@ -213,3 +223,6 @@ class Trainer:
 
     print("Closing trainer")
     self.logger.close()
+
+def compute_psnr(a, b):
+  return 10 * torch.log10(1 / torch.nn.functional.mse_loss(a, b))  

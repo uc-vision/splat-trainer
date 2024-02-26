@@ -42,8 +42,8 @@ def scale_gradients(packed, sh_feature, lr:LearningRates):
                         [lr.alpha_logit], device=packed.device, dtype=torch.float32).unsqueeze(0)
   
 
-  print(packed.grad.abs().mean(), packed.grad.shape, scales.shape)
-  # packed.grad *= scales
+  # print(packed.grad.abs().mean(), packed.grad.shape, scales.shape)
+  packed.grad *= scales
   # print(packed.grad.abs().mean())
 
 
@@ -80,7 +80,7 @@ class GaussianScene:
     self.raster_config = RasterConfig()
 
     self.points = ParameterClass.create(packed, 
-      learning_rates=dict(gaussians3d = 1.0, sh_feature = 1.0))
+      learning_rates=dict(gaussians3d = 0.001, sh_feature = 0.001))
 
   def to(self, device):
     self.points = self.points.to(device)
@@ -93,7 +93,7 @@ class GaussianScene:
 
   def step(self):
     
-    # scale_gradients(self.points.gaussians3d, self.points.sh_feature, self.lr)
+    scale_gradients(self.points.gaussians3d, self.points.sh_feature, self.lr)
 
     self.points.step()
 

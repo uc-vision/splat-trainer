@@ -33,3 +33,6 @@ class Dataset(metaclass=ABCMeta):
   def pointcloud(self) -> PointCloud:
     raise NotImplementedError
 
+  @abstractmethod
+  def scene_scale(self) -> float:
+    raise NotImplementedError

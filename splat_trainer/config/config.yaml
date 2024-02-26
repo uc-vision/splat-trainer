@@ -21,13 +21,18 @@ trainer:
   device: "cuda:0"
   learning_rates: 
     _target_: splat_trainer.scene.LearningRates
-    position: 0.001
-    log_scaling: 0.005
-    rotation: 0.001
-    alpha_logit: 0.05
+    # position: 0.000001
+    # log_scaling: 0.00005
+    # rotation: 0.00001
+    # alpha_logit: 0.0005
 
-    base_sh: 0.0025
-    higher_sh: 0.0002
+    position: 0.001
+    log_scaling: 0.01
+    rotation: 0.05
+    alpha_logit: 0.1
+
+    base_sh: 0.25
+    higher_sh: 0.01
       
   iterations : 4000
   eval_iterations: 1000

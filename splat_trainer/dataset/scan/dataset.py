@@ -43,7 +43,7 @@ class ScanDataset(Dataset):
     scan = FrameSet.load_file(Path(scan_file))
     self.depth_range = depth_range
 
-    self.centre, self.scene_scale = camera_extents(scan)    
+    self.centre, self.camera_extent = camera_extents(scan)    
     t = translate_44(*(-self.centre))
     scan = scan.transform(t).copy(
         metadata=dict(
@@ -107,3 +107,6 @@ class ScanDataset(Dataset):
     # pcd = pcd.select_by_index(np.flatnonzero(vis > 0))
     
     return pcd[counts > 0]
+
+  def scene_scale(self) -> float:
+    return self.camera_extent
