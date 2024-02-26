@@ -25,11 +25,12 @@ from .logger import Logger
 
 class TensorboardLogger(Logger):
   def __init__(self, log_config:dict, 
-               dir:str | None = None, 
+               dir, 
                flush_secs:int = 30,
                start_server:bool = False):
+    
     if dir is not None:
-      dir = Path(dir).mkdir(parents=True, exist_ok=True)
+      Path(dir).mkdir(parents=True, exist_ok=True)
 
     self.writer = SummaryWriter(dir, flush_secs=flush_secs) 
 

@@ -75,7 +75,7 @@ class Trainer:
           image_size=(image.shape[1], image.shape[0]),
           near_plane=near,
           far_plane=far
-      ).to(self.device)
+      ).to(self.device, dtype=torch.float32)
 
 
   def log_image(self, name, image, caption=None):
@@ -161,7 +161,7 @@ class Trainer:
   def training_step(self, filename, image, camera_params):
     self.scene.zero_grad()
 
-    rendering = self.scene.render(camera_params, compute_split_heuristic=True)
+    rendering = self.scene.render(camera_params, compute_split_heuristics=True)
     loss = torch.nn.functional.l1_loss(rendering.image, image)
     loss.backward()
 
@@ -191,7 +191,7 @@ class Trainer:
         self.evaluate()
 
       if since_densify >= 100:
-        self.scene.log_point_statistics(self.logger)
+        self.scene.log_point_statistics(self.logger, self.step)
         since_densify = 0
 
       self.training_step(*next(iter_train))

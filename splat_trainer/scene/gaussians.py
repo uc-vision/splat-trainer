@@ -10,7 +10,7 @@ from splat_trainer.util.pointcloud import PointCloud
 from splat_viewer.gaussians import Workspace
 
 from taichi_splatting.misc.parameter_class import ParameterClass
-from taichi_splatting import Gaussians3D, RasterConfig, render_gaussians
+from taichi_splatting import Gaussians3D, RasterConfig, render_gaussians, Rendering
     
 
 
@@ -32,16 +32,20 @@ def estimate_scale(pointcloud : PointCloud, num_neighbors:int = 3):
   dist, idx = tree.query(points, k=num_neighbors + 1, workers=-1)
   
   distance = np.mean(dist[:, 1:], axis=1)
-  return torch.from_numpy(distance).float()
+  return torch.from_numpy(distance).to(torch.float32)
 
 
 def scale_gradients(packed, sh_feature, lr:LearningRates):
   scales = torch.tensor(3 * [lr.position] +
                         3 * [lr.log_scaling] +
                         4 * [lr.rotation] +
-                        [lr.alpha_logit], device=packed.device)
+                        [lr.alpha_logit], device=packed.device, dtype=torch.float32).unsqueeze(0)
+  
 
-  packed.grad *= scales.unsqueeze(0)
+  print(packed.grad.abs().mean(), packed.grad.shape, scales.shape)
+  # packed.grad *= scales
+  # print(packed.grad.abs().mean())
+
 
   sh_feature.grad[..., 0] *= lr.base_sh
   sh_feature.grad[..., 1:] *= lr.higher_sh
@@ -65,10 +69,10 @@ class GaussianScene:
       gaussians3d=points.packed(),
       sh_feature=points.feature,
 
-      split_heuristics=torch.zeros(points.batch_size, 2, dtype=torch.float32),
+      split_heuristics=torch.zeros((points.batch_size[0], 2), dtype=torch.float32),
 
-      visible=torch.zeros(points.batch_size, dtype=torch.int16)),
-      in_view=torch.zeros(points.batch_size, dtype=torch.int16),
+      visible=torch.zeros(points.batch_size, dtype=torch.int16),
+      in_view=torch.zeros(points.batch_size, dtype=torch.int16)),
 
       batch_size = points.batch_size
     )
@@ -89,14 +93,15 @@ class GaussianScene:
 
   def step(self):
     
-    scale_gradients(self.points.gaussians3d, self.points.sh_feature, self.lr)
+    # scale_gradients(self.points.gaussians3d, self.points.sh_feature, self.lr)
+
     self.points.step()
 
   def zero_grad(self):
     self.points.zero_grad()
 
   def render(self, camera_params, compute_radii=False, 
-             render_depth=False, compute_split_heuristics=False):
+             render_depth=False, compute_split_heuristics=False) -> Rendering:
     
     return render_gaussians(self.points.gaussians3d, 
                      features=self.points.sh_feature,
@@ -107,24 +112,25 @@ class GaussianScene:
                      render_depth=render_depth,
                      compute_split_heuristics=compute_split_heuristics)
   
-  def add_training_statistics(self, rendering):
-    idx = rendering.point_indexes
+  def add_training_statistics(self, rendering:Rendering):
+    idx = rendering.points_in_view
     self.points.split_heuristics[idx] += rendering.split_heuristics
 
     visible = rendering.split_heuristics[:, 1] > 0
-    self.points.rendered[idx] += visible
+
+    self.points.visible[idx] += visible
     self.points.in_view[idx] += 1
 
     return (visible.sum(), idx.shape[0])
 
 
-  def log_point_statistics(self, logger):
-    logger.log_histogram("view_gradient", self.points.split_heuristics[:, 0])
-    logger.log_histogram("prune_cost", self.points.split_heuristics[:, 1])
+  def log_point_statistics(self, logger, step:int):
+    logger.log_histogram("view_gradient", self.points.split_heuristics[:, 0], step)
+    logger.log_histogram("prune_cost", self.points.split_heuristics[:, 1], step)
 
 
-    logger.log_histogram("visible", self.points.visible)
-    logger.log_histogram("in_view", self.points.in_view)
+    logger.log_histogram("visible", self.points.visible, step)
+    logger.log_histogram("in_view", self.points.in_view, step)
 
 
 
@@ -144,7 +150,6 @@ class GaussianScene:
           sh_degree:int = 2):
     
     scales = estimate_scale(pcd, num_neighbors=num_neighbors) * initial_scale
-
 
     sh_feature = torch.zeros(pcd.points.shape[0], 3, (sh_degree + 1)**2)
     sh_feature[:, :, 0] = rgb_to_sh(pcd.colors)

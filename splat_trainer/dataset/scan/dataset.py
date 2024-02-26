@@ -99,7 +99,8 @@ class ScanDataset(Dataset):
     pcd_filename = find_cloud(self.scan)    
     pcd = PointCloud.load(pcd_filename)
 
-    pcd.points -= self.centre
+
+    pcd.points -= torch.from_numpy(self.centre).to(torch.float32)
 
     counts = visibility(self.scan.expand_cameras(), pcd.points)
     print(f"Visible {(counts > 0).sum()} of {len(counts)} points")

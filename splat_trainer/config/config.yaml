@@ -10,7 +10,8 @@ hydra:
 
 logger:
   _target_: splat_trainer.logger.TensorboardLogger
-  dir: log
+  dir: "log"
+  start_server: True
 
 trainer:
   _target_: splat_trainer.trainer.TrainConfig

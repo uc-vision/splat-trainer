@@ -21,9 +21,10 @@ class PointCloud:
     if rgb.dtype == np.uint8:
       rgb = rgb.astype(np.float32) / 255.0
 
+
     return PointCloud(
-        points = torch.from_numpy(xyz), 
-        colors = torch.from_numpy(rgb),
+        points = torch.from_numpy(xyz.astype(np.float32)), 
+        colors = torch.from_numpy(rgb.astype(np.float32)),
         batch_size = (xyz.shape[0],))
 
   def show(self):
