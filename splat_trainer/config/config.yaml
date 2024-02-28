@@ -19,28 +19,26 @@ trainer:
   load_model: null
 
   device: "cuda:0"
-  learning_rates: 
-    _target_: splat_trainer.scene.LearningRates
-    # position: 0.000001
-    # log_scaling: 0.00005
-    # rotation: 0.00001
-    # alpha_logit: 0.0005
+  scene: 
+    _target_: splat_trainer.scene.SceneConfig
+    learning_rates:
+      position:     0.0002
+      log_scaling:  0.005
+      rotation:     0.001
+      alpha_logit:  0.05
+      sh_feature:   0.002
 
-    position: 0.001
-    log_scaling: 0.01
-    rotation: 0.05
-    alpha_logit: 0.1
+    sh_ratio: 20.0
 
-    base_sh: 0.25
-    higher_sh: 0.01
+    # Initialisation from a point cloud
+    num_neighbors: 3
+    initial_alpha: 0.5
+    sh_degree: 1
+  
       
   iterations : 4000
   eval_iterations: 1000
 
-  num_neighbors: 3
-  initial_alpha: 0.5
-
-  sh_degree: 1
 
 
 debug: False

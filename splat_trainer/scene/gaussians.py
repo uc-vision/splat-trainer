@@ -1,6 +1,8 @@
 
-from dataclasses import dataclass
+from dataclasses import  dataclass
+from beartype import beartype
 import numpy as np
+from omegaconf import DictConfig, OmegaConf
 from scipy.spatial import cKDTree
 from tensordict import TensorDict, tensorclass
 import torch
@@ -13,18 +15,46 @@ from taichi_splatting.misc.parameter_class import ParameterClass
 from taichi_splatting import Gaussians3D, RasterConfig, render_gaussians, Rendering
     
 
+@dataclass(kw_only=True, frozen=True)
+class SceneConfig:  
+  learning_rates : DictConfig
+  base_lr:float       = 1.0 
+  sh_ratio:float      = 20.0
+  
+  num_neighbors:int   = 3
+  initial_scale:float = 0.5
+  initial_alpha:float = 0.5 
+  sh_degree:int       = 2
 
-@dataclass(frozen=True)
-class LearningRates:
-  position: float = 0.001
-  log_scaling: float = 0.005
-  rotation: float = 0.001
-  alpha_logit: float = 0.05
 
-  base_sh: float = 0.0025
-  higher_sh: float = 0.0002
+
+  def load_model(self, workspace_path, model_name = None):
+    workspace = Workspace.load(workspace_path)
+    gaussians = workspace.load_model(model=model_name).to_gaussians3d()
+
+    return GaussianScene(gaussians, self)
   
 
+  def from_pointcloud(self, pcd:PointCloud):
+    
+    scales = estimate_scale(pcd, num_neighbors=self.num_neighbors) * self.initial_scale
+
+    sh_feature = torch.zeros(pcd.points.shape[0], 3, (self.sh_degree + 1)**2)
+    sh_feature[:, :, 0] = rgb_to_sh(pcd.colors)
+
+    gaussians = Gaussians3D(
+      position=pcd.points,
+      log_scaling=torch.log(scales).unsqueeze(1).expand(-1, 3),
+      rotation=F.normalize(torch.randn(pcd.points.shape[0], 4), dim=1),
+      alpha_logit=torch.full( (pcd.points.shape[0], 1), 
+                             fill_value=inverse_sigmoid(self.initial_alpha)),
+
+      feature=sh_feature,
+      batch_size=(pcd.points.shape[0],)
+    )
+    return GaussianScene(gaussians, self)
+
+  
 def estimate_scale(pointcloud : PointCloud, num_neighbors:int = 3):
   points = pointcloud.points.cpu().numpy()
   tree = cKDTree(points)
@@ -35,40 +65,30 @@ def estimate_scale(pointcloud : PointCloud, num_neighbors:int = 3):
   return torch.from_numpy(distance).to(torch.float32)
 
 
-def scale_gradients(packed, sh_feature, lr:LearningRates):
-  scales = torch.tensor(3 * [lr.position] +
-                        3 * [lr.log_scaling] +
-                        4 * [lr.rotation] +
-                        [lr.alpha_logit], device=packed.device, dtype=torch.float32).unsqueeze(0)
-  
-
-  # print(packed.grad.abs().mean(), packed.grad.shape, scales.shape)
-  packed.grad *= scales
-  # print(packed.grad.abs().mean())
-
-
-  sh_feature.grad[..., 0] *= lr.base_sh
-  sh_feature.grad[..., 1:] *= lr.higher_sh
-
-
 @tensorclass
-class PackedPoints:
-  gaussians3d: torch.Tensor  # (N, 11)
-  sh_feature: torch.Tensor  # (N, (D+1)**2)
+class Points:
+  position    : torch.Tensor  # (N, 3)
+  log_scaling : torch.Tensor  # (N, 3)
+  rotation    : torch.Tensor  # (N, 4)
+  alpha_logit : torch.Tensor  # (N, 1)
+
+  sh_feature  : torch.Tensor  # (N, (D+1)**2)
 
   split_heuristics : torch.Tensor  # (N, 2) - accumulated split heuristics
   visible : torch.Tensor  # (N, 1) - number of times the point was rasterized
   in_view : torch.Tensor  # (N, 1) - number of times the point was in the view frustum
 
 class GaussianScene:
-  def __init__(self, points: Gaussians3D, lr:LearningRates):
+  def __init__(self, points: Gaussians3D, config: SceneConfig):
+    self.config = config
 
-    self.lr = lr
-    
-    packed = TensorDict(dict(
-      gaussians3d=points.packed(),
+    training_points = TensorDict(dict(
+      position=points.position,
+      log_scaling=points.log_scaling,
+      rotation=points.rotation,
+      alpha_logit=points.alpha_logit,
+
       sh_feature=points.feature,
-
       split_heuristics=torch.zeros((points.batch_size[0], 2), dtype=torch.float32),
 
       visible=torch.zeros(points.batch_size, dtype=torch.int16),
@@ -78,38 +98,55 @@ class GaussianScene:
     )
 
     self.raster_config = RasterConfig()
+    self.learning_rates = OmegaConf.to_container(config.learning_rates)
 
-    self.points = ParameterClass.create(packed, 
-      learning_rates=dict(gaussians3d = 0.001, sh_feature = 0.001))
+    self.points = ParameterClass.create(training_points, 
+          learning_rates = self.learning_rates)   
+
+
 
   def to(self, device):
     self.points = self.points.to(device)
-    
     return self
   
+  @beartype
+  def update_learning_rate(self, scene_scale:float, step:int):
+    lr = self.learning_rates  
+    self.points.set_learning_rate(
+      position = lr['position'] * scene_scale)
+
 
   def __repr__(self):
-    return f"GaussianScene({self.points.gaussians3d.shape[0]} points)"
+    return f"GaussianScene({self.points.position.shape[0]} points)"
 
   def step(self):
     
-    scale_gradients(self.points.gaussians3d, self.points.sh_feature, self.lr)
-
+    self.points.sh_feature.grad[..., 1:] /= self.config.sh_ratio
     self.points.step()
 
   def zero_grad(self):
     self.points.zero_grad()
 
+  def gaussians3d(self):
+      points = self.points
+      return Gaussians3D(
+        position    = points.position,
+        log_scaling = points.log_scaling,
+        rotation    = points.rotation,
+        alpha_logit = points.alpha_logit,
+        feature     = points.sh_feature,
+        batch_size  = points.batch_size
+      )
+
   def render(self, camera_params, compute_radii=False, 
              render_depth=False, compute_split_heuristics=False) -> Rendering:
     
-    return render_gaussians(self.points.gaussians3d, 
-                     features=self.points.sh_feature,
-                     use_sh=True,
-                     config=self.raster_config,
-                     camera_params=camera_params,
-                     compute_radii=compute_radii,
-                     render_depth=render_depth,
+    return render_gaussians(self.gaussians3d(), 
+                     use_sh        = True,
+                     config        = self.raster_config,
+                     camera_params = camera_params,
+                     compute_radii = compute_radii,
+                     render_depth  = render_depth,
                      compute_split_heuristics=compute_split_heuristics)
   
   def add_training_statistics(self, rendering:Rendering):
@@ -125,46 +162,13 @@ class GaussianScene:
 
 
   def log_point_statistics(self, logger, step:int):
-    logger.log_histogram("view_gradient", self.points.split_heuristics[:, 0], step)
-    logger.log_histogram("prune_cost", self.points.split_heuristics[:, 1], step)
+    logger.log_histogram("points/view_gradient(log)", self.points.split_heuristics[:, 0].log(), step)
+    logger.log_histogram("points/prune_cost(log)", self.points.split_heuristics[:, 1].log(), step)
+
+    logger.log_histogram("points/visible", self.points.visible, step)
+    logger.log_histogram("points/in_view", self.points.in_view, step)
 
 
-    logger.log_histogram("visible", self.points.visible, step)
-    logger.log_histogram("in_view", self.points.in_view, step)
-
-
-
-  @staticmethod
-  def load_model(workspace_path, model_name = None, lr:LearningRates = LearningRates()):
-    workspace = Workspace.load(workspace_path)
-    gaussians = workspace.load_model(model=model_name).to_gaussians3d()
-
-    return GaussianScene(gaussians, lr)
-  
-
-  @staticmethod
-  def from_pointcloud(pcd:PointCloud, lr:LearningRates, 
-          num_neighbors:int = 3, 
-          initial_scale:float = 0.5,
-          initial_alpha:float = 0.5,
-          sh_degree:int = 2):
-    
-    scales = estimate_scale(pcd, num_neighbors=num_neighbors) * initial_scale
-
-    sh_feature = torch.zeros(pcd.points.shape[0], 3, (sh_degree + 1)**2)
-    sh_feature[:, :, 0] = rgb_to_sh(pcd.colors)
-
-    gaussians = Gaussians3D(
-      position=pcd.points,
-      log_scaling=torch.log(scales).unsqueeze(1).expand(-1, 3),
-      rotation=F.normalize(torch.randn(pcd.points.shape[0], 4), dim=1),
-      alpha_logit=torch.full( (pcd.points.shape[0], 1), 
-                             fill_value=inverse_sigmoid(initial_alpha)),
-
-      feature=sh_feature,
-      batch_size=(pcd.points.shape[0],)
-    )
-    return GaussianScene(gaussians, lr)
 
 
 def sigmoid(x):
@@ -181,3 +185,7 @@ def rgb_to_sh(rgb):
 
 def sh_to_rgb(sh):
     return sh * sh0 + 0.5
+
+
+def replace_dict(d, **kwargs):
+  return {**d, **kwargs}
