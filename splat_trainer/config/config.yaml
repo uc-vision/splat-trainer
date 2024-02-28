@@ -26,7 +26,7 @@ trainer:
       log_scaling:  0.005
       rotation:     0.001
       alpha_logit:  0.05
-      sh_feature:   0.002
+      sh_feature:   0.005
 
     sh_ratio: 20.0
 
