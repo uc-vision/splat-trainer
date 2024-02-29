@@ -17,15 +17,9 @@ from splat_trainer.logger.histogram import Histogram
 from .logger import Logger
 
 
-
-
-
-
-
-
 class TensorboardLogger(Logger):
   def __init__(self, log_config:dict, 
-               dir, 
+               dir: str | None = None, 
                flush_secs:int = 30,
                start_server:bool = False):
     
@@ -40,7 +34,7 @@ class TensorboardLogger(Logger):
 
 
     if start_server:
-      self.process = subprocess.Popen(["tensorboard", "--logdir", dir or "."]) 
+      self.process = subprocess.Popen(["tensorboard", "--logdir", self.writer.log_dir]) 
     else:
       self.process = None
 

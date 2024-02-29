@@ -3,15 +3,12 @@
 defaults:
   - _self_
   - dataset: scan
+  - logger: tensorboard
 
 hydra:
   job: 
     chdir: True
 
-logger:
-  _target_: splat_trainer.logger.TensorboardLogger
-  dir: "log"
-  start_server: True
 
 trainer:
   _target_: splat_trainer.trainer.TrainConfig

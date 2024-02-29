@@ -1,0 +1,6 @@
+# @package _global_
+
+
+logger:
+  _target_: splat_trainer.logger.TensorboardLogger
+  # start_server: True
