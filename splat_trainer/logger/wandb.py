@@ -13,10 +13,10 @@ from splat_trainer.logger.histogram import Histogram
 from .logger import Logger
 
 class WandbLogger(Logger):
-  def __init__(self, project:str | None, name:str | None, log_config:dict, dir:str | None = None):
+  def __init__(self, project:str | None, log_config:dict, name:str | None=None, dir:str | None = None):
     if dir is not None:
       dir = Path(dir).mkdir(parents=True, exist_ok=True)
-    self.run = wandb.init(project=project, name=name, config=log_config, dir=dir)
+    self.run = wandb.init(project=project, name=name, config=log_config, dir=dir, settings=wandb.Settings(start_method='thread'))
 
     self.queue = Queue()
     self.log_thread = Thread(target=self.worker)
@@ -36,6 +36,7 @@ class WandbLogger(Logger):
 
     self.run.finish(quiet=True)
     
+
     
   @beartype
   def log_evaluations(self, name, rows:List[Dict], step):
@@ -60,13 +61,13 @@ class WandbLogger(Logger):
 
 
   @beartype
-  def log_image(self, name:str, image:torch.Tensor, step:int = 0):
+  def log_image(self, name:str, image:torch.Tensor, caption:str | None = None, step:int = 0):
     
     def log():
       nonlocal image, step
       
       image = (image * 255).to(torch.uint8).cpu().numpy()
-      image = wandb.Image(image, mode="RGB")
+      image = wandb.Image(image, mode="RGB", caption=caption, file_type="jpg")
       self.run.log({name : image}, step=step)
 
     self.queue.put(log)
@@ -74,13 +75,17 @@ class WandbLogger(Logger):
 
   @beartype
   def log_histogram(self, name:str, values:torch.Tensor | Histogram, step:int):
-    if isinstance(values, Histogram):
-      hist = wandb.Histogram(np_histogram=
-        (values.counts.cpu().numpy(), values.bins.cpu().numpy()))
-      
-      self.log_data({name:hist}, step=step)
+    def log():
+      try:
+        if isinstance(values, Histogram):
+          hist = wandb.Histogram(np_histogram=
+            (values.counts.cpu().numpy(), values.bins.cpu().numpy()))
+          
+          self.run.log({name:hist}, step=step)
 
-    elif isinstance(values, torch.Tensor):
-      self.log_data({name:wandb.Histogram(values)}, step=step)
+        elif isinstance(values, torch.Tensor):
+          self.run.log({name:wandb.Histogram(values.cpu().numpy())}, step=step)
+      except Exception as e:
+        print(f"Error logging histogram {name}: {e}")
 
-  
+    self.queue.put(log)

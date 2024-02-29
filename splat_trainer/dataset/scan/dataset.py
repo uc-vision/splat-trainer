@@ -64,7 +64,11 @@ class ScanDataset(Dataset):
 
 
     # Evenly distribute validation images
-    self.val_cameras = self.all_cameras[::len(self.all_cameras) // val_count]
+    if val_count > 0:
+      self.val_cameras = self.all_cameras[::len(self.all_cameras) // val_count]
+    else:
+      self.val_cameras = []
+      
     self.train_cameras = [c for c in self.all_cameras if c not in self.val_cameras]
 
   def __repr__(self) -> str:

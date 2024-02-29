@@ -37,6 +37,6 @@ trainer:
   eval_iterations: 1000
 
 
-
+wait_exit: False
 debug: False
 

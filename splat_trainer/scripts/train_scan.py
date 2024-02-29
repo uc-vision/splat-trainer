@@ -31,8 +31,13 @@ def main(cfg):
 
   try:
     trainer.train()
+    if cfg.wait_exit:
+      input("Press Enter to continue...")
+
   except KeyboardInterrupt:
-    trainer.close()
+    pass
+
+  trainer.close()
     
 if __name__ == "__main__":
   main()

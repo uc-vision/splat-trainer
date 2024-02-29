@@ -158,15 +158,16 @@ class GaussianScene:
     self.points.visible[idx] += visible
     self.points.in_view[idx] += 1
 
-    return (visible.sum(), idx.shape[0])
+    return (visible.sum().item(), idx.shape[0])
 
 
   def log_point_statistics(self, logger, step:int):
-    logger.log_histogram("points/view_gradient(log)", self.points.split_heuristics[:, 0].log(), step)
-    logger.log_histogram("points/prune_cost(log)", self.points.split_heuristics[:, 1].log(), step)
+    h = self.points.split_heuristics / self.points.visible.unsqueeze(1)
 
-    logger.log_histogram("points/visible", self.points.visible, step)
-    logger.log_histogram("points/in_view", self.points.in_view, step)
+    logger.log_histogram("points/log_view_gradient", h[:, 0], step)
+    logger.log_histogram("points/log_prune_cost", h[:, 1], step)
+
+    logger.log_histogram("points/visible", self.points.visible / self.points.in_view, step)
 
 
 

@@ -5,15 +5,12 @@ dataset:
   scan_file: ???
 
   image_scale: 1.0
-  val_count: 10
+  val_count: 0
 
   depth_range: [0.1, 100.0]
 
 
-hydra:  
-  run:
-    dir: ${scan_name:${dataset.scan_file}}  
 
-
-
-
+# hydra:  
+#   run:
+#     dir: ${scan_name:${dataset.scan_file}}  

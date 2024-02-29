@@ -3,5 +3,5 @@
 logger:
   _target_: splat_trainer.logger.WandbLogger
   dir: "log"
-  project_name: "splat-test"
+  project: "splat-test"
 

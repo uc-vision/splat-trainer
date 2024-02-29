@@ -27,6 +27,7 @@ class TrainConfig:
 
   eval_iterations: int = 1000
   num_logged_images: int = 5
+  log_interval: int = 20
 
 
 class Trainer:
@@ -82,6 +83,8 @@ class Trainer:
 
 
   def evaluate_dataset(self, name, data, limit_log_images:Optional[int]=None):
+    if len(data) == 0:
+      return
 
     rows = []
     radius_hist = Histogram.empty(range=(-1, 3), num_bins=20, device=self.device) 
@@ -155,14 +158,10 @@ class Trainer:
     psnr = compute_psnr(rendering.image, image)
 
     self.scene.step()
-    self.log_values("loss", dict(l1 = loss.item()))
-
     (visible, in_view) =  self.scene.add_training_statistics(rendering)
-    self.log_values("points_rendered", dict(in_view=in_view, visible=visible))
 
     self.step += 1
-
-    return dict(l1 = loss.item(), psnr = psnr.item())
+    return dict(l1 = loss.item(), psnr = psnr.item(), visible=visible, in_view=in_view)
 
 
 
@@ -185,25 +184,26 @@ class Trainer:
         self.scene.log_point_statistics(self.logger, self.step)
         since_densify = 0
 
-      steps = [self.training_step(*next(iter_train))
-                for _ in range(10)]
-
+      steps = [self.training_step(*next(iter_train)) for _ in range(10)]
       since_densify += 1
 
-      if self.step % 10  == 0:
+      if self.step % self.config.log_interval  == 0:
         steps = transpose_rows(steps)
 
-        self.pbar.update(10)
+        self.pbar.update(self.config.log_interval)
+
+        means = {k:np.mean(v) for k, v in steps.items()}
         self.pbar.set_postfix(
-          loss=f"{np.mean(steps['l1']):.4f}",
-          psnr = f"{np.mean(steps['psnr']):.2f}")
+          loss=f"{means['l1']:.4f}",
+          psnr = f"{means['psnr']:.2f}")
+        
+        self.log_values("train", means)
 
 
       
     self.pbar.close()
-
     self.evaluate()
-    self.logger.close()
+
 
 
   def close(self):
