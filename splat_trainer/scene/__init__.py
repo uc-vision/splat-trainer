@@ -1,9 +1,9 @@
-from .gaussians import GaussianScene, PackedPoints, LearningRates
+from .gaussians import GaussianScene, Gaussians3D, SceneConfig
 
 
 __all__ = [
     "GaussianScene",
-    "PackedPoints",
-    "LearningRates"
+    "Gaussians3D",
+    "SceneConfig"
 
 ]

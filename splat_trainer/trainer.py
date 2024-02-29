@@ -13,23 +13,19 @@ from splat_trainer.dataset import Dataset
 from splat_trainer.logger import Logger
 from splat_trainer.logger.histogram import Histogram
 
-from splat_trainer.scene.gaussians import GaussianScene, LearningRates
+from splat_trainer.scene.gaussians import GaussianScene, SceneConfig
 from splat_trainer.util.containers import transpose_rows
 
-@dataclass 
+@dataclass(kw_only=True)
 class TrainConfig:
   output_path: str
   device: str
+  iterations: int 
+  scene: SceneConfig
+
   load_model: Optional[str] = None
-  iterations: int = 30000
-  learning_rates: LearningRates = LearningRates()
 
   eval_iterations: int = 1000
-
-  num_neighbors: int = 3
-  initial_alpha: float = 0.5
-  sh_degree: int = 2
-
   num_logged_images: int = 5
 
 
@@ -47,21 +43,12 @@ class Trainer:
     self.camera_poses = dataset.camera_poses().to(self.device)
     self.camera_projection = dataset.camera_projection().to(self.device)
 
-    lr = config.learning_rates
-    lr = replace(lr, position = lr.position * dataset.scene_scale())
-
     if config.load_model:
       print("Loading model from", config.load_model)
-      self.scene = GaussianScene.load_model(
-        config.load_model, lr=config.learning_rates)
+      self.scene = config.scene.load_model(config.load_model)
     else:
-      pcd = dataset.pointcloud()
       print(f"Initializing model from {dataset}")
-
-      self.scene = GaussianScene.from_pointcloud(pcd, lr=config.learning_rates,
-                                        num_neighbors=config.num_neighbors,
-                                        initial_alpha=config.initial_alpha,
-                                        sh_degree=config.sh_degree)
+      self.scene = config.scene.from_pointcloud(dataset.pointcloud())
       
       print(self.scene)
       
@@ -190,8 +177,9 @@ class Trainer:
     iter_train = self.iter_train()
 
     while self.step < self.config.iterations:
-      # if self.step % self.config.eval_iterations == 0:
-      #   self.evaluate()
+      if self.step % self.config.eval_iterations == 0:
+        self.evaluate()
+        self.scene.update_learning_rate(self.dataset.scene_scale(), self.step)
 
       if since_densify >= 100:
         self.scene.log_point_statistics(self.logger, self.step)
@@ -209,6 +197,7 @@ class Trainer:
         self.pbar.set_postfix(
           loss=f"{np.mean(steps['l1']):.4f}",
           psnr = f"{np.mean(steps['psnr']):.2f}")
+
 
       
     self.pbar.close()
