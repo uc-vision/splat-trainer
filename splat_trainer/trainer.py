@@ -1,10 +1,13 @@
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 import math
 import os
 
 from beartype.typing import Optional
 import numpy as np
 import torch
+from torchmetrics.image  import StructuralSimilarityIndexMeasure
+
+
 
 from taichi_splatting import perspective
 from tqdm import tqdm
@@ -13,7 +16,7 @@ from splat_trainer.dataset import Dataset
 from splat_trainer.logger import Logger
 from splat_trainer.logger.histogram import Histogram
 
-from splat_trainer.scene.gaussians import GaussianScene, SceneConfig
+from splat_trainer.scene.gaussians import  SceneConfig
 from splat_trainer.util.containers import transpose_rows
 
 @dataclass(kw_only=True)
@@ -29,6 +32,8 @@ class TrainConfig:
   num_logged_images: int = 5
   log_interval: int = 20
 
+  ssim_weight: float = 0.2
+
 
 class Trainer:
   def __init__(self, dataset:Dataset, config:TrainConfig, logger:Logger):
@@ -40,6 +45,7 @@ class Trainer:
     self.step = 0
 
     self.logger = logger
+    self.ssim = torch.compile(StructuralSimilarityIndexMeasure(data_range=1.0).to(self.device))
 
     self.camera_poses = dataset.camera_poses().to(self.device)
     self.camera_projection = dataset.camera_projection().to(self.device)
@@ -148,20 +154,34 @@ class Trainer:
       yield filename, image, camera_params
 
 
+  def losses(self, rendering, image):
+    image1 = rendering.image.unsqueeze(0).permute(0, 3, 1, 2).to(memory_format=torch.channels_last)
+    image2 = image.unsqueeze(0).permute(0, 3, 1, 2).to(memory_format=torch.channels_last)
+
+    l1 = torch.nn.functional.l1_loss(image1, image2)
+    
+    if self.config.ssim_weight > 0:  
+      ssim = 1. - self.ssim(image1, image2)
+      loss = l1 * (1 - self.config.ssim_weight) + ssim * self.config.ssim_weight
+
+      return loss, dict(l1=l1.item(), ssim=ssim.item())
+    else:
+      return l1, dict(l1=l1.item())
+
+
   def training_step(self, filename, image, camera_params):
     self.scene.zero_grad()
 
     rendering = self.scene.render(camera_params, compute_split_heuristics=True)
-    loss = torch.nn.functional.l1_loss(rendering.image, image)
+
+    loss, losses = self.losses(rendering, image)
     loss.backward()
-    
-    psnr = compute_psnr(rendering.image, image)
 
     self.scene.step()
     (visible, in_view) =  self.scene.add_training_statistics(rendering)
 
     self.step += 1
-    return dict(l1 = loss.item(), psnr = psnr.item(), visible=visible, in_view=in_view)
+    return dict(**losses, visible=visible, in_view=in_view)
 
 
 
@@ -193,9 +213,9 @@ class Trainer:
         self.pbar.update(self.config.log_interval)
 
         means = {k:np.mean(v) for k, v in steps.items()}
-        self.pbar.set_postfix(
-          loss=f"{means['l1']:.4f}",
-          psnr = f"{means['psnr']:.2f}")
+        metrics = [f"{k}={means[k]:.4f}" for k in ['l1', 'ssim'] if k in means]
+
+        self.pbar.set_postfix(**metrics)
         
         self.log_values("train", means)
 

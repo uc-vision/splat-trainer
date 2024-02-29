@@ -36,6 +36,8 @@ trainer:
   iterations : 4000
   eval_iterations: 1000
 
+  ssim_weight: 0.2
+
 
 wait_exit: False
 debug: False
