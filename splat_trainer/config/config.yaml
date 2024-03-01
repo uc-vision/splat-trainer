@@ -9,7 +9,6 @@ hydra:
   job: 
     chdir: True
 
-
 trainer:
   _target_: splat_trainer.trainer.TrainConfig
   output_path: null
@@ -19,24 +18,31 @@ trainer:
   scene: 
     _target_: splat_trainer.scene.SceneConfig
     learning_rates:
-      position:     0.0002
-      log_scaling:  0.005
-      rotation:     0.001
-      alpha_logit:  0.05
+      position:     0.00001
+      log_scaling:  0.02
+      rotation:     0.002
+      alpha_logit:  0.1
       sh_feature:   0.005
+
+    # scheduler:
+    #   _target_: splat_trainer.scheduler.ExponentialDecay
+    #   final_decay:  0.001
+    #   warmup_steps: 0
 
     sh_ratio: 20.0
 
     # Initialisation from a point cloud
-    num_neighbors: 3
+    num_neighbors: 5
     initial_alpha: 0.5
+    initial_scale: 0.5
     sh_degree: 1
-  
-      
-  iterations : 4000
-  eval_iterations: 1000
 
-  ssim_weight: 0.2
+
+  steps : 4000
+  eval_steps: 1000
+
+  ssim_weight: 0.0 # slower iteration but faster convergence
+  ssim_scale: 0.5 # use ssim at a lower resolution (less computation)
 
 
 wait_exit: False

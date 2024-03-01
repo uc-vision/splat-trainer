@@ -13,6 +13,8 @@ events.out.*
 *.pth
 *.pt
 
+outputs/
+
 # Distribution / packaging
 .Python
 build/

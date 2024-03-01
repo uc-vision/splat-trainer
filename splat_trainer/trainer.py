@@ -5,8 +5,9 @@ import os
 from beartype.typing import Optional
 import numpy as np
 import torch
-from torchmetrics.image  import StructuralSimilarityIndexMeasure
 
+import torch.nn.functional as F
+from torchmetrics.image  import StructuralSimilarityIndexMeasure, MultiScaleStructuralSimilarityIndexMeasure
 
 
 from taichi_splatting import perspective
@@ -18,21 +19,23 @@ from splat_trainer.logger.histogram import Histogram
 
 from splat_trainer.scene.gaussians import  SceneConfig
 from splat_trainer.util.containers import transpose_rows
+from splat_trainer.util.misc import strided_indexes
 
 @dataclass(kw_only=True)
 class TrainConfig:
   output_path: str
   device: str
-  iterations: int 
+  steps: int 
   scene: SceneConfig
 
   load_model: Optional[str] = None
 
-  eval_iterations: int = 1000
+  eval_steps: int = 1000
   num_logged_images: int = 5
   log_interval: int = 20
 
   ssim_weight: float = 0.2
+  ssim_scale: float = 0.5
 
 
 class Trainer:
@@ -45,7 +48,12 @@ class Trainer:
     self.step = 0
 
     self.logger = logger
-    self.ssim = torch.compile(StructuralSimilarityIndexMeasure(data_range=1.0).to(self.device))
+    # self.ssim = torch.compile(StructuralSimilarityIndexMeasure(
+    #   data_range=1.0, kernel_size=11).to(self.device))
+    
+    self.ssim =  MultiScaleStructuralSimilarityIndexMeasure(
+        data_range=1.0, kernel_size=11).to(self.device)
+
 
     self.camera_poses = dataset.camera_poses().to(self.device)
     self.camera_projection = dataset.camera_projection().to(self.device)
@@ -88,23 +96,26 @@ class Trainer:
     return self.logger.log_histogram(name, values, step=self.step)
 
 
-  def evaluate_dataset(self, name, data, limit_log_images:Optional[int]=None):
+
+  def evaluate_dataset(self, name, data, log_count:int=0):
     if len(data) == 0:
-      return
+      return {}
 
     rows = []
     radius_hist = Histogram.empty(range=(-1, 3), num_bins=20, device=self.device) 
+    log_indexes = strided_indexes(log_count, len(data)) 
 
     with torch.no_grad():
       pbar = tqdm(total=len(data), desc=f"rendering {name}", leave=False)
-      for filename, image, camera_params in self.iter_data(data):
+      for i, (filename, image, camera_params) in enumerate(self.iter_data(data)):
+
         rendering = self.scene.render(camera_params, compute_radii=True)
         psnr = compute_psnr(rendering.image, image)
         l1 = torch.nn.functional.l1_loss(rendering.image, image)
 
         radius_hist = radius_hist.append(rendering.radii.log() / math.log(10.0), trim=False)
 
-        if limit_log_images and len(rows) < limit_log_images or limit_log_images is None:
+        if i in log_indexes:
           self.log_image(f"{name}/{filename}/render", rendering.image, caption=f"{filename} PSNR={psnr:.2f} L1={l1:.2f}")
           if self.step == 0:
             self.log_image(f"{name}/{filename}/image", image, caption=filename)
@@ -117,22 +128,24 @@ class Trainer:
 
     self.logger.log_evaluations(f"{name}/evals", rows, step=self.step)
     totals = transpose_rows(rows)
+    mean_l1, mean_psnr = np.mean(totals['l1']), np.mean(totals['psnr'])
 
-    self.log_value(f"{name}/psnr", np.mean(totals['psnr']) )
-    self.log_value(f"{name}/l1", np.mean(totals['l1']) )
+    self.log_value(f"{name}/psnr", mean_psnr) 
+    self.log_value(f"{name}/l1", mean_l1) 
 
     self.log_histogram(f"{name}/psnr_hist", torch.tensor(totals['psnr']))
     self.log_histogram(f"{name}/radius_hist", radius_hist)
 
-    
-
+    return {f"{name}_psnr":mean_psnr}
 
 
   def evaluate(self):
     n_logged = self.config.num_logged_images
 
-    self.evaluate_dataset("train", self.dataset.train(shuffle=False), limit_log_images=n_logged)
-    self.evaluate_dataset("val", self.dataset.val(), limit_log_images=n_logged)
+    train = self.evaluate_dataset("eval_train", self.dataset.train(shuffle=False), log_count=n_logged)
+    val = self.evaluate_dataset("val", self.dataset.val(), log_count=n_logged)
+
+    return {**train, **val}
 
   def iter_train(self):
     while True:
@@ -148,21 +161,24 @@ class Trainer:
                       for x in (image, cam_idx)]
         
         image = image.to(dtype=torch.float) / 255.0
-
         camera_params = self.camera_params(cam_idx, image)
       
       yield filename, image, camera_params
 
+  @torch.compile
+  def compute_ssim(self, image, ref, scale=1.0):
+      image1 = ref.unsqueeze(0).permute(0, 3, 1, 2).to(memory_format=torch.channels_last)
+      image2 = image.unsqueeze(0).permute(0, 3, 1, 2).to(memory_format=torch.channels_last)
+
+      return 1. - self.ssim(F.interpolate(image1, scale_factor=scale), F.interpolate(image2, scale_factor=scale))
+      
 
   def losses(self, rendering, image):
-    image1 = rendering.image.unsqueeze(0).permute(0, 3, 1, 2).to(memory_format=torch.channels_last)
-    image2 = image.unsqueeze(0).permute(0, 3, 1, 2).to(memory_format=torch.channels_last)
-
-    l1 = torch.nn.functional.l1_loss(image1, image2)
+    l1 = torch.nn.functional.l1_loss(rendering.image, image)
     
     if self.config.ssim_weight > 0:  
-      ssim = 1. - self.ssim(image1, image2)
-      loss = l1 * (1 - self.config.ssim_weight) + ssim * self.config.ssim_weight
+      ssim = self.compute_ssim(rendering.image, image, scale=self.config.ssim_scale)
+      loss = l1 + ssim * self.config.ssim_weight
 
       return loss, dict(l1=l1.item(), ssim=ssim.item())
     else:
@@ -189,16 +205,16 @@ class Trainer:
     print(f"Writing to model path {os.getcwd()}")
 
 
-    self.pbar = tqdm(total=self.config.iterations, desc="training")
+    self.pbar = tqdm(total=self.config.steps, desc="training")
     self.step = 0
     since_densify = 0
 
     iter_train = self.iter_train()
 
-    while self.step < self.config.iterations:
-      if self.step % self.config.eval_iterations == 0:
-        self.evaluate()
-        self.scene.update_learning_rate(self.dataset.scene_scale(), self.step)
+    while self.step < self.config.steps:
+      if self.step % self.config.eval_steps == 0:
+        eval_metrics = self.evaluate()
+        self.scene.update_learning_rate(self.dataset.scene_scale(), self.step, self.config.steps)
 
       if since_densify >= 100:
         self.scene.log_point_statistics(self.logger, self.step)
@@ -213,18 +229,19 @@ class Trainer:
         self.pbar.update(self.config.log_interval)
 
         means = {k:np.mean(v) for k, v in steps.items()}
-        metrics = [f"{k}={means[k]:.4f}" for k in ['l1', 'ssim'] if k in means]
+        metrics = {k:f"{means[k]:.4f}" for k in ['l1', 'ssim'] if k in means}
 
-        self.pbar.set_postfix(**metrics)
-        
+        self.pbar.set_postfix(**metrics, **eval_metrics)        
         self.log_values("train", means)
 
-
-      
+    eval_metrics = self.evaluate()
+    self.pbar.set_postfix(**metrics, **eval_metrics)        
     self.pbar.close()
-    self.evaluate()
 
 
+    return (eval_metrics.get('eval_train_psnr', 0.0) 
+            + eval_metrics.get('val_psnr', 0.0)) / 2.0
+    
 
   def close(self):
     if self.pbar is not None:

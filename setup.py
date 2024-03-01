@@ -14,6 +14,7 @@ setup(
         'omegaconf',
         'roma>=1.4',
         'tabulate',
+        'torch-metrics',
     ],
 
     entry_points={

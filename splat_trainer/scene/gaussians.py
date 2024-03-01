@@ -7,6 +7,8 @@ from scipy.spatial import cKDTree
 from tensordict import TensorDict, tensorclass
 import torch
 import torch.nn.functional as F
+from splat_trainer.scheduler import Scheduler, Uniform
+from splat_trainer.util.misc import inverse_sigmoid, rgb_to_sh
 
 from splat_trainer.util.pointcloud import PointCloud
 from splat_viewer.gaussians import Workspace
@@ -14,6 +16,7 @@ from splat_viewer.gaussians import Workspace
 from taichi_splatting.misc.parameter_class import ParameterClass
 from taichi_splatting import Gaussians3D, RasterConfig, render_gaussians, Rendering
     
+
 
 @dataclass(kw_only=True, frozen=True)
 class SceneConfig:  
@@ -26,6 +29,7 @@ class SceneConfig:
   initial_alpha:float = 0.5 
   sh_degree:int       = 2
 
+  scheduler:Scheduler = Uniform()
 
 
   def load_model(self, workspace_path, model_name = None):
@@ -110,10 +114,12 @@ class GaussianScene:
     return self
   
   @beartype
-  def update_learning_rate(self, scene_scale:float, step:int):
-    lr = self.learning_rates  
-    self.points.set_learning_rate(
-      position = lr['position'] * scene_scale)
+  def update_learning_rate(self, scene_scale:float, step:int, total_steps:int):
+    scheduler = self.config.scheduler
+    base_lr = self.learning_rates ['position'] * scene_scale
+    pos_lr = scheduler.schedule(base_lr, step, total_steps)
+
+    self.points.set_learning_rate(position = pos_lr)
 
 
   def __repr__(self):
@@ -171,22 +177,3 @@ class GaussianScene:
 
 
 
-
-def sigmoid(x):
-  return 1 / (1 + np.exp(-x))
-
-def inverse_sigmoid(x):
-  return np.log(x / (1 - x))
-
-
-sh0 = 0.282094791773878
-
-def rgb_to_sh(rgb):
-    return (rgb - 0.5) / sh0
-
-def sh_to_rgb(sh):
-    return sh * sh0 + 0.5
-
-
-def replace_dict(d, **kwargs):
-  return {**d, **kwargs}
