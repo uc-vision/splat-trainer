@@ -38,6 +38,20 @@ trainer:
     sh_degree: 1
 
 
+  controller:
+    _target_: splat_trainer.scene.EMAConfig
+    target_count: null
+
+    # rate of splitting proportional to current size
+    split_rate: 0.1
+
+    # min visbility to be considered for splitting/pruning
+    min_visibility: 20 
+    decay_steps: 100.0 # in steps
+
+  
+  densify_steps: 50
+
   steps : 4000
   eval_steps: 1000
 

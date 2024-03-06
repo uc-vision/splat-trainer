@@ -7,7 +7,7 @@ import numpy as np
 import torch
 
 import torch.nn.functional as F
-from torchmetrics.image  import StructuralSimilarityIndexMeasure, MultiScaleStructuralSimilarityIndexMeasure
+from torchmetrics.image  import MultiScaleStructuralSimilarityIndexMeasure
 
 
 from taichi_splatting import perspective
@@ -21,20 +21,24 @@ from splat_trainer.scene.gaussians import  SceneConfig
 from splat_trainer.util.containers import transpose_rows
 from splat_trainer.util.misc import strided_indexes
 
+from splat_trainer.scene.controller import ControllerConfig
+
 @dataclass(kw_only=True)
 class TrainConfig:
   output_path: str
   device: str
   steps: int 
   scene: SceneConfig
+  controller: ControllerConfig
 
   load_model: Optional[str] = None
 
+  densify_steps: int = 50
   eval_steps: int = 1000
   num_logged_images: int = 5
   log_interval: int = 20
 
-  ssim_weight: float = 0.2
+  ssim_weight: float = 0.0
   ssim_scale: float = 0.5
 
 
@@ -48,9 +52,7 @@ class Trainer:
     self.step = 0
 
     self.logger = logger
-    # self.ssim = torch.compile(StructuralSimilarityIndexMeasure(
-    #   data_range=1.0, kernel_size=11).to(self.device))
-    
+
     self.ssim =  MultiScaleStructuralSimilarityIndexMeasure(
         data_range=1.0, kernel_size=11).to(self.device)
 
@@ -68,6 +70,9 @@ class Trainer:
       print(self.scene)
       
     self.scene.to(self.device)
+    self.controller = config.controller.make_controller(
+      self.scene, self.logger, config.densify_steps, config.steps)
+
     self.pbar = None
     
 
@@ -194,7 +199,7 @@ class Trainer:
     loss.backward()
 
     self.scene.step()
-    (visible, in_view) =  self.scene.add_training_statistics(rendering)
+    (visible, in_view) =  self.controller.add_rendering(rendering)
 
     self.step += 1
     return dict(**losses, visible=visible, in_view=in_view)
@@ -216,12 +221,13 @@ class Trainer:
         eval_metrics = self.evaluate()
         self.scene.update_learning_rate(self.dataset.scene_scale(), self.step, self.config.steps)
 
-      if since_densify >= 100:
-        self.scene.log_point_statistics(self.logger, self.step)
+      if since_densify >= self.config.densify_steps:
+        self.controller.densify_and_prune(self.step)
         since_densify = 0
 
+      
       steps = [self.training_step(*next(iter_train)) for _ in range(10)]
-      since_densify += 1
+      since_densify += len(steps)
 
       if self.step % self.config.log_interval  == 0:
         steps = transpose_rows(steps)
