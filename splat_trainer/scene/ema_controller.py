@@ -37,22 +37,22 @@ class EMAConfig(ControllerConfig):
   decay_steps:float = 100.0 # half life of visibility decay in steps
 
   def make_controller(self, scene:GaussianScene, logger:Logger, 
-               densify_steps:int, total_steps:int):
-    return PointController(self, scene, logger, densify_steps, total_steps)
+               densify_interval:int, total_steps:int):
+    return PointController(self, scene, logger, densify_interval, total_steps)
 
 
 class PointController(Controller):
   def __init__(self, config:EMAConfig, 
                scene:GaussianScene,
                logger:Logger, 
-               densify_steps:int, 
+               densify_interval:int, 
                total_steps:int):
     
     self.config = config
     self.scene = scene
     self.logger = logger
 
-    self.densify_steps = densify_steps
+    self.densify_interval = densify_interval
     self.total_steps = total_steps
 
     self.target_count = config.target_count or scene.num_points
@@ -70,7 +70,8 @@ class PointController(Controller):
     # decay visibility by half in 'decay_steps'
     self.decay =  math.exp(-math.log(2) / config.decay_steps)
 
-    self.splits_per_densify = (1 + config.split_rate) ** (1.0 / densify_steps) - 1.0
+    self.splits_per_densify = (1 + config.split_rate) ** (densify_interval / 100) - 1.0
+
 
 
   def log_histograms(self, step:int):
@@ -92,16 +93,20 @@ class PointController(Controller):
       candidates = torch.nonzero(self.points.visible > config.min_visibility).squeeze(1)
       prune_cost, split_score = self.points.split_heuristics[candidates].unbind(dim=1) 
 
-      # linear decay
-      factor = self.splits_per_densify * (1 - t)
+      if candidates.shape[0] == 0:
+        splittable, pruneable = [
+          torch.zeros(0, dtype=torch.bool, device=candidates.device) for _ in range(2)]
 
-      split_thresh = torch.quantile(split_score, 1 - (factor * split_ratio))
-      prune_thresh = torch.quantile(prune_cost, factor * 1/split_ratio )
+      else:
+        # linear decay
+        quantile = self.splits_per_densify * (1 - t)
 
-      pruneable = (prune_cost <= prune_thresh) 
-      splittable = (split_score > split_thresh) & ~pruneable
+        split_thresh = torch.quantile(split_score, 1 - (quantile * split_ratio))
+        prune_thresh = torch.quantile(prune_cost, quantile * 1/split_ratio )
 
-
+        pruneable = (prune_cost <= prune_thresh) 
+        splittable = (split_score > split_thresh) & ~pruneable
+      
       split_idx, prune_idx =  candidates[splittable], candidates[pruneable]
 
       counts = dict(total=self.points.batch_size[0], 

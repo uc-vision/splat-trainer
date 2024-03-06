@@ -23,6 +23,7 @@ class WandbLogger(Logger):
     self.log_thread.start()
 
 
+
   def worker(self):
     item = self.queue.get()
     while item is not None:

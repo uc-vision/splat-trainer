@@ -8,7 +8,7 @@ class ControllerConfig(metaclass=ABCMeta):
 
   @abstractmethod
   def make_controller(self, scene:GaussianScene, logger:Logger, 
-                      densify_steps:int, total_steps:int) -> 'Controller':
+                      densify_interval:int, total_steps:int) -> 'Controller':
     raise NotImplementedError
   
 

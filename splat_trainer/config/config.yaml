@@ -50,7 +50,7 @@ trainer:
     decay_steps: 100.0 # in steps
 
   
-  densify_steps: 50
+  densify_interval: 20
 
   steps : 4000
   eval_steps: 1000

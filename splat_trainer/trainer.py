@@ -33,7 +33,7 @@ class TrainConfig:
 
   load_model: Optional[str] = None
 
-  densify_steps: int = 50
+  densify_interval: int = 50
   eval_steps: int = 1000
   num_logged_images: int = 5
   log_interval: int = 20
@@ -71,7 +71,7 @@ class Trainer:
       
     self.scene.to(self.device)
     self.controller = config.controller.make_controller(
-      self.scene, self.logger, config.densify_steps, config.steps)
+      self.scene, self.logger, config.densify_interval, config.steps)
 
     self.pbar = None
     
@@ -120,10 +120,13 @@ class Trainer:
 
         radius_hist = radius_hist.append(rendering.radii.log() / math.log(10.0), trim=False)
 
+        
+
         if i in log_indexes:
-          self.log_image(f"{name}/{filename}/render", rendering.image, caption=f"{filename} PSNR={psnr:.2f} L1={l1:.2f}")
+          image_id = filename.replace("/", "_")
+          self.log_image(f"{name}_images/{image_id}/render", rendering.image, caption=f"{filename} PSNR={psnr:.2f} L1={l1:.2f}")
           if self.step == 0:
-            self.log_image(f"{name}/{filename}/image", image, caption=filename)
+            self.log_image(f"{name}_images/{image_id}/image", image, caption=filename)
         
         eval = dict(filename=filename, psnr = psnr.item(), l1 = l1.item())
         rows.append(eval)
@@ -147,7 +150,7 @@ class Trainer:
   def evaluate(self):
     n_logged = self.config.num_logged_images
 
-    train = self.evaluate_dataset("eval_train", self.dataset.train(shuffle=False), log_count=n_logged)
+    train = self.evaluate_dataset("train", self.dataset.train(shuffle=False), log_count=n_logged)
     val = self.evaluate_dataset("val", self.dataset.val(), log_count=n_logged)
 
     return {**train, **val}
@@ -221,7 +224,7 @@ class Trainer:
         eval_metrics = self.evaluate()
         self.scene.update_learning_rate(self.dataset.scene_scale(), self.step, self.config.steps)
 
-      if since_densify >= self.config.densify_steps:
+      if since_densify >= self.config.densify_interval:
         self.controller.densify_and_prune(self.step)
         since_densify = 0
 
