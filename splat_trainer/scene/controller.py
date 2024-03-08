@@ -2,7 +2,7 @@ from abc import ABCMeta, abstractmethod
 from taichi_splatting import Rendering
 from splat_trainer.logger.logger import Logger
 
-from splat_trainer.scene.gaussians import GaussianScene
+from splat_trainer.scene.gaussian_scene import GaussianScene
 
 class ControllerConfig(metaclass=ABCMeta):
 

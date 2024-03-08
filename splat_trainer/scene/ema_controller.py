@@ -9,7 +9,7 @@ import torch
 
 from splat_trainer.logger.logger import Logger
 from .controller import Controller, ControllerConfig
-from .gaussians import GaussianScene
+from .gaussian_scene import GaussianScene
 
 
 
@@ -17,6 +17,15 @@ from .gaussians import GaussianScene
 class PointStatistics:
   split_heuristics : torch.Tensor  # (N, 2) - accumulated split heuristics
   visible : torch.Tensor  # (N, ) - number of times the point was rasterized
+
+  @staticmethod
+  def zeros(batch_size, device:Optional[torch.device] = None):
+    return PointStatistics(
+      split_heuristics=torch.zeros(batch_size, 2, dtype=torch.float32, device=device),
+      visible=torch.zeros(batch_size, dtype=torch.float32, device=device),
+      batch_size=(batch_size,)
+    )
+    
 
 
 
@@ -56,13 +65,7 @@ class PointController(Controller):
     self.total_steps = total_steps
 
     self.target_count = config.target_count or scene.num_points
-
-    n = scene.num_points
-    self.points = PointStatistics(
-       split_heuristics=torch.zeros(n, 2, dtype=torch.float32, device=scene.device),
-        visible=torch.zeros(n, dtype=torch.float32, device=scene.device),
-        batch_size = (n,)
-        )
+    self.points = PointStatistics.zeros(scene.num_points, device=scene.device)
        
     # adapt 0.9 toward target in 'decay_steps' for an exponential moving average
     self.ema_alpha  = (0.1 ** (2.0 / config.decay_steps))
@@ -73,7 +76,6 @@ class PointController(Controller):
     self.splits_per_densify = (1 + config.split_rate) ** (densify_interval / 100) - 1.0
 
 
-
   def log_histograms(self, step:int):
     split_score, prune_cost = self.points.split_heuristics.unbind(1) 
 
@@ -82,7 +84,7 @@ class PointController(Controller):
     self.logger.log_histogram("points/visible", self.points.visible, step)
 
 
-  def split_prune_mask(self, step:int):
+  def find_split_prune_indexes(self, step:int):
       config = self.config  
 
       split_ratio = np.clip(self.target_count / self.scene.num_points, 
@@ -118,11 +120,23 @@ class PointController(Controller):
       return split_idx, prune_idx        
 
 
+
+
   def densify_and_prune(self, step:int):
     self.log_histograms(step)
 
-    split_idx, prune_idx = self.split_prune_mask(step)
-    # self.scene.densify_and_prune(splittable)
+    split_idx, prune_idx = self.find_split_prune_indexes(step)
+
+    keep_mask = torch.ones(self.points.batch_size[0], dtype=torch.bool, device=self.scene.device)
+    keep_mask[prune_idx] = False
+    keep_mask[split_idx] = False
+
+    self.scene.split_and_prune(keep_mask, split_idx)
+    self.points = self.points[keep_mask]
+
+    new_points = PointStatistics.zeros(split_idx.shape[0] * 2, device=self.scene.device)
+    self.points = torch.cat([self.points, new_points], dim=0)
+    
 
 
 

@@ -1,4 +1,4 @@
-from .gaussians import GaussianScene, Gaussians3D, SceneConfig
+from .gaussian_scene import GaussianScene, Gaussians3D, SceneConfig
 from .ema_controller import EMAConfig
 
 

@@ -17,7 +17,7 @@ from splat_trainer.dataset import Dataset
 from splat_trainer.logger import Logger
 from splat_trainer.logger.histogram import Histogram
 
-from splat_trainer.scene.gaussians import  SceneConfig
+from splat_trainer.scene.gaussian_scene import  SceneConfig
 from splat_trainer.util.containers import transpose_rows
 from splat_trainer.util.misc import strided_indexes
 
@@ -34,12 +34,19 @@ class TrainConfig:
   load_model: Optional[str] = None
 
   densify_interval: int = 50
+  update_steps: int = 10
+
   eval_steps: int = 1000
   num_logged_images: int = 5
   log_interval: int = 20
 
   ssim_weight: float = 0.0
   ssim_scale: float = 0.5
+
+
+
+
+
 
 
 class Trainer:
@@ -68,6 +75,8 @@ class Trainer:
       self.scene = config.scene.from_pointcloud(dataset.pointcloud())
       
       print(self.scene)
+
+    self.render_start, self.render_end = [torch.cuda.Event(enable_timing = True) for _ in range(2)]
       
     self.scene.to(self.device)
     self.controller = config.controller.make_controller(
@@ -120,7 +129,6 @@ class Trainer:
 
         radius_hist = radius_hist.append(rendering.radii.log() / math.log(10.0), trim=False)
 
-        
 
         if i in log_indexes:
           image_id = filename.replace("/", "_")
@@ -196,17 +204,19 @@ class Trainer:
   def training_step(self, filename, image, camera_params):
     self.scene.zero_grad()
 
+    self.render_start.record()
     rendering = self.scene.render(camera_params, compute_split_heuristics=True)
 
     loss, losses = self.losses(rendering, image)
     loss.backward()
+    self.render_end.record()
 
     self.scene.step()
     (visible, in_view) =  self.controller.add_rendering(rendering)
 
     self.step += 1
-    return dict(**losses, visible=visible, in_view=in_view)
-
+    return dict(**losses, visible=visible, in_view=in_view, 
+                render_ms=self.render_start.elapsed_time(self.render_end))
 
 
   def train(self):
@@ -218,6 +228,7 @@ class Trainer:
     since_densify = 0
 
     iter_train = self.iter_train()
+    start_event, end_event = [torch.cuda.Event(enable_timing = True) for _ in range(2)]
 
     while self.step < self.config.steps:
       if self.step % self.config.eval_steps == 0:
@@ -228,8 +239,10 @@ class Trainer:
         self.controller.densify_and_prune(self.step)
         since_densify = 0
 
-      
-      steps = [self.training_step(*next(iter_train)) for _ in range(10)]
+      start_event.record()
+      steps = [self.training_step(*next(iter_train)) for _ in range(self.config.update_steps)]
+      end_event.record()
+
       since_densify += len(steps)
 
       if self.step % self.config.log_interval  == 0:
@@ -242,6 +255,9 @@ class Trainer:
 
         self.pbar.set_postfix(**metrics, **eval_metrics)        
         self.log_values("train", means)
+
+        self.log_value("train/step_ms", 
+                start_event.elapsed_time(end_event) / self.config.update_steps) 
 
     eval_metrics = self.evaluate()
     self.pbar.set_postfix(**metrics, **eval_metrics)        

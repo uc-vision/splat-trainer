@@ -7,6 +7,7 @@ from scipy.spatial import cKDTree
 from tensordict import TensorDict
 import torch
 import torch.nn.functional as F
+from splat_trainer.scene.split import split_gaussians
 from splat_trainer.scheduler import Scheduler, Uniform
 from splat_trainer.util.misc import inverse_sigmoid, rgb_to_sh
 
@@ -69,6 +70,8 @@ def estimate_scale(pointcloud : PointCloud, num_neighbors:int = 3):
   return torch.from_numpy(distance).to(torch.float32)
 
 
+
+
 class GaussianScene:
   def __init__(self, points: Gaussians3D, config: SceneConfig):
     self.config = config
@@ -78,7 +81,7 @@ class GaussianScene:
       log_scaling=points.log_scaling,
       rotation=points.rotation,
       alpha_logit=points.alpha_logit,
-      sh_feature=points.feature),
+      feature=points.feature),
 
       batch_size = points.batch_size
     )
@@ -117,7 +120,7 @@ class GaussianScene:
 
   def step(self):
     
-    self.points.sh_feature.grad[..., 1:] /= self.config.sh_ratio
+    self.points.feature.grad[..., 1:] /= self.config.sh_ratio
     self.points.step()
 
   def zero_grad(self):
@@ -125,21 +128,23 @@ class GaussianScene:
 
 
 
-  def gaussians3d(self):
-      points = self.points
-      return Gaussians3D(
-        position    = points.position,
-        log_scaling = points.log_scaling,
-        rotation    = points.rotation,
-        alpha_logit = points.alpha_logit,
-        feature     = points.sh_feature,
-        batch_size  = points.batch_size
-      )
+  def split_and_prune(self, keep_mask, split_idx):
+
+    splits = split_gaussians(self.gaussians[split_idx], n=2, scaling=1 / (0.8 * 2))
+    self.points = self.points[keep_mask].append_tensors(splits.to_tensordict())
+
+    return self
+
+
+  @property
+  def gaussians(self):
+      return Gaussians3D.from_tensordict(self.points.tensors)
+      
 
   def render(self, camera_params, compute_radii=False, 
              render_depth=False, compute_split_heuristics=False) -> Rendering:
     
-    return render_gaussians(self.gaussians3d(), 
+    return render_gaussians(self.gaussians, 
                      use_sh        = True,
                      config        = self.raster_config,
                      camera_params = camera_params,
@@ -147,5 +152,7 @@ class GaussianScene:
                      render_depth  = render_depth,
                      compute_split_heuristics=compute_split_heuristics)
   
+
+
 
 

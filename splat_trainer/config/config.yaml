@@ -22,7 +22,7 @@ trainer:
       log_scaling:  0.02
       rotation:     0.002
       alpha_logit:  0.1
-      sh_feature:   0.005
+      feature:   0.005
 
     # scheduler:
     #   _target_: splat_trainer.scheduler.ExponentialDecay
