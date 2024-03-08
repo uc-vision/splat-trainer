@@ -45,10 +45,6 @@ class TrainConfig:
 
 
 
-
-
-
-
 class Trainer:
   def __init__(self, dataset:Dataset, config:TrainConfig, logger:Logger):
 
@@ -80,7 +76,7 @@ class Trainer:
       
     self.scene.to(self.device)
     self.controller = config.controller.make_controller(
-      self.scene, self.logger, config.densify_interval, config.steps)
+      self.scene,  config.densify_interval, config.steps)
 
     self.pbar = None
     
@@ -226,6 +222,7 @@ class Trainer:
     self.pbar = tqdm(total=self.config.steps, desc="training")
     self.step = 0
     since_densify = 0
+    densify_metrics = dict(n = self.scene.num_points)
 
     iter_train = self.iter_train()
     start_event, end_event = [torch.cuda.Event(enable_timing = True) for _ in range(2)]
@@ -236,7 +233,11 @@ class Trainer:
         self.scene.update_learning_rate(self.dataset.scene_scale(), self.step, self.config.steps)
 
       if since_densify >= self.config.densify_interval:
-        self.controller.densify_and_prune(self.step)
+        self.controller.log_histograms(self.logger, self.step)
+        densify_metrics = self.controller.densify_and_prune(self.step)
+
+        self.log_values("densify", densify_metrics)
+
         since_densify = 0
 
       start_event.record()
@@ -253,7 +254,7 @@ class Trainer:
         means = {k:np.mean(v) for k, v in steps.items()}
         metrics = {k:f"{means[k]:.4f}" for k in ['l1', 'ssim'] if k in means}
 
-        self.pbar.set_postfix(**metrics, **eval_metrics)        
+        self.pbar.set_postfix(**metrics, **eval_metrics, **densify_metrics)        
         self.log_values("train", means)
 
         self.log_value("train/step_ms", 

@@ -45,21 +45,19 @@ class EMAConfig(ControllerConfig):
   min_visibility:int = 20 
   decay_steps:float = 100.0 # half life of visibility decay in steps
 
-  def make_controller(self, scene:GaussianScene, logger:Logger, 
+  def make_controller(self, scene:GaussianScene, 
                densify_interval:int, total_steps:int):
-    return PointController(self, scene, logger, densify_interval, total_steps)
+    return PointController(self, scene,  densify_interval, total_steps)
 
 
 class PointController(Controller):
   def __init__(self, config:EMAConfig, 
                scene:GaussianScene,
-               logger:Logger, 
                densify_interval:int, 
                total_steps:int):
     
     self.config = config
     self.scene = scene
-    self.logger = logger
 
     self.densify_interval = densify_interval
     self.total_steps = total_steps
@@ -76,12 +74,12 @@ class PointController(Controller):
     self.splits_per_densify = (1 + config.split_rate) ** (densify_interval / 100) - 1.0
 
 
-  def log_histograms(self, step:int):
+  def log_histograms(self, logger:Logger, step:int):
     split_score, prune_cost = self.points.split_heuristics.unbind(1) 
 
-    self.logger.log_histogram("points/log_split_score", split_score[split_score > 0].log(), step)
-    self.logger.log_histogram("points/log_prune_cost", prune_cost[prune_cost > 0].log(), step)
-    self.logger.log_histogram("points/visible", self.points.visible, step)
+    logger.log_histogram("points/log_split_score", split_score[split_score > 0].log(), step)
+    logger.log_histogram("points/log_prune_cost", prune_cost[prune_cost > 0].log(), step)
+    logger.log_histogram("points/visible", self.points.visible, step)
 
 
   def find_split_prune_indexes(self, step:int):
@@ -92,7 +90,7 @@ class PointController(Controller):
         
       t = step / self.total_steps
 
-      candidates = torch.nonzero(self.points.visible > config.min_visibility).squeeze(1)
+      candidates = torch.nonzero(self.points.visible >= config.min_visibility).squeeze(1)
       prune_cost, split_score = self.points.split_heuristics[candidates].unbind(dim=1) 
 
       if candidates.shape[0] == 0:
@@ -111,21 +109,17 @@ class PointController(Controller):
       
       split_idx, prune_idx =  candidates[splittable], candidates[pruneable]
 
-      counts = dict(total=self.points.batch_size[0], 
-              candidates=candidates.shape[0],
+      counts = dict(n=self.points.batch_size[0], 
+              visible=candidates.shape[0],
               split=split_idx.shape[0],
               prune=prune_idx.shape[0])
          
-      self.logger.log_values("split_prune", counts, step)
-      return split_idx, prune_idx        
-
-
+      return split_idx, prune_idx, counts     
 
 
   def densify_and_prune(self, step:int):
-    self.log_histograms(step)
 
-    split_idx, prune_idx = self.find_split_prune_indexes(step)
+    split_idx, prune_idx, counts = self.find_split_prune_indexes(step)
 
     keep_mask = torch.ones(self.points.batch_size[0], dtype=torch.bool, device=self.scene.device)
     keep_mask[prune_idx] = False
@@ -136,7 +130,7 @@ class PointController(Controller):
 
     new_points = PointStatistics.zeros(split_idx.shape[0] * 2, device=self.scene.device)
     self.points = torch.cat([self.points, new_points], dim=0)
-    
+    return counts    
 
 
 

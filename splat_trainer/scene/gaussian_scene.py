@@ -70,8 +70,6 @@ def estimate_scale(pointcloud : PointCloud, num_neighbors:int = 3):
   return torch.from_numpy(distance).to(torch.float32)
 
 
-
-
 class GaussianScene:
   def __init__(self, points: Gaussians3D, config: SceneConfig):
     self.config = config
