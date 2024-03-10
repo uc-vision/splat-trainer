@@ -17,7 +17,8 @@ def point_basis(points:Gaussians3D):
   r = F.normalize(points.rotation, dim=1)
   m = roma.unitquat_to_rotmat(r)
 
-  return m * scale.unsqueeze(-1)
+
+  return m.transpose(1, 2) * scale.unsqueeze(-1)
 
 
 def split_by_samples(points: Gaussians3D, samples: torch.Tensor) -> Gaussians3D:
@@ -52,11 +53,29 @@ def split_gaussians(points: Gaussians3D, n:int=2, scaling:Optional[float]=None) 
 
   samples = torch.randn((points.batch_size[0], n, 3), device=points.position.device) 
 
-  if scaling is not None:
-    scaling = 1 / (0.8 * n)
+  if scaling is None:
+    scaling = 1 / math.sqrt(n)
 
   points = replace(points, 
       log_scaling = points.log_scaling + math.log(scaling),
+      batch_size = points.batch_size)
+
+  return split_by_samples(points, samples)
+
+
+def split_gaussians_uniform(points: Gaussians3D, n:int=2, scaling:Optional[float]=None, noise=0.1) -> Gaussians3D:
+  """ Split along most significant axis """
+  axis = F.one_hot(torch.argmax(points.log_scaling, dim=1), num_classes=3)
+  values = torch.linspace(-1, 1, n, device=points.position.device)
+
+  samples = values.view(1, -1, 1) * axis.view(-1, 1, 3)
+  samples += torch.randn_like(samples) * noise
+
+  if scaling is None:
+    scaling = 1 / math.sqrt(n)
+
+  points = replace(points, 
+      log_scaling = points.log_scaling + math.log(scaling) * axis,
       batch_size = points.batch_size)
 
   return split_by_samples(points, samples)
