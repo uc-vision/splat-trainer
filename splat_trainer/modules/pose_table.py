@@ -50,6 +50,9 @@ class CameraRigTable(nn.Module):
     return camera_t_rig @ rig_t_world
 
 
+
+
+
 class PoseTable(nn.Module):
   def __init__(self, m:torch.Tensor):
     super().__init__()

@@ -1,3 +1,4 @@
+import traceback
 import hydra
 
 from omegaconf import OmegaConf
@@ -23,7 +24,9 @@ def main(cfg):
     
     print(config.pretty(cfg))
     logger = hydra.utils.instantiate(cfg.logger, _partial_=True)(log_config=OmegaConf.to_container(cfg, resolve=True))
-    
+    trainer = None
+
+  try:
     ti.init(arch=ti.cuda, debug=cfg.debug, device_memory_GB=0.1)
     
     train_config = hydra.utils.instantiate(cfg.trainer)
@@ -31,15 +34,20 @@ def main(cfg):
 
     trainer = Trainer(dataset, train_config, logger)
 
-  try:
     trainer.train()
     if cfg.wait_exit:
       input("Press Enter to continue...")
 
   except KeyboardInterrupt:
     pass
+  except Exception:
+    # print exception and stack trace and exit
+     traceback.print_exc()
 
-  trainer.close()
+  if trainer is not None:
+    trainer.close()
+  
+  logger.close()
     
 if __name__ == "__main__":
   main()

@@ -1,7 +1,7 @@
 from taichi_splatting.tests.random_data import random_3d_gaussians, random_camera
 
 from taichi_splatting import render_gaussians
-from splat_trainer.scene import split
+from splat_trainer.gaussians import split
 
 import torch
 

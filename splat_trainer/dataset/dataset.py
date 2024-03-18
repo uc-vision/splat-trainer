@@ -24,10 +24,15 @@ class Dataset(metaclass=ABCMeta):
   @abstractmethod
   def camera_poses(self) -> torch.nn.Module:
     raise NotImplementedError
-    
+
   @abstractmethod
-  def camera_projection(self) -> torch.Tensor:
+  def camera_projection(self) -> torch.nn.Module:
     raise NotImplementedError
+
+  @abstractmethod
+  def camera_shape(self) -> torch.Size:
+    raise NotImplementedError
+    
 
   @abstractmethod
   def pointcloud(self) -> PointCloud:

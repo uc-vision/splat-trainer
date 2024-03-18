@@ -4,7 +4,7 @@ import math
 
 class Scheduler(metaclass=abc.ABCMeta):
   @abc.abstractmethod
-  def schedule(self, base_lr:float, step:int, total_steps:int) -> float:
+  def __call__(self, base_lr:float, step:int, total_steps:int) -> float:
     pass
 
 
@@ -13,7 +13,7 @@ class ExponentialDecay(Scheduler):
   final_decay:float = 1/1000.0
   warmup_steps:int = 0
 
-  def schedule(self, base_lr:float, step:int, total_steps:int):
+  def __call__(self, base_lr:float, step:int, total_steps:int):
     t = min(step / total_steps, 1)
     lr = math.exp(math.log(base_lr) * (1 - t) + math.log(self.final_decay * base_lr) *  t) 
     
@@ -25,5 +25,5 @@ class ExponentialDecay(Scheduler):
   
 @dataclass(kw_only=True, frozen=True)
 class Uniform(Scheduler):
-  def schedule(self, base_lr:float, step:int, total_steps:int):
+  def __call__(self, base_lr:float, step:int, total_steps:int):
     return base_lr

@@ -1,0 +1,15 @@
+# @package _global_
+
+
+trainer:
+  controller:
+    _target_: splat_trainer.controller.ThresholdConfig
+    grad_threshold: 0.0002
+
+    # min visbility to be considered for splitting
+    min_visibility: 50 
+    min_opacity: 0.01
+    min_split_size: 0.01
+
+  
+  densify_interval: 100

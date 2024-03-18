@@ -1,8 +1,8 @@
 
-from dataclasses import  dataclass, replace
+from dataclasses import replace
 from functools import partial
 import math
-from typing import Optional
+from beartype.typing import Optional
 from beartype import beartype
 
 import torch

@@ -31,11 +31,19 @@ def camera_extents(scan:FrameSet):
     return avg_cam_center.reshape(3), diagonal * 1.1
 
 
+class RigProjectionTable(torch.nn.Module):
+  def __init__(self, projection:torch.Tensor):
+    super().__init__()
+    self.projection = torch.nn.Parameter(projection.to(torch.float32))
+
+  def forward(self, cam_idx):
+    return self.projection[cam_idx[1]]
+
 
 class ScanDataset(Dataset):
   def __init__(self, scan_file:str,                
         image_scale:float=1.0,
-        val_count:int=10,
+        val_stride:int=10,
         depth_range:Tuple[float, float] = (0.1, 100.0)):
 
     self.scan_file = scan_file
@@ -65,9 +73,8 @@ class ScanDataset(Dataset):
 
 
     # Evenly distribute validation images
-    idx = strided_indexes(val_count, len(self.all_cameras))
-    self.val_cameras = [self.all_cameras[i] for i in idx]
-
+    self.val_cameras = [camera for i, camera in enumerate(self.all_cameras) 
+                        if i % val_stride == 0] if val_stride > 0 else []
     self.train_cameras = [c for c in self.all_cameras if c not in self.val_cameras]
 
   def __repr__(self) -> str:
@@ -94,9 +101,12 @@ class ScanDataset(Dataset):
       rig_t_world=torch.linalg.inv(world_t_rig),
       camera_t_rig=torch.from_numpy(camera_t_rig).to(torch.float32))
   
+  def camera_shape(self) -> torch.Size:
+    return torch.Size([self.scan.num_frames, len(self.scan.cameras)])
+  
   def camera_projection(self) -> torch.Tensor:
     projections = np.array([camera.intrinsic for camera in self.scan.cameras.values()])
-    return torch.from_numpy(projections).to(torch.float32)
+    return RigProjectionTable(torch.from_numpy(projections).to(torch.float32))
 
   def pointcloud(self) -> PointCloud:
     pcd_filename = find_cloud(self.scan)    

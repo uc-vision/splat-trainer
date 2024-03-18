@@ -1,8 +1,11 @@
 # @package _global_
 
 dataset:
-  _target_: splat_trainer.dataset.ScanDataset
-  scan_file: ???
+  _target_: splat_trainer.dataset.COLMAPDataset
+  base_path: ???
+
+  model_dir: "sparse/0"
+  image_dir: "images"
 
   image_scale: 1.0
   val_stride: 0

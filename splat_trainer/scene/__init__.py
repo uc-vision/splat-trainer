@@ -1,12 +1,17 @@
-from .gaussian_scene import GaussianScene, Gaussians3D, SceneConfig
-from .ema_controller import EMAConfig
+from .scene import GaussianSceneConfig, GaussianScene
+from .sh_scene import SHScene, Gaussians3D, SHConfig
+from .tcnn_scene import TCNNScene, TCNNConfig
 
 
 __all__ = [
-    "GaussianScene",
-    "Gaussians3D",
+  "GaussianScene",
+  "GaussianSceneConfig",
 
-    "SceneConfig",
-    "EMAConfig"
+  "SHScene",
+  "SHConfig",
+  
+  "TCNNScene",
+  "TCNNConfig",
 
+  "Gaussians3D"
 ]
