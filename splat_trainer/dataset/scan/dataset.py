@@ -10,7 +10,7 @@ import torch
 import numpy as np
 from splat_trainer.modules.pose_table import CameraRigTable
 from splat_trainer.dataset.dataset import CameraView, Dataset
-from splat_trainer.util.misc import strided_indexes
+from splat_trainer.util.misc import split_stride, strided_indexes
 
 from .loading import  PreloadedImages, preload_images
 from splat_trainer.util.pointcloud import PointCloud
@@ -71,12 +71,9 @@ class ScanDataset(Dataset):
     self.all_cameras = preload_images(scan, cameras)
     self.scan = scan.copy(cameras=cameras)
 
-
     # Evenly distribute validation images
-    self.val_cameras = [camera for i, camera in enumerate(self.all_cameras) 
-                        if i % val_stride == 0] if val_stride > 0 else []
-    self.train_cameras = [c for c in self.all_cameras if c not in self.val_cameras]
-
+    self.train_cameras, self.val_cameras = split_stride(self.all_cameras, val_stride)
+    
   def __repr__(self) -> str:
     return f"ScanDataset({self.scan_file}, image_scale={self.image_scale} cloud={find_cloud(self.scan)})"
 

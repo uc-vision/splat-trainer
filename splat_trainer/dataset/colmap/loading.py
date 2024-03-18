@@ -1,3 +1,4 @@
+from functools import partial
 from multiprocessing import cpu_count, get_logger
 from multiprocessing.pool import ThreadPool
 from pathlib import Path
@@ -49,12 +50,16 @@ def load_image(filename:Path, image_scale:float=1.0):
   assert filename.is_file(), f"load_image: file {filename} does not exist"
 
   image = cv2.imread(str(filename), cv2.IMREAD_COLOR)
+
   if image_scale != 1.0:
-    image = cv2.resize(image, fx=image_scale, fy=image_scale, interpolation=cv2.INTER_AREA)
+    h, w, _ = image.shape
+    dsize = (int(w * image_scale), int(h * image_scale))
+
+    image = cv2.resize(image, dsize=dsize, fx=image_scale, fy=image_scale, interpolation=cv2.INTER_AREA)
 
   assert image is not None, f"load_image: could not read {filename}"
   return image
 
 @beartype
-def load_images(filenames:List[str], base_path:Path, **map_options):
-  return parmap_list(load_image, [base_path / f for f in filenames], **map_options)  
+def load_images(filenames:List[str], base_path:Path, image_scale:float, **map_options):
+  return parmap_list(partial(load_image, image_scale=image_scale), [base_path / f for f in filenames], **map_options)  

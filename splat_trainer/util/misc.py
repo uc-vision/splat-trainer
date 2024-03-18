@@ -10,6 +10,8 @@ def strided_indexes(subset:int, total:int):
 
 
 def split_stride(images, stride=0):
+  assert stride == 0 or stride > 1, f"val_stride {stride}, must be zero, or greater than 1"
+
   val_cameras = [camera for i, camera in enumerate(images) if i % stride == 0] if stride > 0 else []
   train_cameras = [camera for camera in images if camera not in val_cameras]
 

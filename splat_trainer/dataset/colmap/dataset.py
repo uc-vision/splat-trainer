@@ -42,27 +42,26 @@ class COLMAPDataset(Dataset):
       camera_idx[k] = i
 
 
+
     def image_info(image:pycolmap.Image) -> Tuple[np.array, str, int]:
-      world_t_camera = np.eye(4)
-      world_t_camera[:3, :4] =  image.cam_from_world.matrix()        
-      return (np.linalg.inv(world_t_camera), image.name, camera_idx[image.camera_id])
+      camera_t_world = np.eye(4)
+      camera_t_world[:3, :4] =  image.cam_from_world.matrix()        
+      return (camera_t_world, image.name, camera_idx[image.camera_id])
     
     self.num_cameras = len(self.reconstruction.images)
 
     self.camera_t_world, self.image_names, self.camera_idx = zip(
       *[image_info(image) for image in self.reconstruction.images.values()])
     
-    images = load_images(list(self.image_names), Path(base_path) / image_dir)
+    images = load_images(list(self.image_names), Path(base_path) / image_dir, image_scale=image_scale)
     cameras = [CameraImage(filename, torch.from_numpy(image).pin_memory(), i) 
                for i, (filename, image) in enumerate(zip(self.image_names, images))]
     
     cam_positions = np.array([image.cam_from_world.translation for image in self.reconstruction.images.values()])
-    self.camera_extent = camera_extents(cam_positions)
-    
-
+    self.centre, self.camera_extent = camera_extents(cam_positions)    
     
     # Evenly distribute validation images
-    self.val_cameras, self.train_cameras = split_stride(cameras, val_stride)
+    self.train_cameras, self.val_cameras = split_stride(cameras, val_stride)
 
   def __repr__(self) -> str:
     return f"COLMAPDataset({self.base_path}, image_scale={self.image_scale})"
@@ -90,7 +89,7 @@ class COLMAPDataset(Dataset):
     colors = np.array([p.color for p in self.reconstruction.points3D.values()])
 
     return PointCloud(torch.tensor(xyz, dtype=torch.float32), 
-                      torch.tensor(colors, dtype=torch.float32),
+                      torch.tensor(colors, dtype=torch.float32) / 255.0,
                       batch_size=(len(xyz),))
     
   def scene_scale(self) -> float:
