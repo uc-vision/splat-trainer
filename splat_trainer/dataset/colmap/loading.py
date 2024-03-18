@@ -57,6 +57,8 @@ def load_image(filename:Path, image_scale:float=1.0):
 
     image = cv2.resize(image, dsize=dsize, fx=image_scale, fy=image_scale, interpolation=cv2.INTER_AREA)
 
+  image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+
   assert image is not None, f"load_image: could not read {filename}"
   return image
 
