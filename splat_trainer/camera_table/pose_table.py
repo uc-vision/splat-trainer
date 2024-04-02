@@ -10,7 +10,7 @@ import roma
 
 
 
-class CameraRigTable(nn.Module):
+class RigPoseTable(nn.Module):
   def __init__(self, rig_t_world:torch.Tensor, camera_t_rig:torch.Tensor):
     super().__init__()
 
@@ -57,6 +57,8 @@ class PoseTable(nn.Module):
   def __init__(self, m:torch.Tensor):
     super().__init__()
 
+    assert m.shape[-2:] == (4, 4), f"Expected (..., 4, 4) tensor, got: {m.shape}"
+
     R, t = split_rt(m)
     q = roma.rotmat_to_unitquat(R)
 
@@ -72,6 +74,8 @@ class PoseTable(nn.Module):
     self.q.data = F.normalize(self.q.data, dim=-1)
     return self
 
+  def shape(self):
+    return self.t.shape[:-1]
 
 
   

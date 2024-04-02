@@ -51,6 +51,8 @@ class TrainConfig:
   ssim_weight: float = 0.0
   ssim_scale: float = 0.5
 
+  max_blur: float = 5.0
+
   scheduler: Scheduler = Uniform()
 
 
@@ -64,20 +66,20 @@ class Trainer:
     self.step = 0
     self.logger = logger
 
+    self.blur_cov = config.max_blur
+
     self.ssim =  MultiScaleStructuralSimilarityIndexMeasure(
         data_range=1.0, kernel_size=11).to(self.device)
 
-    self.camera_poses = dataset.camera_poses().to(self.device)
-    self.camera_projection = dataset.camera_projection().to(self.device)
+    self.camera_table = dataset.camera_table().to(self.device)
 
     print(f"Initializing model from {dataset}")
     initial_gaussians = from_pointcloud(dataset.pointcloud(), 
                                         initial_scale=config.initial_scale,
                                         initial_alpha=config.initial_alpha,
                                         num_neighbors=config.num_neighbors)
-    self.scene = config.scene.from_color_gaussians(initial_gaussians, 
-                      self.device, self.dataset.camera_shape())
-      
+    
+    self.scene = config.scene.from_color_gaussians(initial_gaussians, self.camera_table, self.device)
     print(self.scene)
 
     self.render_timers = [CudaTimer() for _ in range(self.config.log_interval)]
@@ -91,16 +93,16 @@ class Trainer:
     
 
   def camera_params(self, cam_idx:torch.Tensor, image:torch.Tensor):
-      near, far = self.dataset.depth_range
+        near, far = self.dataset.depth_range
 
-      return perspective.CameraParams(
-          T_camera_world=self.camera_poses(cam_idx.unsqueeze(0)),
-          T_image_camera=self.camera_projection(cam_idx).squeeze(0),
-          image_size=(image.shape[1], image.shape[0]),
-          near_plane=near,
-          far_plane=far,
-          blur_cov=0.0
-      ).to(self.device, dtype=torch.float32)
+        return perspective.CameraParams(
+            T_camera_world=self.camera_poses(cam_idx.unsqueeze(0)),
+            T_image_camera=self.camera_projection(cam_idx).squeeze(0),
+            image_size=(image.shape[1], image.shape[0]),
+            near_plane=near,
+            far_plane=far,
+            blur_cov=0.0
+        ).to(self.device, dtype=torch.float32)
 
 
   def log_image(self, name, image, caption=None):
@@ -128,9 +130,9 @@ class Trainer:
 
     with torch.no_grad():
       pbar = tqdm(total=len(data), desc=f"rendering {name}", leave=False)
-      for i, (filename, cam_idx, image, camera_params) in enumerate(self.iter_data(data)):
+      for i, (filename, cam_idx, image) in enumerate(self.iter_data(data)):
 
-        rendering = self.scene.render(cam_idx, camera_params, compute_radii=True, render_depth=True)
+        rendering = self.scene.render(cam_idx, compute_radii=True, render_depth=True)
         psnr = compute_psnr(rendering.image, image)
         l1 = torch.nn.functional.l1_loss(rendering.image, image)
 
@@ -140,7 +142,7 @@ class Trainer:
           image_id = filename.replace("/", "_")
           self.log_image(f"{name}_images/{image_id}/render", rendering.image, caption=f"{filename} PSNR={psnr:.2f} L1={l1:.2f}")
           self.log_image(f"{name}_images/{image_id}/depth", 
-              colorize_depth(self.color_map, rendering.depth, camera_params.near_plane), caption=filename)
+              colorize_depth(self.color_map, rendering.depth, 0.1), caption=filename)
 
           if self.step == 0:
             self.log_image(f"{name}_images/{image_id}/image", image, caption=filename)
@@ -171,6 +173,10 @@ class Trainer:
     val = self.evaluate_dataset("val", self.dataset.val(), log_count=n_logged)
 
     return {**train, **val}
+  
+  def write_checkpoint(self):
+    self.scene.write_to(self.config.output_path / "point_cloud" , f"model_{self.step}")
+    self.scene.log(self.logger, self.step)
 
   def iter_train(self):
     while True:
@@ -180,15 +186,14 @@ class Trainer:
   
 
   def iter_data(self, iter):
-    for filename, image, cam_idx in iter:
+    for filename, image, image_idx in iter:
       with torch.no_grad():
-        image, cam_idx = [x.to(self.device, non_blocking=True) 
-                      for x in (image, cam_idx)]
+        image, image_idx = [x.to(self.device, non_blocking=True) 
+                      for x in (image, image_idx)]
         
         image = image.to(dtype=torch.float) / 255.0
-        camera_params = self.camera_params(cam_idx, image)
       
-      yield filename, cam_idx, image, camera_params
+      yield filename, image_idx.squeeze(0), image
 
   @torch.compile
   def compute_ssim(self, image, ref, scale=1.0):
@@ -210,11 +215,11 @@ class Trainer:
       return l1, dict(l1=l1.item())
 
 
-  def training_step(self, filename, cam_idx, image, camera_params, timer):
+  def training_step(self, filename, image_idx, image, timer):
     self.scene.zero_grad()
 
     with timer:
-      rendering = self.scene.render(cam_idx, camera_params, compute_split_heuristics=True)
+      rendering = self.scene.render(image_idx, compute_split_heuristics=True)
 
       loss, losses = self.losses(rendering, image)
       loss.backward()
@@ -241,9 +246,15 @@ class Trainer:
     while self.step < self.config.steps:
       if self.step % self.config.eval_steps == 0:
         eval_metrics = self.evaluate()
-        lr_scale = self.dataset.scene_scale() * self.config.scheduler(1.0, self.step, self.config.steps)
+        lr_scale = self.config.scheduler(self.step, self.config.steps)
 
         self.scene.update_learning_rate(lr_scale)
+        
+        t = self.step / self.config.steps
+        self.blur_cov = self.config.max_blur * (1 - t)**3
+
+        self.log_values("train", dict(lr_scale=lr_scale, blur_cov=self.blur_cov))
+        self.write_checkpoint()
 
       if since_densify >= self.config.densify_interval:
         self.controller.log_histograms(self.logger, self.step)

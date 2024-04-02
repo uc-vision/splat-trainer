@@ -7,9 +7,9 @@ trainer:
     target_count: 1000000
 
     # rate of splitting proportional to current size
-    split_rate: 0.01
+    split_rate: 0.02
 
     # min visbility to be considered for splitting/pruning
-    min_visibility: 20 
+    min_visibility: 100 
   
-  densify_interval: 20
+  densify_interval: 100

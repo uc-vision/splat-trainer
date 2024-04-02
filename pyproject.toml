@@ -1,0 +1,59 @@
+[project]
+name = "splat-trainer"  
+version = "0.1.0"  
+description = "Gaussian Splatting scene reconstruction with taichi-splatting"  
+readme = "README.md" 
+requires-python = ">=3.10"
+license = {file = "LICENSE"}
+
+maintainers = [
+  {name = "Oliver Batchelor", email = "oliver.batchelor@canterbury.ac.nz" } 
+]
+
+dependencies = [
+  'taichi-splatting >= 0.11.0',
+  'tqdm',
+  'plyfile',
+  'pypcd4',
+  'hydra-core',
+  'omegaconf',
+  'roma>=1.4',
+  'tabulate',
+  'torch-metrics',
+]
+
+
+[tool.setuptools.packages.find]
+include = ["taichi_splatting"]
+exclude = ["profiles", "benchmarks"]
+
+
+[project.urls] 
+"Homepage" = "https://github.com/uc-vision/taichi-splatting"
+
+[build-system]
+requires = ["setuptools>=43.0.0",  "wheel", "setuptools-scm"]
+build-backend = "setuptools.build_meta"
+
+
+[options]
+dependency_links = ["https://pypi.taichi.graphics/simple/"]
+
+[project.scripts]  # Optional
+splat-trainer = "train-scan=splat_trainer.scripts.train_scan:main"
+
+
+[tool.setuptools.package-data]
+
+[tool.pyright]
+reportInvalidTypeForm = "none"
+
+[tool.ruff]
+indent-width = 2
+
+[tool.pytest.ini_options]
+filterwarnings = [
+    # disable "UserWarning: The .grad attribute of a Tensor that is not a leaf Tensor"
+    "ignore::UserWarning"  
+]
+

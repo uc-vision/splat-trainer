@@ -3,6 +3,7 @@ from beartype.typing import  List
 import torch
 
 from splat_trainer.logger.histogram import Histogram
+from splat_trainer.util.pointcloud import PointCloud
 
 # os.environ["WANDB_SILENT"] = "true"
 
@@ -15,6 +16,10 @@ class Logger(metaclass=ABCMeta):
   
   @abstractmethod
   def log_image(self, name:str, image:torch.Tensor, step:int, caption:str | None = None):
+    raise NotImplementedError
+  
+  @abstractmethod
+  def log_cloud(self, points:PointCloud, step:int):
     raise NotImplementedError
   
   @abstractmethod

@@ -34,7 +34,7 @@ class LogExceptions(object):
         return result
 
 
-def parmap_list(f, xs, j=cpu_count() // 4, chunksize=1, pool=ThreadPool, progress=tqdm):
+def parmap_list(f, xs, j=cpu_count() // 2, chunksize=1, pool=ThreadPool, progress=tqdm):
 
   with pool(processes=j) as pool:
     iter = pool.imap(LogExceptions(f), xs, chunksize=chunksize)

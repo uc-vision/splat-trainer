@@ -9,6 +9,7 @@ from threading import Thread
 from queue import Queue
 
 from splat_trainer.logger.histogram import Histogram
+from splat_trainer.util.pointcloud import PointCloud
 
 from .logger import Logger
 
@@ -69,6 +70,18 @@ class WandbLogger(Logger):
       
       image = (image * 255).to(torch.uint8).cpu().numpy()
       image = wandb.Image(image, mode="RGB", caption=caption, file_type="jpg")
+      self.run.log({name : image}, step=step)
+
+    self.queue.put(log)
+
+
+  def log_cloud(self, name:str, points:PointCloud, step:int):
+    def log():
+      nonlocal points, step
+      
+      data = torch.cat([points.points, points.colors], dim=1).cpu().numpy()
+
+      image = wandb.Object3D(data)
       self.run.log({name : image}, step=step)
 
     self.queue.put(log)

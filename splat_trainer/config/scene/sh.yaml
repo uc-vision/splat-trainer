@@ -5,6 +5,7 @@ trainer:
     _target_: splat_trainer.scene.SHConfig
     learning_rates:
       position:     0.00001
+
       log_scaling:  0.02
       rotation:     0.0025
       alpha_logit:  0.05

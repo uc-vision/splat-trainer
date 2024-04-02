@@ -13,9 +13,16 @@ def split_rt(
     return R.contiguous(), t.contiguous()
 
 def join_rt(r, t):
-  T = torch.eye(4, device=r.device, dtype=r.dtype)
-  T[0:3, 0:3] = r
-  T[0:3, 3] = t
+  assert r.shape[-2:] == (3, 3), f"Expected (..., 3, 3) tensor, got: {r.shape}"
+  assert t.shape[-1] == 3, f"Expected (..., 3) tensor, got: {t.shape}"
+
+  prefix = t.shape[:-1]
+  assert prefix == t.shape[:-1], f"Expected same prefix shape, got: {r.shape} {t.shape}"
+
+  T = torch.eye(4, device=r.device, dtype=r.dtype).view((1, ) * (len(prefix)) + (4, 4)).expand(prefix + (4, 4)).contiguous()
+
+  T[..., 0:3, 0:3] = r
+  T[..., 0:3, 3] = t
   return T
   
 

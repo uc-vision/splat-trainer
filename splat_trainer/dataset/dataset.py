@@ -5,6 +5,7 @@ from beartype.typing import Iterator
 
 import torch
 
+from splat_trainer.camera_table.camera_table import CameraTable
 from splat_trainer.util.pointcloud import PointCloud
 
 
@@ -22,22 +23,10 @@ class Dataset(metaclass=ABCMeta):
     raise NotImplementedError
 
   @abstractmethod
-  def camera_poses(self) -> torch.nn.Module:
+  def camera_table(self) -> CameraTable:
     raise NotImplementedError
 
-  @abstractmethod
-  def camera_projection(self) -> torch.nn.Module:
-    raise NotImplementedError
-
-  @abstractmethod
-  def camera_shape(self) -> torch.Size:
-    raise NotImplementedError
-    
 
   @abstractmethod
   def pointcloud(self) -> PointCloud:
-    raise NotImplementedError
-
-  @abstractmethod
-  def scene_scale(self) -> float:
     raise NotImplementedError

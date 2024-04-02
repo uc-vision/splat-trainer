@@ -13,6 +13,7 @@ from torch.utils.tensorboard import SummaryWriter
 import tabulate
 
 from splat_trainer.logger.histogram import Histogram
+from splat_trainer.util.pointcloud import PointCloud
 
 from .logger import Logger
 
@@ -89,6 +90,9 @@ class TensorboardLogger(Logger):
                  dataformats="HWC",
                  global_step=step)
     
+  
+  def log_cloud(self, points:PointCloud, step:int):
+    pass # Not supported by tensorboard
 
   @beartype
   def log_histogram(self, name:str, values:torch.Tensor | Histogram, step:int):

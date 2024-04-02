@@ -1,3 +1,4 @@
+from itertools import product
 from pathlib import Path
 from beartype.typing import Iterator, Tuple
 from camera_geometry import FrameSet
@@ -8,9 +9,12 @@ import torch
 
 
 import numpy as np
-from splat_trainer.modules.pose_table import CameraRigTable
+from splat_trainer.camera_table.camera_table import CameraRigTable, CameraTable
+from splat_trainer.camera_table.pose_table import RigPoseTable
 from splat_trainer.dataset.dataset import CameraView, Dataset
-from splat_trainer.util.misc import split_stride, strided_indexes
+from splat_trainer.util.misc import split_stride
+
+from taichi_splatting.perspective import CameraParams
 
 from .loading import  PreloadedImages, preload_images
 from splat_trainer.util.pointcloud import PointCloud
@@ -21,23 +25,6 @@ def find_cloud(scan:FrameSet) -> Tuple[np.ndarray, np.ndarray]:
   return Path(scan.find_file(scan.models.sparse.filename))
 
 
-def camera_extents(scan:FrameSet):
-    cam_centers = np.stack([camera.location for camera in scan.expand_cameras()])
-    avg_cam_center = np.mean(cam_centers, axis=0, keepdims=True)
-
-    distances = np.linalg.norm(cam_centers - avg_cam_center, axis=0, keepdims=True)
-    diagonal = np.max(distances)
-
-    return avg_cam_center.reshape(3), diagonal * 1.1
-
-
-class RigProjectionTable(torch.nn.Module):
-  def __init__(self, projection:torch.Tensor):
-    super().__init__()
-    self.projection = torch.nn.Parameter(projection.to(torch.float32))
-
-  def forward(self, cam_idx):
-    return self.projection[cam_idx[1]]
 
 
 class ScanDataset(Dataset):
@@ -51,14 +38,6 @@ class ScanDataset(Dataset):
 
     scan = FrameSet.load_file(Path(scan_file))
     self.depth_range = depth_range
-
-    self.centre, self.camera_extent = camera_extents(scan)    
-    t = translate_44(*(-self.centre))
-    scan = scan.transform(t).copy(
-        metadata=dict(
-          source=scan_file,
-          offset=(-self.centre).tolist() )
-       )
 
     cameras = {k: optimal_undistorted(camera, alpha=0).scale_image(image_scale)
       for k, camera in scan.cameras.items()}
@@ -88,29 +67,25 @@ class ScanDataset(Dataset):
     return images
 
 
-  def camera_poses(self) -> CameraRigTable:
+  def camera_table(self) -> CameraTable:
     camera_t_rig = np.array(
        [camera.camera_t_parent for camera in self.scan.cameras.values()])
     
     world_t_rig = torch.from_numpy(np.array(self.scan.rig_poses)).to(torch.float32)
-
+    projections = np.array([camera.intrinsic for camera in self.scan.cameras.values()])
+    
     return CameraRigTable(
       rig_t_world=torch.linalg.inv(world_t_rig),
-      camera_t_rig=torch.from_numpy(camera_t_rig).to(torch.float32))
+      camera_t_rig=torch.from_numpy(camera_t_rig).to(torch.float32),
+      projections=torch.from_numpy(projections).to(torch.float32))
   
   def camera_shape(self) -> torch.Size:
     return torch.Size([self.scan.num_frames, len(self.scan.cameras)])
   
-  def camera_projection(self) -> torch.Tensor:
-    projections = np.array([camera.intrinsic for camera in self.scan.cameras.values()])
-    return RigProjectionTable(torch.from_numpy(projections).to(torch.float32))
 
   def pointcloud(self) -> PointCloud:
     pcd_filename = find_cloud(self.scan)    
     pcd = PointCloud.load(pcd_filename)
-
-
-    pcd.points -= torch.from_numpy(self.centre).to(torch.float32)
 
     counts = visibility(self.scan.expand_cameras(), pcd.points)
     print(f"Visible {(counts > 0).sum()} of {len(counts)} points")
@@ -118,5 +93,3 @@ class ScanDataset(Dataset):
     
     return pcd[counts > 0]
 
-  def scene_scale(self) -> float:
-    return self.camera_extent

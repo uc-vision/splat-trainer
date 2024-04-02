@@ -14,18 +14,21 @@ from splat_trainer.scene import GaussianScene
 
 @tensorclass
 class PointStatistics:
-  split_heuristics : torch.Tensor  # (N, 2) - accumulated split heuristics
-  visible : torch.Tensor  # (N, ) - number of times the point was rasterized
-  
-  age : torch.Tensor  # (N, ) - age of the point
+  split_score : torch.Tensor  # (N, ) - averaged split score
+  prune_cost : torch.Tensor  # (N, ) - max prune cost
 
+  visible : torch.Tensor  # (N, ) - number of times the point was visible
+  in_view : torch.Tensor  # (N, ) - number of times the point was in the view volume
+  
 
   @staticmethod
   def zeros(batch_size, device:Optional[torch.device] = None):
     return PointStatistics(
-      split_heuristics=torch.zeros(batch_size, 2, dtype=torch.float32, device=device),
-      visible=torch.zeros(batch_size, dtype=torch.float32, device=device),
-      age=torch.zeros(batch_size, dtype=torch.float32, device=device),
+      split_score=torch.zeros(batch_size, dtype=torch.float32, device=device),
+      prune_cost=torch.zeros(batch_size, dtype=torch.float32, device=device),
+
+      visible=torch.zeros(batch_size, dtype=torch.int16, device=device),
+      in_view=torch.zeros(batch_size, dtype=torch.int16, device=device),
       batch_size=(batch_size,)
     )
     
@@ -73,11 +76,11 @@ class TargetController(Controller):
 
 
   def log_histograms(self, logger:Logger, step:int):
-    split_score, prune_cost = self.points.split_heuristics.unbind(1) 
-    logger.log_histogram("points/log_split_score", 
-            split_score[split_score > 0 & split_score.isfinite()].log(), step)
-    logger.log_histogram("points/log_prune_cost", 
-            prune_cost[prune_cost > 0 & prune_cost.isfinite()].log(), step)
+
+    split_score, prune_cost = self.points.split_score.log(), self.points.prune_cost.log()
+
+    logger.log_histogram("points/log_split_score", split_score[split_score.isfinite()], step)
+    logger.log_histogram("points/log_prune_cost",  prune_cost[prune_cost.isfinite()], step)
     logger.log_histogram("points/visible", self.points.visible, step)
 
 
@@ -87,26 +90,25 @@ class TargetController(Controller):
       split_ratio = np.clip(self.target_count / self.scene.num_points, 
                               a_min=1/config.max_ratio, a_max=config.max_ratio)
         
-      t = step / self.total_steps
+      t = max(0, (2 * step / self.total_steps) - 1)
 
       candidates = torch.nonzero(self.points.visible >= config.min_visibility).squeeze(1)
       points = self.points[candidates]
 
-      prune_cost, split_score = points.split_heuristics.unbind(dim=1) 
 
       if candidates.shape[0] == 0:
         splittable, pruneable = [
           torch.zeros(0, dtype=torch.bool, device=candidates.device) for _ in range(2)]
 
       else:
-        # linear decay
-        quantile = self.splits_per_densify * (1 - t)
+        # quadratic decay
+        quantile = self.splits_per_densify * (1 - t)**2
 
-        split_thresh = torch.quantile(split_score, 1 - (quantile * split_ratio))
-        prune_thresh = torch.quantile(prune_cost, quantile * 1/split_ratio )
+        split_thresh = torch.quantile(points.split_score, 1 - (quantile * split_ratio))
+        prune_thresh = torch.quantile(points.prune_cost, quantile * 1/split_ratio )
 
-        pruneable = (prune_cost <= prune_thresh) 
-        splittable = (split_score > split_thresh) & ~pruneable
+        pruneable = (points.prune_cost <= prune_thresh) 
+        splittable = (points.split_score > split_thresh) & ~pruneable
       
       split_idx, prune_idx =  candidates[splittable], candidates[pruneable]
 
@@ -137,17 +139,22 @@ class TargetController(Controller):
 
   def add_rendering(self, rendering:Rendering): 
     idx = rendering.points_in_view
-    visible_mask = (rendering.split_heuristics[:, 1] > 0)
+    split_score, prune_cost = rendering.split_heuristics.unbind(1)
 
-    # accumulate split heuristics for visible points
-    h, vis = self.points.split_heuristics, self.points.visible
-    weight = torch.where(vis[idx] > 0, self.ema_alpha, 1.0).unsqueeze(1)
+    vis_mask = prune_cost > 0
+    vis_idx = idx[vis_mask]
+    points = self.points
 
-    h[idx] = (1 - weight) * h[idx] + weight * rendering.split_heuristics
-    vis[idx] += 1
+    # weight = torch.where(self.points.in_view[vis_idx] > 0, self.ema_alpha, 1.0)
+    # points.split_score[vis_idx] = (1 - weight) * points.split_score[vis_idx] + weight * split_score[vis_mask]
 
-    self.points.age += 1
-    return (visible_mask.sum().item(), idx.shape[0])
+    points.prune_cost[idx] = torch.maximum(points.prune_cost[idx], prune_cost)
+    points.split_score[idx] = torch.maximum(points.split_score[idx], split_score)
+
+    points.in_view[idx] += 1
+    points.visible[vis_idx] += 1
+
+    return (vis_idx.shape[0], idx.shape[0])
 
 
 

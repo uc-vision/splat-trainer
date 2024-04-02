@@ -20,10 +20,12 @@ trainer:
 
   scheduler:
     _target_: splat_trainer.scheduler.ExponentialDecay
-    final_decay:  0.01
+    base_lr: 1.0
+    final_lr:  0.1
     warmup_steps: 0
 
-  steps : 30000
+  steps : 20000
+
   eval_steps: 1000
 
   # Initialisation from a point cloud
@@ -33,6 +35,8 @@ trainer:
 
   ssim_weight: 0.2 # slower iteration but faster convergence
   ssim_scale: 0.5 # use ssim at a lower resolution (less computation)
+
+  max_blur: 4.0
 
 
 wait_exit: False
