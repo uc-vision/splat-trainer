@@ -38,11 +38,11 @@ class RigPoseTable(nn.Module):
     self.rig_t_world.normalize()
 
   
-  def forward(self, camera_index:torch.Tensor):
-    assert camera_index.dim() == 2 and camera_index.shape[1] == 2, \
-      f"Expected (rig_index, camera_index) N, 2 tensor, got: {camera_index.shape}"
+  def forward(self, image_index:torch.Tensor):
+    assert image_index.dim() == 2 and image_index.shape[1] == 2, \
+      f"Expected (rig_index, camera_index) N, 2 tensor, got: {image_index.shape}"
 
-    rig_index, camera_index = camera_index.unbind(-1)
+    rig_index, camera_index = image_index.unbind(-1)
 
     camera_t_rig = self.camera_t_rig(camera_index)
     rig_t_world = self.rig_t_world(rig_index)
@@ -54,19 +54,22 @@ class RigPoseTable(nn.Module):
 
 
 class PoseTable(nn.Module):
-  def __init__(self, m:torch.Tensor):
+  def __init__(self, m:torch.Tensor, requries_grad=False):
     super().__init__()
 
     assert m.shape[-2:] == (4, 4), f"Expected (..., 4, 4) tensor, got: {m.shape}"
 
+
     R, t = split_rt(m)
     q = roma.rotmat_to_unitquat(R)
 
-    self.t = nn.Parameter(t.to(torch.float32))
-    self.q = nn.Parameter(q.to(torch.float32))
+    self.t = nn.Parameter(t.to(torch.float32), requires_grad=requries_grad)
+    self.q = nn.Parameter(q.to(torch.float32), requires_grad=requries_grad)
 
 
   def forward(self, indices):
+    assert (indices < self.q.shape[0]).all(), f"Index out of bounds: {indices} >= {self.q.shape[0]}"
+
     q, t = F.normalize(self.q[indices], dim=-1), self.t[indices]
     return join_rt(roma.unitquat_to_rotmat(q), t)
   

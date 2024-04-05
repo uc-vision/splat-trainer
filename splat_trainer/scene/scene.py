@@ -15,7 +15,7 @@ class GaussianScene(metaclass=ABCMeta):
     raise NotImplementedError
 
   @abstractmethod
-  def render(self, cam_idx:torch.Tensor, camera_params:CameraParams, **options) -> Rendering:
+  def render(self, camera_params:CameraParams, cam_idx:torch.Tensor, **options) -> Rendering:
     raise NotImplementedError
 
   @abstractmethod

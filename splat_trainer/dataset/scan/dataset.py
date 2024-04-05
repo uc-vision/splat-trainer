@@ -1,29 +1,20 @@
-from itertools import product
 from pathlib import Path
 from beartype.typing import Iterator, Tuple
 from camera_geometry import FrameSet
 
-from camera_geometry.transforms import translate_44
 from camera_geometry.camera_models import optimal_undistorted
 import torch
 
 
 import numpy as np
 from splat_trainer.camera_table.camera_table import CameraRigTable, CameraTable
-from splat_trainer.camera_table.pose_table import RigPoseTable
 from splat_trainer.dataset.dataset import CameraView, Dataset
 from splat_trainer.util.misc import split_stride
 
-from taichi_splatting.perspective import CameraParams
 
 from .loading import  PreloadedImages, preload_images
 from splat_trainer.util.pointcloud import PointCloud
 from .visibility import visibility
-
-def find_cloud(scan:FrameSet) -> Tuple[np.ndarray, np.ndarray]:
-  assert 'sparse' in scan.models, "No sparse model found in scene.json"
-  return Path(scan.find_file(scan.models.sparse.filename))
-
 
 
 
@@ -73,11 +64,12 @@ class ScanDataset(Dataset):
     
     world_t_rig = torch.from_numpy(np.array(self.scan.rig_poses)).to(torch.float32)
     projections = np.array([camera.intrinsic for camera in self.scan.cameras.values()])
+
     
     return CameraRigTable(
       rig_t_world=torch.linalg.inv(world_t_rig),
       camera_t_rig=torch.from_numpy(camera_t_rig).to(torch.float32),
-      projections=torch.from_numpy(projections).to(torch.float32))
+      projection=torch.from_numpy(projections).to(torch.float32))
   
   def camera_shape(self) -> torch.Size:
     return torch.Size([self.scan.num_frames, len(self.scan.cameras)])
@@ -93,3 +85,7 @@ class ScanDataset(Dataset):
     
     return pcd[counts > 0]
 
+
+def find_cloud(scan:FrameSet) -> Tuple[np.ndarray, np.ndarray]:
+  assert 'sparse' in scan.models, "No sparse model found in scene.json"
+  return Path(scan.find_file(scan.models.sparse.filename))

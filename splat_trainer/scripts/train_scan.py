@@ -16,15 +16,14 @@ def main(cfg):
   import taichi as ti
   from splat_trainer.trainer import Trainer
 
-
-  with torch.no_grad():
-    torch.set_printoptions(precision=4, sci_mode=False)
-    np.set_printoptions(precision=4, suppress=True)
-    torch.set_float32_matmul_precision('high')
-    
-    print(config.pretty(cfg))
-    logger = hydra.utils.instantiate(cfg.logger, _partial_=True)(log_config=OmegaConf.to_container(cfg, resolve=True))
-    trainer = None
+  torch.set_grad_enabled(False)
+  torch.set_printoptions(precision=4, sci_mode=False)
+  np.set_printoptions(precision=4, suppress=True)
+  torch.set_float32_matmul_precision('high')
+  
+  print(config.pretty(cfg))
+  logger = hydra.utils.instantiate(cfg.logger, _partial_=True)(log_config=OmegaConf.to_container(cfg, resolve=True))
+  trainer = None
 
   try:
     ti.init(arch=ti.cuda, debug=cfg.debug, device_memory_GB=0.1)

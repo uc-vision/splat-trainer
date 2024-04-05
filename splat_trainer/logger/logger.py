@@ -19,7 +19,7 @@ class Logger(metaclass=ABCMeta):
     raise NotImplementedError
   
   @abstractmethod
-  def log_cloud(self, points:PointCloud, step:int):
+  def log_cloud(self, name_str, points:PointCloud, step:int):
     raise NotImplementedError
   
   @abstractmethod

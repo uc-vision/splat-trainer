@@ -21,6 +21,8 @@ from taichi_splatting.misc.parameter_class import ParameterClass
 from taichi_splatting import Gaussians3D, RasterConfig, Rendering
 
 from taichi_splatting.renderer import gaussians_in_view, project_to_image, render_projected
+from taichi_splatting.perspective import CameraParams
+
 from splat_trainer.util.pointcloud import PointCloud
 
 
@@ -171,9 +173,8 @@ class TCNNScene(GaussianScene):
     self.points.step()
     self.color_opt.step()
 
-    with torch.no_grad():
-      self.points.rotation = torch.nn.Parameter(
-        F.normalize(self.points.rotation.detach(), dim=1), requires_grad=True)
+    self.points.rotation = torch.nn.Parameter(
+      F.normalize(self.points.rotation.detach(), dim=1), requires_grad=True)
 
   def zero_grad(self):
     self.points.zero_grad()
@@ -218,9 +219,8 @@ class TCNNScene(GaussianScene):
     
 
 
-  def render(self, image_idx:torch.Tensor, **options) -> Rendering:
-    camera_params = self.camera_table(image_idx)
-  
+  def render(self, camera_params:CameraParams, image_idx:torch.Tensor, **options) -> Rendering:
+    
     config = self.raster_config
     indexes = gaussians_in_view(self.points.position, camera_params, config.tile_size, config.margin_tiles)
 
@@ -229,7 +229,7 @@ class TCNNScene(GaussianScene):
 
 
     return render_projected(indexes, gaussians2d, features, depthvars, 
-                  camera_params, config, **options)
+            camera_params, config, **options)
 
 
 

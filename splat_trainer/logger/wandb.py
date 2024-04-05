@@ -76,6 +76,7 @@ class WandbLogger(Logger):
 
 
   def log_cloud(self, name:str, points:PointCloud, step:int):
+
     def log():
       nonlocal points, step
       

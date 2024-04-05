@@ -19,7 +19,6 @@ from taichi_splatting.misc.parameter_class import ParameterClass
 from taichi_splatting import Gaussians3D, RasterConfig, render_gaussians, Rendering
 from taichi_splatting.perspective import CameraParams
 
-from splat_viewer.gaussians import Gaussians
 
 from splat_trainer.util.pointcloud import PointCloud
 
@@ -84,9 +83,8 @@ class SHScene(GaussianScene):
     self.points.feature.grad[..., 1:] /= self.config.sh_ratio
     self.points.step()
 
-    with torch.no_grad():
-      self.points.rotation = torch.nn.Parameter(
-        F.normalize(self.points.rotation.detach(), dim=1), requires_grad=True)
+    self.points.rotation = torch.nn.Parameter(
+      F.normalize(self.points.rotation.detach(), dim=1), requires_grad=True)
 
   def zero_grad(self):
     self.points.zero_grad()
@@ -108,7 +106,11 @@ class SHScene(GaussianScene):
 
     
   def log(self, logger:Logger, step:int):
-    point_cloud = PointCloud(self.gaussians.position, sh_to_rgb(self.gaussians.feature[:, :, 0]))
+    
+    point_cloud = PointCloud(
+      self.gaussians.position.detach(), 
+      sh_to_rgb(self.gaussians.feature[:, :, 0]),
+      batch_size=self.gaussians.shape[:1] )
     logger.log_cloud("point_cloud", point_cloud, step=step)
     
     
@@ -118,10 +120,9 @@ class SHScene(GaussianScene):
       return Gaussians3D.from_tensordict(self.points.tensors)
       
 
-  def render(self, cam_idx:torch.Tensor, 
+  def render(self, camera_params:CameraParams, cam_idx:torch.Tensor, 
              **options) -> Rendering:
     
-    camera_params = self.camera_table(cam_idx)
     return render_gaussians(self.gaussians, 
                      use_sh        = True,
                      config        = self.raster_config,

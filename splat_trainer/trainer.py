@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 import math
 import os
+from pathlib import Path
 
 from beartype.typing import Optional
 import numpy as np
@@ -67,6 +68,7 @@ class Trainer:
     self.logger = logger
 
     self.blur_cov = config.max_blur
+    self.output_path = Path(config.output_path or os.getcwd())
 
     self.ssim =  MultiScaleStructuralSimilarityIndexMeasure(
         data_range=1.0, kernel_size=11).to(self.device)
@@ -94,14 +96,15 @@ class Trainer:
 
   def camera_params(self, cam_idx:torch.Tensor, image:torch.Tensor):
         near, far = self.dataset.depth_range
+        camera_t_world, image_t_camera = self.camera_table(cam_idx)
 
         return perspective.CameraParams(
-            T_camera_world=self.camera_poses(cam_idx.unsqueeze(0)),
-            T_image_camera=self.camera_projection(cam_idx).squeeze(0),
+            T_camera_world=camera_t_world.squeeze(0),
+            T_image_camera=image_t_camera.squeeze(0),
             image_size=(image.shape[1], image.shape[0]),
             near_plane=near,
             far_plane=far,
-            blur_cov=0.0
+            blur_cov=self.blur_cov
         ).to(self.device, dtype=torch.float32)
 
 
@@ -128,30 +131,29 @@ class Trainer:
     radius_hist = Histogram.empty(range=(-1, 3), num_bins=20, device=self.device) 
     log_indexes = strided_indexes(log_count, len(data)) 
 
-    with torch.no_grad():
-      pbar = tqdm(total=len(data), desc=f"rendering {name}", leave=False)
-      for i, (filename, cam_idx, image) in enumerate(self.iter_data(data)):
+    pbar = tqdm(total=len(data), desc=f"rendering {name}", leave=False)
+    for i, (filename, camera_params, cam_idx, image) in enumerate(self.iter_data(data)):
 
-        rendering = self.scene.render(cam_idx, compute_radii=True, render_depth=True)
-        psnr = compute_psnr(rendering.image, image)
-        l1 = torch.nn.functional.l1_loss(rendering.image, image)
+      rendering = self.scene.render(camera_params, cam_idx, compute_radii=True, render_depth=True)
+      psnr = compute_psnr(rendering.image, image)
+      l1 = torch.nn.functional.l1_loss(rendering.image, image)
 
-        radius_hist = radius_hist.append(rendering.radii.log() / math.log(10.0), trim=False)
+      radius_hist = radius_hist.append(rendering.radii.log() / math.log(10.0), trim=False)
 
-        if i in log_indexes:
-          image_id = filename.replace("/", "_")
-          self.log_image(f"{name}_images/{image_id}/render", rendering.image, caption=f"{filename} PSNR={psnr:.2f} L1={l1:.2f}")
-          self.log_image(f"{name}_images/{image_id}/depth", 
-              colorize_depth(self.color_map, rendering.depth, 0.1), caption=filename)
+      if i in log_indexes:
+        image_id = filename.replace("/", "_")
+        self.log_image(f"{name}_images/{image_id}/render", rendering.image, caption=f"{filename} PSNR={psnr:.2f} L1={l1:.2f}")
+        self.log_image(f"{name}_images/{image_id}/depth", 
+            colorize_depth(self.color_map, rendering.depth, 0.1), caption=filename)
 
-          if self.step == 0:
-            self.log_image(f"{name}_images/{image_id}/image", image, caption=filename)
-        
-        eval = dict(filename=filename, psnr = psnr.item(), l1 = l1.item())
-        rows.append(eval)
-        
-        pbar.update(1)
-        pbar.set_postfix(psnr=f"{psnr.item():.2f}", l1=f"{l1.item():.4f}")
+        if self.step == 0:
+          self.log_image(f"{name}_images/{image_id}/image", image, caption=filename)
+      
+      eval = dict(filename=filename, psnr = psnr.item(), l1 = l1.item())
+      rows.append(eval)
+      
+      pbar.update(1)
+      pbar.set_postfix(psnr=f"{psnr.item():.2f}", l1=f"{l1.item():.4f}")
 
     self.logger.log_evaluations(f"{name}/evals", rows, step=self.step)
     totals = transpose_rows(rows)
@@ -175,7 +177,7 @@ class Trainer:
     return {**train, **val}
   
   def write_checkpoint(self):
-    self.scene.write_to(self.config.output_path / "point_cloud" , f"model_{self.step}")
+    self.scene.write_to(self.output_path / "point_cloud" , f"model_{self.step}")
     self.scene.log(self.logger, self.step)
 
   def iter_train(self):
@@ -187,13 +189,13 @@ class Trainer:
 
   def iter_data(self, iter):
     for filename, image, image_idx in iter:
-      with torch.no_grad():
-        image, image_idx = [x.to(self.device, non_blocking=True) 
-                      for x in (image, image_idx)]
-        
-        image = image.to(dtype=torch.float) / 255.0
+      image, image_idx = [x.to(self.device, non_blocking=True) 
+                    for x in (image, image_idx)]
       
-      yield filename, image_idx.squeeze(0), image
+      image = image.to(dtype=torch.float) / 255.0
+      camera_params = self.camera_params(image_idx, image)
+
+    yield filename, camera_params, image_idx.squeeze(0), image
 
   @torch.compile
   def compute_ssim(self, image, ref, scale=1.0):
@@ -215,11 +217,11 @@ class Trainer:
       return l1, dict(l1=l1.item())
 
 
-  def training_step(self, filename, image_idx, image, timer):
+  def training_step(self, filename, camera_params, image_idx, image, timer):
     self.scene.zero_grad()
 
     with timer:
-      rendering = self.scene.render(image_idx, compute_split_heuristics=True)
+      rendering = self.scene.render(camera_params, image_idx, compute_split_heuristics=True)
 
       loss, losses = self.losses(rendering, image)
       loss.backward()
@@ -245,16 +247,16 @@ class Trainer:
 
     while self.step < self.config.steps:
       if self.step % self.config.eval_steps == 0:
-        eval_metrics = self.evaluate()
-        lr_scale = self.config.scheduler(self.step, self.config.steps)
+          eval_metrics = self.evaluate()
+          lr_scale = self.config.scheduler(self.step, self.config.steps)
 
-        self.scene.update_learning_rate(lr_scale)
-        
-        t = self.step / self.config.steps
-        self.blur_cov = self.config.max_blur * (1 - t)**3
+          self.scene.update_learning_rate(lr_scale)
+          
+          t = self.step / self.config.steps
+          self.blur_cov = self.config.max_blur * (1 - t)**3
 
-        self.log_values("train", dict(lr_scale=lr_scale, blur_cov=self.blur_cov))
-        self.write_checkpoint()
+          self.log_values("train", dict(lr_scale=lr_scale, blur_cov=self.blur_cov))
+          self.write_checkpoint()
 
       if since_densify >= self.config.densify_interval:
         self.controller.log_histograms(self.logger, self.step)
@@ -265,9 +267,10 @@ class Trainer:
       
       torch.cuda.empty_cache()
 
-      with step_timer:
-        steps = [self.training_step(*next(iter_train), timer=timer) 
-                for timer in self.render_timers]
+      with torch.enable_grad():
+        with step_timer:
+          steps = [self.training_step(*next(iter_train), timer=timer) 
+                  for timer in self.render_timers]
 
       since_densify += len(steps)
 

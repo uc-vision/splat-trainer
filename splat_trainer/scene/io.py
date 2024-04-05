@@ -120,7 +120,7 @@ def from_plydata(plydata:plyfile.PlyData, with_sh:bool=False) -> Gaussians3D:
 def write_gaussians(filename:Path | str, gaussians:Gaussians3D, with_sh:bool = False):
   filename = Path(filename)
 
-  plydata = to_plydata(gaussians, with_sh=with_sh)
+  plydata = to_plydata(gaussians.detach(), with_sh=with_sh)
   plydata.write(str(filename))
 
 

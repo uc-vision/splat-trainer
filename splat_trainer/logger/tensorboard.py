@@ -91,7 +91,7 @@ class TensorboardLogger(Logger):
                  global_step=step)
     
   
-  def log_cloud(self, points:PointCloud, step:int):
+  def log_cloud(self, name:str, points:PointCloud, step:int):
     pass # Not supported by tensorboard
 
   @beartype
