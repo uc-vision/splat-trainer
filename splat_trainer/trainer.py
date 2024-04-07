@@ -75,6 +75,7 @@ class Trainer:
 
     self.camera_table = dataset.camera_table()
     self.camera_table.to(self.device)
+    self.camera_table.requires_grad_(False)
     
 
     print(f"Initializing model from {dataset}")
@@ -177,7 +178,7 @@ class Trainer:
     val = self.evaluate_dataset("val", self.dataset.val(), log_count=n_logged)
 
     self.scene.write_to(self.output_path / "point_cloud" , f"model_{self.step}")
-    # self.scene.log(self.logger, self.step)
+    self.scene.log(self.logger, self.step)
 
     return {**train, **val}
   
@@ -198,7 +199,7 @@ class Trainer:
       image = image.to(dtype=torch.float) / 255.0
       camera_params = self.camera_params(image_idx, image)
 
-    yield filename, camera_params, image_idx.squeeze(0), image
+      yield filename, camera_params, image_idx.squeeze(0), image
 
   @torch.compile
   def compute_ssim(self, image, ref, scale=1.0):

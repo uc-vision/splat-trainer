@@ -58,7 +58,7 @@ class ScanDataset(Dataset):
     return images
 
 
-  def camera_table(self) -> CameraTable:
+  def camera_table(self) -> CameraRigTable:
     camera_t_rig = np.array(
        [camera.camera_t_parent for camera in self.scan.cameras.values()])
     

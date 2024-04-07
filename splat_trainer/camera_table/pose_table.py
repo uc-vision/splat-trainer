@@ -54,7 +54,7 @@ class RigPoseTable(nn.Module):
 
 
 class PoseTable(nn.Module):
-  def __init__(self, m:torch.Tensor, requries_grad=False):
+  def __init__(self, m:torch.Tensor):
     super().__init__()
 
     assert m.shape[-2:] == (4, 4), f"Expected (..., 4, 4) tensor, got: {m.shape}"
@@ -63,8 +63,8 @@ class PoseTable(nn.Module):
     R, t = split_rt(m)
     q = roma.rotmat_to_unitquat(R)
 
-    self.t = nn.Parameter(t.to(torch.float32), requires_grad=requries_grad)
-    self.q = nn.Parameter(q.to(torch.float32), requires_grad=requries_grad)
+    self.t = nn.Parameter(t.to(torch.float32))
+    self.q = nn.Parameter(q.to(torch.float32))
 
 
   def forward(self, indices):

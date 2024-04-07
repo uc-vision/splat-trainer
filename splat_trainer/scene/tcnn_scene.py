@@ -141,7 +141,7 @@ class TCNNScene(GaussianScene):
     
     self.camera_table = camera_table
     
-    image_features = torch.zeros(*camera_table.shape(),  config.image_features, dtype=torch.float32, device=device)
+    image_features = torch.zeros(*camera_table.shape,  config.image_features, dtype=torch.float32, device=device)
     self.image_features = torch.nn.Parameter(image_features, requires_grad=True)
 
     self.color_opt = self.make_color_optimizer()

@@ -1,6 +1,6 @@
 
 import copy
-from dataclasses import  dataclass, replace
+from dataclasses import  asdict, dataclass, replace
 from pathlib import Path
 from beartype import beartype
 from omegaconf import DictConfig, OmegaConf
@@ -122,6 +122,7 @@ class SHScene(GaussianScene):
 
   def render(self, camera_params:CameraParams, cam_idx:torch.Tensor, 
              **options) -> Rendering:
+    
     
     return render_gaussians(self.gaussians, 
                      use_sh        = True,
