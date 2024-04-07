@@ -73,7 +73,9 @@ class Trainer:
     self.ssim =  MultiScaleStructuralSimilarityIndexMeasure(
         data_range=1.0, kernel_size=11).to(self.device)
 
-    self.camera_table = dataset.camera_table().to(self.device)
+    self.camera_table = dataset.camera_table()
+    self.camera_table.to(self.device)
+    
 
     print(f"Initializing model from {dataset}")
     initial_gaussians = from_pointcloud(dataset.pointcloud(), 
@@ -174,11 +176,12 @@ class Trainer:
     train = self.evaluate_dataset("train", self.dataset.train(shuffle=False), log_count=n_logged)
     val = self.evaluate_dataset("val", self.dataset.val(), log_count=n_logged)
 
+    self.scene.write_to(self.output_path / "point_cloud" , f"model_{self.step}")
+    # self.scene.log(self.logger, self.step)
+
     return {**train, **val}
   
-  def write_checkpoint(self):
-    self.scene.write_to(self.output_path / "point_cloud" , f"model_{self.step}")
-    self.scene.log(self.logger, self.step)
+
 
   def iter_train(self):
     while True:
@@ -256,7 +259,6 @@ class Trainer:
           self.blur_cov = self.config.max_blur * (1 - t)**3
 
           self.log_values("train", dict(lr_scale=lr_scale, blur_cov=self.blur_cov))
-          self.write_checkpoint()
 
       if since_densify >= self.config.densify_interval:
         self.controller.log_histograms(self.logger, self.step)

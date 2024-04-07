@@ -83,6 +83,7 @@ class TCNNConfig(GaussianSceneConfig):
     gaussians = gaussians.replace(feature=features).to(device)
 
     self.pretrain_colors(gaussians.feature, color_model, color_targets, iters=1000)
+    
     centre, extent = camera_extents(camera_table)
     config = self.with_scene_extent(extent)
 
@@ -90,6 +91,7 @@ class TCNNConfig(GaussianSceneConfig):
 
 
   def pretrain_colors(self, features, color_model, target_colors, iters):
+    with torch.enable_grad():
       n = target_colors.shape[0]
       device = features.device
 

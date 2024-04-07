@@ -75,10 +75,7 @@ class COLMAPDataset(Dataset):
     return MultiCameraTable(
       camera_t_world = torch.tensor(np.array(self.camera_t_world), dtype=torch.float32),
       projection = torch.tensor(np.array(self.projections), dtype=torch.float32),
-      image_size = torch.tensor(np.array(self.image_sizes), dtype=torch.long),
-
-      camera_idx = torch.tensor(self.camera_idx, dtype=torch.long),
-      depth_range=self.depth_range)
+      camera_idx = torch.tensor(self.camera_idx, dtype=torch.long))
 
 
   def pointcloud(self) -> PointCloud:  

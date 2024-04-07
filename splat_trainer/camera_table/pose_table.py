@@ -77,6 +77,7 @@ class PoseTable(nn.Module):
     self.q.data = F.normalize(self.q.data, dim=-1)
     return self
 
+  @property
   def shape(self):
     return self.t.shape[:-1]
 

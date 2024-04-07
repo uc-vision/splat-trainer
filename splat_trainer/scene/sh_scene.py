@@ -109,7 +109,7 @@ class SHScene(GaussianScene):
     
     point_cloud = PointCloud(
       self.gaussians.position.detach(), 
-      sh_to_rgb(self.gaussians.feature[:, :, 0]),
+      255 * sh_to_rgb(self.gaussians.feature[:, :, 0]),
       batch_size=self.gaussians.shape[:1] )
     logger.log_cloud("point_cloud", point_cloud, step=step)
     
