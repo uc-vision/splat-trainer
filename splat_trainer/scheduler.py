@@ -2,6 +2,8 @@ import abc
 from dataclasses import  dataclass
 import math
 
+import torch
+
 class Scheduler(metaclass=abc.ABCMeta):
   @abc.abstractmethod
   def __call__(self, step:int, total_steps:int) -> float:
@@ -30,3 +32,7 @@ class Uniform(Scheduler):
 
   def __call__(self, step:int, total_steps:int):
     return self.base_lr
+  
+
+
+

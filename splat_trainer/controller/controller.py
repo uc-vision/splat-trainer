@@ -1,5 +1,6 @@
 from abc import ABCMeta, abstractmethod
 from taichi_splatting import Rendering
+import torch
 
 from splat_trainer.scene import GaussianScene
 
@@ -17,7 +18,7 @@ class Controller(metaclass=ABCMeta):
     raise NotImplementedError
 
   @abstractmethod
-  def add_rendering(self, rendering:Rendering): 
+  def add_rendering(self, rendering:Rendering) -> tuple[torch.Tensor, torch.Tensor]: 
     raise NotImplementedError
   
   @abstractmethod

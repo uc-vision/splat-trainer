@@ -13,6 +13,9 @@ config.add_resolvers()
 
 @hydra.main(config_name="config", config_path="../config", version_base="1.2")
 def main(cfg):
+  train_with_config(cfg)
+
+def train_with_config(cfg):
   import taichi as ti
   from splat_trainer.trainer import Trainer
 

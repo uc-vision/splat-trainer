@@ -113,7 +113,7 @@ class ThresholdController(Controller):
     self.points.point_grad[idx] += point_grad
     self.points.visible[idx] += visible_mask
 
-    return (visible_mask.sum().item(), idx.shape[0])
+    return (idx[visible_mask], idx)
 
 
 

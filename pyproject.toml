@@ -11,7 +11,7 @@ maintainers = [
 ]
 
 dependencies = [
-  'taichi-splatting >= 0.11.0',
+  'taichi-splatting >= 0.12.0',
   'tqdm',
   'plyfile',
   'pypcd4',
@@ -19,7 +19,12 @@ dependencies = [
   'omegaconf',
   'roma>=1.4',
   'tabulate',
-  'torch-metrics',
+  'torchmetrics',
+  'opencv-python',
+  'pycolmap',
+  'scipy',
+  'tensorboard',
+  'wandb'
 ]
 
 
@@ -40,7 +45,7 @@ build-backend = "setuptools.build_meta"
 dependency_links = ["https://pypi.taichi.graphics/simple/"]
 
 [project.scripts]  # Optional
-splat-trainer = "train-scan=splat_trainer.scripts.train_scan:main"
+splat-trainer = "splat_trainer.scripts.train_scan:main"
 
 
 [tool.setuptools.package-data]

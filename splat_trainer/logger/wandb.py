@@ -80,7 +80,7 @@ class WandbLogger(Logger):
     def log():
       nonlocal points, step
       
-      data = torch.cat([points.points, points.colors], dim=1).cpu().numpy()
+      data = torch.cat([points.points, points.colors * 255], dim=1).cpu().numpy()
 
       image = wandb.Object3D(data)
       self.run.log({name : image}, step=step)

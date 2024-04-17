@@ -32,8 +32,7 @@ def to_plydata(gaussians:Gaussians3D, with_sh:bool=False) -> plyfile.PlyData:
     assert gaussians.feature.ndim == 2, f"Expected ndim=2 feature tensor, got {gaussians.feature.shape}"
 
     num_features = gaussians.feature.shape[1] 
-    dtype += [('f_' + str(i), 'f4') for i in range(num_features - 3)]
-
+    dtype += [('f_' + str(i), 'f4') for i in range(num_features)]
 
   vertex = np.zeros(gaussians.batch_size[0], dtype=dtype )
 

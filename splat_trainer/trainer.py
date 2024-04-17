@@ -15,6 +15,7 @@ from taichi_splatting import Rendering, perspective
 from tqdm import tqdm
 
 from splat_trainer.dataset import Dataset
+from splat_trainer.image_scaler import ImageScaler, NullScaler
 from splat_trainer.gaussians.loading import from_pointcloud
 
 from splat_trainer.logger import Logger
@@ -39,7 +40,7 @@ class TrainConfig:
   load_model: Optional[str] = None
 
   num_neighbors:int   = 3
-  initial_scale:float = 0.5
+  initial_point_scale:float = 0.5
   initial_alpha:float = 0.5 
 
   densify_interval: int = 50
@@ -52,10 +53,11 @@ class TrainConfig:
   ssim_weight: float = 0.0
   ssim_scale: float = 0.5
 
-  max_blur: float = 5.0
+  blur_cov: float = 0.3
 
-  scheduler: Scheduler = Uniform()
-
+  lr_scheduler: Scheduler = Uniform()
+  image_scaler: ImageScaler = NullScaler()
+  
 
 class Trainer:
   def __init__(self, dataset:Dataset, config:TrainConfig, logger:Logger):
@@ -66,11 +68,12 @@ class Trainer:
     self.config = config
     self.step = 0
     self.logger = logger
+    self.image_scale = self.config.image_scaler.update(0)
 
-    self.blur_cov = config.max_blur
+    self.blur_cov = config.blur_cov
     self.output_path = Path(config.output_path or os.getcwd())
 
-    self.ssim =  MultiScaleStructuralSimilarityIndexMeasure(
+    self.ssim = MultiScaleStructuralSimilarityIndexMeasure(
         data_range=1.0, kernel_size=11).to(self.device)
 
     self.camera_table = dataset.camera_table()
@@ -80,7 +83,7 @@ class Trainer:
 
     print(f"Initializing model from {dataset}")
     initial_gaussians = from_pointcloud(dataset.pointcloud(), 
-                                        initial_scale=config.initial_scale,
+                                        initial_scale=config.initial_point_scale,
                                         initial_alpha=config.initial_alpha,
                                         num_neighbors=config.num_neighbors)
     
@@ -178,7 +181,7 @@ class Trainer:
     val = self.evaluate_dataset("val", self.dataset.val(), log_count=n_logged)
 
     self.scene.write_to(self.output_path / "point_cloud" , f"model_{self.step}")
-    self.scene.log(self.logger, self.step)
+    # self.scene.log(self.logger, self.step)
 
     return {**train, **val}
   
@@ -201,8 +204,8 @@ class Trainer:
 
       yield filename, camera_params, image_idx.squeeze(0), image
 
-  @torch.compile
-  def compute_ssim(self, image, ref, scale=1.0):
+  @torch.compile()
+  def compute_ssim(self, image:torch.Tensor, ref:torch.Tensor, scale:float=1.0):
       image1 = ref.unsqueeze(0).permute(0, 3, 1, 2).to(memory_format=torch.channels_last)
       image2 = image.unsqueeze(0).permute(0, 3, 1, 2).to(memory_format=torch.channels_last)
 
@@ -222,7 +225,7 @@ class Trainer:
 
 
   def training_step(self, filename, camera_params, image_idx, image, timer):
-    self.scene.zero_grad()
+    image, camera_params = self.config.image_scaler(image, camera_params, self.image_scale)
 
     with timer:
       rendering = self.scene.render(camera_params, image_idx, compute_split_heuristics=True)
@@ -230,11 +233,13 @@ class Trainer:
       loss, losses = self.losses(rendering, image)
       loss.backward()
 
-    self.scene.step()
     (visible, in_view) =  self.controller.add_rendering(rendering)
+    self.scene.step(visible)
+
+    self.scene.zero_grad()
 
     self.step += 1
-    return dict(**losses, visible=visible, in_view=in_view)
+    return dict(**losses, visible=visible.shape[0], in_view=in_view.shape[0])
 
 
   def train(self):
@@ -250,16 +255,16 @@ class Trainer:
     step_timer = CudaTimer()
 
     while self.step < self.config.steps:
+
+
       if self.step % self.config.eval_steps == 0:
           eval_metrics = self.evaluate()
-          lr_scale = self.config.scheduler(self.step, self.config.steps)
+          self.image_scale = self.config.image_scaler.update(self.step)
 
+          lr_scale = self.config.lr_scheduler(self.step, self.config.steps)
           self.scene.update_learning_rate(lr_scale)
-          
-          t = self.step / self.config.steps
-          self.blur_cov = self.config.max_blur * (1 - t)**3
 
-          self.log_values("train", dict(lr_scale=lr_scale, blur_cov=self.blur_cov))
+          self.log_values("train", dict(lr_scale=lr_scale, blur_cov=self.blur_cov, image_scale=self.image_scale))
 
       if since_densify >= self.config.densify_interval:
         self.controller.log_histograms(self.logger, self.step)

@@ -143,18 +143,20 @@ class TargetController(Controller):
 
     vis_mask = prune_cost > 0
     vis_idx = idx[vis_mask]
+
     points = self.points
 
     # weight = torch.where(self.points.in_view[vis_idx] > 0, self.ema_alpha, 1.0)
     # points.split_score[vis_idx] = (1 - weight) * points.split_score[vis_idx] + weight * split_score[vis_mask]
 
-    points.prune_cost[idx] = torch.maximum(points.prune_cost[idx], prune_cost)
-    points.split_score[idx] = torch.maximum(points.split_score[idx], split_score)
+    points.prune_cost[idx] = torch.maximum(points.prune_cost[idx]  * self.ema_alpha, prune_cost) 
+    points.split_score[idx] = torch.maximum(points.split_score[idx] * self.ema_alpha, split_score )  
+
 
     points.in_view[idx] += 1
     points.visible[vis_idx] += 1
 
-    return (vis_idx.shape[0], idx.shape[0])
+    return (vis_idx, idx)
 
 
 

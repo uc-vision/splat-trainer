@@ -79,7 +79,7 @@ class SHScene(GaussianScene):
   def __repr__(self):
     return f"GaussianScene({self.points.position.shape[0]} points)"
 
-  def step(self):
+  def step(self, visible:torch.Tensor):
     self.points.feature.grad[..., 1:] /= self.config.sh_ratio
     self.points.step()
 
@@ -109,7 +109,7 @@ class SHScene(GaussianScene):
     
     point_cloud = PointCloud(
       self.gaussians.position.detach(), 
-      255 * sh_to_rgb(self.gaussians.feature[:, :, 0]),
+      sh_to_rgb(self.gaussians.feature[:, :, 0]),
       batch_size=self.gaussians.shape[:1] )
     logger.log_cloud("point_cloud", point_cloud, step=step)
     

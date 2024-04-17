@@ -11,7 +11,7 @@ from splat_trainer.logger.logger import Logger
 
 class GaussianScene(metaclass=ABCMeta):  
   @abstractmethod
-  def step(self):
+  def step(self, visible:torch.Tensor):
     raise NotImplementedError
 
   @abstractmethod

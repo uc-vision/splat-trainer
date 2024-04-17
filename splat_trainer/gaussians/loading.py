@@ -5,15 +5,10 @@ import torch.nn.functional as F
 
 from splat_trainer.util.misc import inverse_sigmoid
 from splat_trainer.util.pointcloud import PointCloud
-from splat_viewer.gaussians import Workspace
+
 
 from taichi_splatting import Gaussians3D
   
-
-def load_workspace(workspace_path, model_name = None) -> Gaussians3D:
-  workspace = Workspace.load(workspace_path)
-  return workspace.load_model(model=model_name).to_gaussians3d()
-
 
 def from_pointcloud(pcd:PointCloud, 
                     initial_scale:float = 0.5,
