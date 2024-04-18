@@ -15,6 +15,7 @@ from .logger import Logger
 
 class WandbLogger(Logger):
   def __init__(self, project:str | None, log_config:dict, name:str | None=None, dir:str | None = None):
+
     if dir is not None:
       dir = Path(dir).mkdir(parents=True, exist_ok=True)
     self.run = wandb.init(project=project, name=name, config=log_config, dir=dir, settings=wandb.Settings(start_method='thread'))

@@ -24,7 +24,8 @@ dependencies = [
   'pycolmap',
   'scipy',
   'tensorboard',
-  'wandb'
+  'wandb',
+  'tinycudann @ git+https://github.com/NVlabs/tiny-cuda-nn/#subdirectory=bindings/torch'
 ]
 
 
