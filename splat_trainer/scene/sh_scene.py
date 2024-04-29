@@ -16,8 +16,8 @@ from splat_trainer.gaussians.split import  split_gaussians_uniform
 from splat_trainer.util.misc import  rgb_to_sh, sh_to_rgb
 
 from taichi_splatting.misc.parameter_class import ParameterClass
-from taichi_splatting import Gaussians3D, RasterConfig, render_gaussians, Rendering
-from taichi_splatting.perspective import CameraParams
+from taichi_splatting.conic import Gaussians3D, RasterConfig, render_gaussians, Rendering
+from taichi_splatting import CameraParams
 
 
 from splat_trainer.util.pointcloud import PointCloud

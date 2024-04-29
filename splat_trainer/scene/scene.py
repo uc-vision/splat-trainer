@@ -2,7 +2,7 @@ from abc import ABCMeta, abstractmethod
 import torch
 
 from taichi_splatting import Gaussians3D, Rendering
-from taichi_splatting.perspective import CameraParams
+from taichi_splatting import CameraParams
 
 from splat_trainer.camera_table.camera_table import CameraTable
 from splat_trainer.logger.logger import Logger
@@ -35,8 +35,8 @@ class GaussianScene(metaclass=ABCMeta):
     raise NotImplementedError
   
 
-  @abstractmethod
   @property
+  @abstractmethod
   def num_points(self) -> int:
     raise NotImplementedError
 

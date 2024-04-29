@@ -21,8 +21,8 @@ from splat_trainer.gaussians.split import split_gaussians_uniform
 from taichi_splatting.misc.parameter_class import ParameterClass
 from taichi_splatting import Gaussians3D, RasterConfig, Rendering
 
-from taichi_splatting.renderer import gaussians_in_view, render_projected, project_to_image
-from taichi_splatting.perspective import CameraParams
+from taichi_splatting.conic.renderer import gaussians_in_view, render_projected, project_to_conic
+from taichi_splatting import CameraParams
 
 from splat_trainer.util.pointcloud import PointCloud
 
@@ -231,7 +231,7 @@ class TCNNScene(GaussianScene):
     indexes = gaussians_in_view(self.points.position, camera_params, config.tile_size, config.margin_tiles)
 
     features = self.evaluate_colors(indexes, image_idx, camera_params.camera_position)
-    gaussians2d, depthvars = project_to_image(self.gaussians, indexes, camera_params)
+    gaussians2d, depthvars = project_to_conic(self.gaussians, indexes, camera_params)
 
 
     return render_projected(indexes, gaussians2d, features, depthvars, 

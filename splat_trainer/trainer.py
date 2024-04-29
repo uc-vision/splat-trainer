@@ -13,7 +13,7 @@ from torchmetrics.image  import MultiScaleStructuralSimilarityIndexMeasure
 from termcolor import colored
 
  
-from taichi_splatting import Rendering, perspective
+from taichi_splatting import Rendering, CameraParams
 from tqdm import tqdm
 
 from splat_trainer.dataset import Dataset
@@ -118,7 +118,7 @@ class Trainer:
         near, far = self.dataset.depth_range
         camera_t_world, image_t_camera = self.camera_table(cam_idx)
 
-        return perspective.CameraParams(
+        return CameraParams(
             T_camera_world=camera_t_world.squeeze(0),
             T_image_camera=image_t_camera.squeeze(0),
             image_size=(image.shape[1], image.shape[0]),

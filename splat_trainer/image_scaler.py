@@ -5,7 +5,7 @@ from beartype import beartype
 import torch
 import torch.nn.functional as F
 
-from taichi_splatting.perspective import CameraParams
+from taichi_splatting import CameraParams
 
 
 
