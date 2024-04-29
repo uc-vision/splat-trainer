@@ -33,6 +33,12 @@ class GaussianScene(metaclass=ABCMeta):
   @abstractmethod
   def log(self, logger:Logger):
     raise NotImplementedError
+  
+
+  @abstractmethod
+  @property
+  def num_points(self) -> int:
+    raise NotImplementedError
 
 
 class GaussianSceneConfig(metaclass=ABCMeta):

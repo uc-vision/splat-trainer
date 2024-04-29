@@ -149,6 +149,7 @@ class Trainer:
 
     rows = []
     radius_hist = Histogram.empty(range=(-1, 3), num_bins=20, device=self.device) 
+
     log_indexes = strided_indexes(log_count, len(data)) 
 
     pbar = tqdm(total=len(data), desc=f"rendering {name}", leave=False)
@@ -193,6 +194,7 @@ class Trainer:
 
     train = self.evaluate_dataset("train", self.dataset.train(shuffle=False), log_count=n_logged)
     val = self.evaluate_dataset("val", self.dataset.val(), log_count=n_logged)
+
 
     iteration_path = self.output_path / f"point_cloud/iteration_{self.step}"
     iteration_path.mkdir(parents=True, exist_ok=True)
