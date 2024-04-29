@@ -1,13 +1,14 @@
 
 
-from abc import abstractmethod, abstractproperty
+from abc import abstractmethod
+from pathlib import Path
 
-import numpy as np
 import torch
 from torch import nn
 
 
 from splat_trainer.camera_table.pose_table import PoseTable, RigPoseTable
+from splat_trainer.util.transforms import split_rt
 
 
 class CameraTable(nn.Module):
@@ -16,18 +17,22 @@ class CameraTable(nn.Module):
   def forward(self, image_idx:torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
     raise NotImplementedError
   
-  @abstractproperty
+
+  @property
+  @abstractmethod
   def shape(self) -> torch.Size:
     raise NotImplementedError
   
-  @abstractproperty
+  @property
+  @abstractmethod
   def all_cameras(self):
     raise NotImplementedError
 
-  
-  @abstractproperty
+  @property
+  @abstractmethod
   def camera_centers(self) -> torch.Tensor:
     raise NotImplementedError
+  
         
   
 
@@ -115,3 +120,23 @@ class MultiCameraTable(CameraTable):
   @property
   def all_cameras(self):
     return torch.arange(0, self.shape[0], device=self.camera_projection.device)
+
+
+
+
+def camera_json(camera_table:CameraTable):
+  def export_camera(i, idx:torch.Tensor):
+    camera_t_world, proj = camera_table(idx)
+    r, t = split_rt(torch.linalg.inv(camera_t_world))
+
+    return {
+      "id": i,
+      "position": t.cpu().numpy().tolist(),
+      "rotation": r.cpu().numpy().tolist(),
+      "fy": proj[1, 1].item(),
+      "fx": proj[0, 0].item(),
+      "cx": proj[0, 2].item(),
+      "cy": proj[1, 2].item(),
+    }
+
+  return [export_camera(i, idx) for i, idx in enumerate(camera_table.all_cameras.unbind(0))]

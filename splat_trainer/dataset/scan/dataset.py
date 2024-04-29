@@ -7,12 +7,13 @@ import torch
 
 
 import numpy as np
-from splat_trainer.camera_table.camera_table import CameraRigTable, CameraTable
+from splat_trainer.camera_table.camera_table import CameraRigTable, CameraTable, camera_json
 from splat_trainer.dataset.dataset import CameraView, Dataset
 from splat_trainer.util.misc import split_stride
+from splat_trainer.util.transforms import split_rt
 
 
-from .loading import  PreloadedImages, preload_images
+from .loading import  CameraImage, PreloadedImages, preload_images
 from splat_trainer.util.pointcloud import PointCloud
 from .visibility import visibility
 
@@ -84,6 +85,24 @@ class ScanDataset(Dataset):
     # pcd = pcd.select_by_index(np.flatnonzero(vis > 0))
     
     return pcd[counts > 0]
+  
+  def camera_json(self, camera_table:CameraTable):
+
+    def export_camera(i, info):
+      image:CameraImage = self.all_cameras[i]
+      h, w, _ = image.image.shape
+
+      return {
+        "img_name": image.filename,
+        "width": w,
+        "height" : h,
+        **info
+      }
+
+    camera_info = camera_json(camera_table)
+    return [export_camera(i, info) for i, info in enumerate(camera_info)]
+    
+  
 
 
 def find_cloud(scan:FrameSet) -> Tuple[np.ndarray, np.ndarray]:

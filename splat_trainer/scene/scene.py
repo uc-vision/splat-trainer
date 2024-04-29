@@ -27,7 +27,7 @@ class GaussianScene(metaclass=ABCMeta):
     raise NotImplementedError
 
   @abstractmethod
-  def write_to(self, output_dir:str, base_filename:str):
+  def write_to(self, output_dir:str):
     raise NotImplementedError
   
   @abstractmethod

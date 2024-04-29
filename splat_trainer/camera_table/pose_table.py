@@ -3,9 +3,8 @@ from torch import nn
 import torch
 import torch.nn.functional as F
 
-from taichi_splatting.torch_ops.transforms import split_rt
 
-from splat_trainer.util.transforms import join_rt
+from splat_trainer.util.transforms import join_rt, split_rt
 import roma
 
 

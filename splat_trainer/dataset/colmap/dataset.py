@@ -6,14 +6,16 @@ from beartype.typing import Iterator, Tuple, List
 import torch
 
 import numpy as np
-from splat_trainer.camera_table.camera_table import MultiCameraTable
+from splat_trainer.camera_table.camera_table import CameraTable, MultiCameraTable, camera_json
 from splat_trainer.dataset.colmap.loading import load_images
 from splat_trainer.dataset.dataset import CameraView, Dataset
 
 from splat_trainer.util.misc import split_stride
 from splat_trainer.util.pointcloud import PointCloud
 
-import pycolmap 
+import pycolmap
+
+from splat_trainer.util.transforms import split_rt 
 
 
 
@@ -55,11 +57,11 @@ class COLMAPDataset(Dataset):
       *[image_info(image) for image in self.reconstruction.images.values()])
     
     images = load_images(list(self.image_names), Path(base_path) / image_dir, image_scale=image_scale)
-    cameras = [CameraImage(filename, torch.from_numpy(image).pin_memory(), i) 
+    self.all_cameras = [CameraImage(filename, torch.from_numpy(image).pin_memory(), i) 
                for i, (filename, image) in enumerate(zip(self.image_names, images))]  
   
     # Evenly distribute validation images
-    self.train_cameras, self.val_cameras = split_stride(cameras, val_stride)
+    self.train_cameras, self.val_cameras = split_stride(self.all_cameras, val_stride)
 
   def __repr__(self) -> str:
     return f"COLMAPDataset({self.base_path}, image_scale={self.image_scale})"
@@ -88,7 +90,21 @@ class COLMAPDataset(Dataset):
     
 
 
+  def camera_json(self, camera_table:CameraTable):
 
+    def export_camera(i, info):
+      image:CameraImage = self.all_cameras[i]
+      h, w, _ = image.image.shape
+
+      return {
+        "img_name": image.filename,
+        "width": w,
+        "height" : h,
+        **info
+      }
+
+    camera_info = camera_json(camera_table)
+    return [export_camera(i, info) for i, info in enumerate(camera_info)]
 
 
 @dataclass

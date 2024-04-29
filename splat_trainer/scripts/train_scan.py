@@ -1,3 +1,4 @@
+import signal
 import traceback
 import hydra
 
@@ -27,6 +28,7 @@ def train_with_config(cfg):
   print(config.pretty(cfg))
   logger = hydra.utils.instantiate(cfg.logger, _partial_=True)(log_config=OmegaConf.to_container(cfg, resolve=True))
   trainer = None
+
 
   try:
     ti.init(arch=ti.cuda, debug=cfg.debug, device_memory_GB=0.1)

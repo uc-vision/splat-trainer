@@ -30,3 +30,21 @@ class Dataset(metaclass=ABCMeta):
   @abstractmethod
   def pointcloud(self) -> PointCloud:
     raise NotImplementedError
+
+
+  @abstractmethod
+  def camera_json(self, camera_table:CameraTable):
+    """ Export camera information as a json file. List of dictionaries with the following fields:
+    - id: int
+    - img_name: str
+    - width: int
+    - height: int
+    - position: List[float]  (3)
+    - rotation: List[List[float]] (3x3)
+    - fx: float
+    - fy: float
+    - cx: float
+    - cy: float
+    """
+    
+    raise NotImplementedError

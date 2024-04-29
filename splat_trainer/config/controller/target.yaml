@@ -10,6 +10,6 @@ trainer:
     split_rate: 0.02
 
     # min visbility to be considered for splitting/pruning
-    min_visibility: 100 
+    min_visibility: 50 
   
-  densify_interval: 100
+  densify_interval: 200

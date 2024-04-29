@@ -65,3 +65,21 @@ class PointCloud:
       return PointCloud.from_numpy(xyz, rgb)  
     else:
       raise ValueError(f"Unknown file type {filename.suffix}")
+    
+
+
+  def save_ply(self, filename:str | Path):
+    filename = Path(filename)
+    vertex = np.zeros(self.points.shape[0], dtype=[
+      ('x', 'f4'), ('y', 'f4'), ('z', 'f4'),
+      ('red', 'u1'), ('green', 'u1'), ('blue', 'u1')
+    ])
+
+    for i, name in enumerate(['x', 'y', 'z']):
+      vertex[name] = self.points[:, i].numpy()
+
+    for i, name in enumerate(['red', 'green', 'blue']):
+      vertex[name] = (self.colors[:, i].numpy() * 255).astype(np.uint8)
+
+    ply = plyfile.PlyData([plyfile.PlyElement.describe(vertex, 'vertex')], text=True)
+    ply.write(filename)

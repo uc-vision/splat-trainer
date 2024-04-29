@@ -13,3 +13,7 @@ trainer:
 
     sh_ratio: 20.0
     sh_degree: 2
+
+
+    raster: 
+      _target_: taichi_splatting.RasterConfig

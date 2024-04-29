@@ -21,7 +21,7 @@ from splat_trainer.gaussians.split import split_gaussians_uniform
 from taichi_splatting.misc.parameter_class import ParameterClass
 from taichi_splatting import Gaussians3D, RasterConfig, Rendering
 
-from taichi_splatting.renderer import gaussians_in_view, project_to_image, render_projected
+from taichi_splatting.renderer import gaussians_in_view, render_projected, project_to_image
 from taichi_splatting.perspective import CameraParams
 
 from splat_trainer.util.pointcloud import PointCloud
@@ -210,9 +210,9 @@ class TCNNScene(GaussianScene):
       return torch.stack(image_idx)
 
 
-  def write_to(self, output_dir:Path, base_filename:str):
+  def write_to(self, output_dir:Path):
     output_dir.mkdir(parents=True, exist_ok=True)
-    write_gaussians(output_dir / f'{base_filename}.ply', self.gaussians.detach(), with_sh=False)
+    write_gaussians(output_dir / 'point_cloud.ply', self.gaussians.detach(), with_sh=False)
 
   def log(self, logger:Logger, step:int):
     image_idx = torch.zeros(len(self.camera_table.shape), device=self.device, dtype=torch.long)

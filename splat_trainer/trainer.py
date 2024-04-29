@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+import json
 import math
 import os
 from pathlib import Path
@@ -9,6 +10,7 @@ import torch
 
 import torch.nn.functional as F
 from torchmetrics.image  import MultiScaleStructuralSimilarityIndexMeasure
+from termcolor import colored
 
  
 from taichi_splatting import Rendering, perspective
@@ -28,6 +30,7 @@ from splat_trainer.util.containers import transpose_rows
 from splat_trainer.util.misc import CudaTimer, strided_indexes
 
 from splat_trainer.controller import ControllerConfig
+
 
 @dataclass(kw_only=True)
 class TrainConfig:
@@ -73,6 +76,9 @@ class Trainer:
     self.blur_cov = config.blur_cov
     self.output_path = Path(config.output_path or os.getcwd())
 
+    print(f"Output path {colored(self.output_path, 'light_green')}")
+
+
     self.ssim = MultiScaleStructuralSimilarityIndexMeasure(
         data_range=1.0, kernel_size=11).to(self.device)
 
@@ -82,10 +88,18 @@ class Trainer:
     
 
     print(f"Initializing model from {dataset}")
-    initial_gaussians = from_pointcloud(dataset.pointcloud(), 
+    initial_cloud = dataset.pointcloud()
+    initial_gaussians = from_pointcloud(initial_cloud, 
                                         initial_scale=config.initial_point_scale,
                                         initial_alpha=config.initial_alpha,
                                         num_neighbors=config.num_neighbors)
+    
+    self.output_path.mkdir(parents=True, exist_ok=True)
+    initial_cloud.save_ply(self.output_path / "input.ply")
+
+    with open(self.output_path / "cameras.json", "w") as f:
+      json.dump(self.dataset.camera_json(self.camera_table), f)
+    
     
     self.scene = config.scene.from_color_gaussians(initial_gaussians, self.camera_table, self.device)
     print(self.scene)
@@ -180,7 +194,17 @@ class Trainer:
     train = self.evaluate_dataset("train", self.dataset.train(shuffle=False), log_count=n_logged)
     val = self.evaluate_dataset("val", self.dataset.val(), log_count=n_logged)
 
-    self.scene.write_to(self.output_path / "point_cloud" , f"model_{self.step}")
+    iteration_path = self.output_path / f"point_cloud/iteration_{self.step}"
+    iteration_path.mkdir(parents=True, exist_ok=True)
+
+    self.scene.write_to(iteration_path)
+    
+    camera_json = self.dataset.camera_json(self.camera_table)
+    with open(iteration_path / "cameras.json", "w") as f:
+      json.dump(camera_json, f)
+
+    self.output_path
+
     # self.scene.log(self.logger, self.step)
 
     return {**train, **val}

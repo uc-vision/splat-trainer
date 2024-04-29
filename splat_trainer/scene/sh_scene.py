@@ -29,6 +29,8 @@ class SHConfig(GaussianSceneConfig):
   sh_ratio:float      = 20.0
   sh_degree:int       = 2
 
+  raster : RasterConfig = RasterConfig()
+
 
   def with_scene_extent(self, scene_extent:float) -> 'SHConfig':
     learning_rates = copy.copy(self.learning_rates) 
@@ -51,7 +53,7 @@ class SHScene(GaussianScene):
     self.config = config
     self.camera_table = camera_table
 
-    self.raster_config = RasterConfig()
+    self.raster_config = config.raster
     self.learning_rates = OmegaConf.to_container(config.learning_rates)
 
     self.points = ParameterClass.create(points.to_tensordict().to(device), 
@@ -99,10 +101,10 @@ class SHScene(GaussianScene):
     return self
 
 
-  def write_to(self, output_dir:Path, base_filename:str):
+  def write_to(self, output_dir:Path):
     output_dir.mkdir(parents=True, exist_ok=True)
     
-    write_gaussians(output_dir / f'{base_filename}.ply', self.gaussians, with_sh=True)
+    write_gaussians(output_dir / f'point_cloud.ply', self.gaussians, with_sh=True)
 
     
   def log(self, logger:Logger, step:int):
