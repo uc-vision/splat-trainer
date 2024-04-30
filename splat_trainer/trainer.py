@@ -25,7 +25,7 @@ from splat_trainer.logger.histogram import Histogram
 
 from splat_trainer.scene.sh_scene import  GaussianSceneConfig
 from splat_trainer.scheduler import Scheduler, Uniform
-from splat_trainer.util.colorize import colorize_depth, get_cv_colormap
+from splat_trainer.util.colorize import colorize_depth, colorize_ndc, get_cv_colormap
 from splat_trainer.util.containers import transpose_rows
 from splat_trainer.util.misc import CudaTimer, log_interp, strided_indexes
 
@@ -173,7 +173,7 @@ class Trainer:
         image_id = filename.replace("/", "_")
         self.log_image(f"{name}_images/{image_id}/render", rendering.image, caption=f"{filename} PSNR={psnr:.2f} L1={l1:.2f}")
         self.log_image(f"{name}_images/{image_id}/depth", 
-            colorize_depth(self.color_map, rendering.depth, 0.1), caption=filename)
+            colorize_ndc(self.color_map, rendering.depth), caption=f"{filename} depth std={depth_std:.3f}")
 
         if self.step == 0:
           self.log_image(f"{name}_images/{image_id}/image", image, caption=filename)

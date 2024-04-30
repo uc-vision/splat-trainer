@@ -7,6 +7,12 @@ def get_cv_colormap(cmap=cv2.COLORMAP_TURBO):
   colormap = cv2.applyColorMap(colormap, cmap)
   return torch.from_numpy(colormap.astype(np.uint8)).squeeze(0) 
 
+
+def colorize_ndc(color_map, ndc):
+  ndc = ndc.clone()
+  ndc = (255 * ndc).clamp(0, 255).to(torch.int)
+
+  return (color_map[ndc])
  
 def colorize_depth(color_map, depth, near=0.1):
   depth = depth.clone()
