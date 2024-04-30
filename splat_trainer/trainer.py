@@ -27,7 +27,7 @@ from splat_trainer.scene.sh_scene import  GaussianSceneConfig
 from splat_trainer.scheduler import Scheduler, Uniform
 from splat_trainer.util.colorize import colorize_depth, get_cv_colormap
 from splat_trainer.util.containers import transpose_rows
-from splat_trainer.util.misc import CudaTimer, strided_indexes
+from splat_trainer.util.misc import CudaTimer, log_interp, strided_indexes
 
 from splat_trainer.controller import ControllerConfig
 
@@ -53,8 +53,11 @@ class TrainConfig:
   num_logged_images: int = 5
   log_interval: int = 20
 
-  ssim_weight: float = 0.0
+  ssim_weight: float = 0.2
   ssim_scale: float = 0.5
+
+  depth_reg_weight: tuple[float, float] = (0.01, 1.0)
+  depth_reg_start: int = 6000
 
   blur_cov: float = 0.3
 
@@ -159,6 +162,11 @@ class Trainer:
       psnr = compute_psnr(rendering.image, image)
       l1 = torch.nn.functional.l1_loss(rendering.image, image)
 
+      var = rendering.depth_var
+      depth_std = var[var > 0].sqrt().mean()
+
+      ssim = self.compute_ssim(rendering.image, image, scale=self.config.ssim_scale)
+
       radius_hist = radius_hist.append(rendering.radii.log() / math.log(10.0), trim=False)
 
       if i in log_indexes:
@@ -170,30 +178,29 @@ class Trainer:
         if self.step == 0:
           self.log_image(f"{name}_images/{image_id}/image", image, caption=filename)
       
-      eval = dict(filename=filename, psnr = psnr.item(), l1 = l1.item())
+      eval = dict(filename=filename, psnr = psnr.item(), l1 = l1.item(), depth_std=depth_std.item(), ssim=ssim.item())
       rows.append(eval)
       
       pbar.update(1)
-      pbar.set_postfix(psnr=f"{psnr.item():.2f}", l1=f"{l1.item():.4f}")
+      pbar.set_postfix(psnr=f"{psnr.item():.2f}", l1=f"{l1.item():.4f}", ssim=f"{ssim.item():.4f}", depth_std=f"{depth_std.item():.4f}") 
 
     self.logger.log_evaluations(f"{name}/evals", rows, step=self.step)
     totals = transpose_rows(rows)
-    mean_l1, mean_psnr = np.mean(totals['l1']), np.mean(totals['psnr'])
+    means = {k:np.mean(totals[k]) for k in ['l1', 'ssim', 'depth_std', 'psnr']}
 
-    self.log_value(f"{name}/psnr", mean_psnr) 
-    self.log_value(f"{name}/l1", mean_l1) 
+    self.log_values(f"{name}", means) 
 
     self.log_histogram(f"{name}/psnr_hist", torch.tensor(totals['psnr']))
     self.log_histogram(f"{name}/radius_hist", radius_hist)
 
-    return {f"{name}_psnr":mean_psnr}
+    return {f"{name}_psnr":means['psnr']}
 
 
   def evaluate(self):
     n_logged = self.config.num_logged_images
 
-    train = self.evaluate_dataset("train", self.dataset.train(shuffle=False), log_count=n_logged)
-    val = self.evaluate_dataset("val", self.dataset.val(), log_count=n_logged)
+    train = self.evaluate_dataset("eval_train", self.dataset.train(shuffle=False), log_count=n_logged)
+    val = self.evaluate_dataset("eval_val", self.dataset.val(), log_count=n_logged)
 
 
     iteration_path = self.output_path / f"point_cloud/iteration_{self.step}"
@@ -238,23 +245,42 @@ class Trainer:
       return 1. - self.ssim(F.interpolate(image1, scale_factor=scale), F.interpolate(image2, scale_factor=scale))
       
 
+  def depth_reg_weight(self):
+    start, end = self.config.depth_reg_weight
+    if self.step < self.config.depth_reg_start:
+      return 0.0
+
+    t = (self.step - self.config.depth_reg_start) / (self.config.steps - self.config.depth_reg_start)
+    return log_interp(start, end, t)
+
   def losses(self, rendering:Rendering, image):
     l1 = torch.nn.functional.l1_loss(rendering.image, image)
+    loss = l1
+
+    losses = dict(l1=l1.item())
     
     if self.config.ssim_weight > 0:  
       ssim = self.compute_ssim(rendering.image, image, scale=self.config.ssim_scale)
-      loss = l1 + ssim * self.config.ssim_weight 
-      return loss, dict(l1=l1.item(), ssim=ssim.item())
+      loss += ssim * self.config.ssim_weight 
+      losses['ssim'] = ssim.item()
 
-    else:
-      return l1, dict(l1=l1.item())
+    depth_reg_weight = self.depth_reg_weight()
+    if depth_reg_weight > 0:
 
+      var = rendering.depth_var
+      depth_std = var[var > 0].sqrt().mean()
+
+      loss += depth_std * depth_reg_weight
+      losses['depth_std'] = depth_std.item()
+    
+    return loss, losses
 
   def training_step(self, filename, camera_params, image_idx, image, timer):
     image, camera_params = self.config.image_scaler(image, camera_params, self.image_scale)
 
     with timer:
-      rendering = self.scene.render(camera_params, image_idx, compute_split_heuristics=True)
+      rendering = self.scene.render(camera_params, image_idx, 
+          compute_split_heuristics=True, render_depth=bool(self.depth_reg_weight() > 0))
 
       loss, losses = self.losses(rendering, image)
       loss.backward()
@@ -290,7 +316,11 @@ class Trainer:
           lr_scale = self.config.lr_scheduler(self.step, self.config.steps)
           self.scene.update_learning_rate(lr_scale)
 
-          self.log_values("train", dict(lr_scale=lr_scale, blur_cov=self.blur_cov, image_scale=self.image_scale))
+          self.log_values("train", dict(
+                  lr_scale=lr_scale, 
+                  blur_cov=self.blur_cov, 
+                  image_scale=self.image_scale,
+                  depth_reg_weight=self.depth_reg_weight()))
 
       if since_densify >= self.config.densify_interval:
         self.controller.log_histograms(self.logger, self.step)
@@ -314,7 +344,7 @@ class Trainer:
         self.pbar.update(self.config.log_interval)
 
         means = {k:np.mean(v) for k, v in steps.items()}
-        metrics = {k:f"{means[k]:.4f}" for k in ['l1', 'ssim', 'reg'] if k in means}
+        metrics = {k:f"{means[k]:.4f}" for k in ['l1', 'ssim', 'depth_std'] if k in means}
 
         self.pbar.set_postfix(**metrics, **eval_metrics, **densify_metrics)        
         self.log_values("train", means)

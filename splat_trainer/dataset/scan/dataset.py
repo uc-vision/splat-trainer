@@ -87,6 +87,7 @@ class ScanDataset(Dataset):
     return pcd[counts > 0]
   
   def camera_json(self, camera_table:CameraTable):
+    near, far = self.depth_range
 
     def export_camera(i, info):
       image:CameraImage = self.all_cameras[i]
@@ -96,6 +97,8 @@ class ScanDataset(Dataset):
         "img_name": image.filename,
         "width": w,
         "height" : h,
+        "near": near,
+        "far": far,
         **info
       }
 

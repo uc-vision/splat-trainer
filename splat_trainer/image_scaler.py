@@ -7,6 +7,8 @@ import torch.nn.functional as F
 
 from taichi_splatting import CameraParams
 
+from splat_trainer.util.misc import log_interp
+
 
 
 class ImageScaler(metaclass=abc.ABCMeta):
@@ -36,7 +38,8 @@ class ExponentialScaler(ImageScaler):
   
   def update(self, step:int) -> float:
     t = min(step / self.steps, 1)
-    return math.exp(math.log(self.initial_scale) * (1 - t) +  t * math.log(self.final_scale)) 
+    return log_interp(self.initial_scale, self.final_scale, t)
+    
 
 
   @beartype

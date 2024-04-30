@@ -41,6 +41,9 @@ trainer:
   ssim_weight: 0.2 # slower iteration but faster convergence
   ssim_scale: 0.5 # use ssim at a lower resolution (less computation)
 
+  depth_reg_weight: [0.01, 1.0]
+  depth_reg_start: 6000
+
   blur_cov: 0.3
 
 

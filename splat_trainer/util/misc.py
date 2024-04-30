@@ -19,6 +19,9 @@ def split_stride(images, stride=0):
 
 
 
+def log_interp(a, b, t):
+  return np.exp(np.log(a) * (1 - t) +  t * np.log(b)) 
+
 def sigmoid(x):
   return 1 / (1 + np.exp(-x))
 
