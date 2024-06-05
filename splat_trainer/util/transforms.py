@@ -46,3 +46,13 @@ def transform33(transform, points):
   return transformed[..., 0].reshape(-1, 3)
 
 
+def expand_proj(transform:torch.Tensor):
+  # expand 3x3 to 4x4 by padding 
+  prefix = transform.shape[:-2]
+
+  expanded = torch.zeros((4, 4), dtype=transform.dtype, device=transform.device
+                       ).view(*[1 for _ in prefix] , 4, 4).expand(*prefix, 4, 4)
+  expanded[..., :3, :3] = transform
+  expanded[..., 3, 2] = 1.0
+  return expanded
+        

@@ -1,14 +1,14 @@
 
 
 from abc import abstractmethod
-from pathlib import Path
+from typing import Tuple
 
 import torch
 from torch import nn
 
 
 from splat_trainer.camera_table.pose_table import PoseTable, RigPoseTable
-from splat_trainer.util.transforms import split_rt
+from splat_trainer.util.transforms import expand_proj, make_homog, split_rt, transform44
 
 
 class CameraTable(nn.Module):
@@ -33,8 +33,9 @@ class CameraTable(nn.Module):
   def camera_centers(self) -> torch.Tensor:
     raise NotImplementedError
   
-        
-  
+
+
+
 
 def camera_extents(cameras:CameraTable):
     cam_centers = cameras.camera_centers.reshape(-1, 3)
@@ -140,3 +141,24 @@ def camera_json(camera_table:CameraTable):
     }
 
   return [export_camera(i, idx) for i, idx in enumerate(camera_table.all_cameras.unbind(0))]
+
+
+def visibility(camera_table:CameraTable, points:torch.Tensor, image_size:Tuple[float, float], near=0.1, far=100.0):
+  counts = torch.zeros(camera_table.shape, dtype=torch.bool, device=camera_table.device)
+
+  cam_t_world, image_t_cam = camera_table(camera_table.all_cameras)
+  image_t_world = expand_proj(image_t_cam) @ cam_t_world
+
+  homog_points = make_homog(points)
+
+  for i in range(image_t_world.shape[0]):
+    proj_points = transform44(image_t_world[i], homog_points)
+    proj_points = proj_points / proj_points[..., 2:3]
+
+    counts += (
+      (proj_points[..., 0] >= 0) & (proj_points[..., 0] < image_size[0]) 
+      & (proj_points[..., 1] >= 0) & (proj_points[..., 1] < image_size[1]) 
+      & (proj_points[..., 2] > near) & (proj_points[..., 2] < far)
+    )
+
+  return counts
