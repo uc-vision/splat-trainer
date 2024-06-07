@@ -76,10 +76,10 @@ class PointCloud:
     ])
 
     for i, name in enumerate(['x', 'y', 'z']):
-      vertex[name] = self.points[:, i].numpy()
+      vertex[name] = self.points[:, i].cpu().numpy()
 
     for i, name in enumerate(['red', 'green', 'blue']):
-      vertex[name] = (self.colors[:, i].numpy() * 255).astype(np.uint8)
+      vertex[name] = (self.colors[:, i].cpu().numpy() * 255).astype(np.uint8)
 
     ply = plyfile.PlyData([plyfile.PlyElement.describe(vertex, 'vertex')], text=True)
     ply.write(filename)

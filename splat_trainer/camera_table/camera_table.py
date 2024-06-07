@@ -1,7 +1,8 @@
 
 
 from abc import abstractmethod
-from typing import Tuple
+from numbers import Number
+from typing import List, Tuple
 
 import torch
 from torch import nn
@@ -9,6 +10,8 @@ from torch import nn
 
 from splat_trainer.camera_table.pose_table import PoseTable, RigPoseTable
 from splat_trainer.util.transforms import expand_proj, make_homog, split_rt, transform44
+
+from beartype import beartype
 
 
 class CameraTable(nn.Module):
@@ -33,8 +36,7 @@ class CameraTable(nn.Module):
   def camera_centers(self) -> torch.Tensor:
     raise NotImplementedError
   
-
-
+  
 
 
 def camera_extents(cameras:CameraTable):
@@ -61,7 +63,7 @@ class CameraRigTable(CameraTable):
 
 
   def forward(self, image_idx:torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:     
-    return self.camera_poses(image_idx.unsqueeze(0)), self.camera_projection[image_idx[1]]
+    return self.camera_poses(image_idx), self.camera_projection[image_idx[:, 1]]
 
   @property
   def shape(self) -> torch.Size:
@@ -142,9 +144,11 @@ def camera_json(camera_table:CameraTable):
 
   return [export_camera(i, idx) for i, idx in enumerate(camera_table.all_cameras.unbind(0))]
 
-
-def visibility(camera_table:CameraTable, points:torch.Tensor, image_size:Tuple[float, float], near=0.1, far=100.0):
-  counts = torch.zeros(camera_table.shape, dtype=torch.bool, device=camera_table.device)
+@beartype
+def point_visibility(camera_table:CameraTable, points:torch.Tensor, 
+                     image_sizes:torch.Tensor, depth_range:Tuple[Number, Number]) -> torch.Tensor:
+  
+  counts = torch.zeros(points.shape[0], dtype=torch.int32, device=camera_table.device)
 
   cam_t_world, image_t_cam = camera_table(camera_table.all_cameras)
   image_t_world = expand_proj(image_t_cam) @ cam_t_world
@@ -152,13 +156,17 @@ def visibility(camera_table:CameraTable, points:torch.Tensor, image_size:Tuple[f
   homog_points = make_homog(points)
 
   for i in range(image_t_world.shape[0]):
+    image_size = image_sizes[i] if image_sizes.dim() > 1 else image_sizes
+
     proj_points = transform44(image_t_world[i], homog_points)
     proj_points = proj_points / proj_points[..., 2:3]
 
     counts += (
       (proj_points[..., 0] >= 0) & (proj_points[..., 0] < image_size[0]) 
       & (proj_points[..., 1] >= 0) & (proj_points[..., 1] < image_size[1]) 
-      & (proj_points[..., 2] > near) & (proj_points[..., 2] < far)
+      & (proj_points[..., 2] > depth_range[0]) & (proj_points[..., 2] < depth_range[1])
     )
 
   return counts
+
+

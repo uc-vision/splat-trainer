@@ -25,6 +25,10 @@ class Dataset(metaclass=ABCMeta):
   @abstractmethod
   def camera_table(self) -> CameraTable:
     raise NotImplementedError
+  
+  @abstractmethod
+  def image_sizes(self) -> torch.Tensor:
+    raise NotImplementedError
 
 
   @abstractmethod

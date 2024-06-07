@@ -13,6 +13,8 @@ from torchmetrics.image  import MultiScaleStructuralSimilarityIndexMeasure
 from termcolor import colored
 
  
+from splat_trainer.camera_table.camera_table import CameraTable, point_visibility
+from splat_trainer.util.pointcloud import PointCloud
 from taichi_splatting import Rendering, perspective
 from tqdm import tqdm
 
@@ -62,6 +64,28 @@ class TrainConfig:
   image_scaler: ImageScaler = NullScaler()
   
 
+def random_points(cam_centers:torch.Tensor, count:int, depth_range:tuple[float, float]):
+    device = cam_centers.device
+    dirs = F.normalize(torch.randn(count, 3, device=device))
+    depths = torch.rand(count, device=device) * (depth_range[1] - depth_range[0]) + depth_range[0]
+
+    points = cam_centers.unsqueeze(1) + dirs.unsqueeze(2) * depths.unsqueeze(1)
+    colors = torch.rand(count, 3, device=device)
+
+    return PointCloud(points, colors)
+    
+
+
+def crop_cloud(pcd:PointCloud, camera_table:CameraTable, image_sizes:torch.Tensor, depth_range:tuple[float, float]):
+
+    counts = point_visibility(camera_table, pcd.points, image_sizes, depth_range=depth_range)
+    print(f"Visible {(counts > 0).sum()} of {len(counts)} points")
+  
+    return pcd[counts > 0]
+
+
+
+
 class Trainer:
   def __init__(self, dataset:Dataset, config:TrainConfig, logger:Logger):
 
@@ -85,10 +109,19 @@ class Trainer:
     self.camera_table = dataset.camera_table()
     self.camera_table.to(self.device)
     self.camera_table.requires_grad_(False)
+
+    self.image_sizes = dataset.image_sizes().to(self.device)
     
 
     print(f"Initializing model from {dataset}")
-    initial_cloud = dataset.pointcloud()
+    initial_cloud = crop_cloud(dataset.pointcloud().to(self.device), 
+                               self.camera_table, dataset.image_sizes(), dataset.depth_range)
+
+    
+    # near, far = dataset.depth_range
+    # rand = random_points(self.camera_table.camera_centers, 10000, 10.0
+
+
     initial_gaussians = from_pointcloud(initial_cloud, 
                                         initial_scale=config.initial_point_scale,
                                         initial_alpha=config.initial_alpha,

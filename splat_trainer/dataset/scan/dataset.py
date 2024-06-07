@@ -1,4 +1,5 @@
 from pathlib import Path
+from typing import List
 from beartype.typing import Iterator, Tuple
 from camera_geometry import FrameSet
 
@@ -10,12 +11,10 @@ import numpy as np
 from splat_trainer.camera_table.camera_table import CameraRigTable, CameraTable, camera_json
 from splat_trainer.dataset.dataset import CameraView, Dataset
 from splat_trainer.util.misc import split_stride
-from splat_trainer.util.transforms import split_rt
 
 
 from .loading import  CameraImage, PreloadedImages, preload_images
 from splat_trainer.util.pointcloud import PointCloud
-from .visibility import visibility
 
 
 
@@ -29,7 +28,7 @@ class ScanDataset(Dataset):
     self.image_scale = image_scale
 
     scan = FrameSet.load_file(Path(scan_file))
-    self.depth_range = depth_range
+    self.depth_range = tuple(depth_range)
 
     cameras = {k: optimal_undistorted(camera, alpha=0).scale_image(image_scale)
       for k, camera in scan.cameras.items()}
@@ -57,6 +56,10 @@ class ScanDataset(Dataset):
   def val(self) -> Iterator[CameraView]:
     images = PreloadedImages(self.val_cameras)
     return images
+  
+
+  def image_sizes(self) -> torch.Tensor:
+    return torch.Tensor([(cam.camera.image_size) for cam in self.all_cameras]).to(torch.int32)
 
 
   def camera_table(self) -> CameraRigTable:
@@ -78,13 +81,9 @@ class ScanDataset(Dataset):
 
   def pointcloud(self) -> PointCloud:
     pcd_filename = find_cloud(self.scan)    
-    pcd = PointCloud.load(pcd_filename)
+    return PointCloud.load(pcd_filename)
 
-    counts = visibility(self.scan.expand_cameras(), pcd.points)
-    print(f"Visible {(counts > 0).sum()} of {len(counts)} points")
-    # pcd = pcd.select_by_index(np.flatnonzero(vis > 0))
-    
-    return pcd[counts > 0]
+  
   
   def camera_json(self, camera_table:CameraTable):
 
