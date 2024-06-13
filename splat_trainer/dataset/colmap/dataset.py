@@ -15,8 +15,6 @@ from splat_trainer.util.pointcloud import PointCloud
 
 import pycolmap
 
-from splat_trainer.util.transforms import split_rt 
-
 
 
 class COLMAPDataset(Dataset):
@@ -28,7 +26,7 @@ class COLMAPDataset(Dataset):
         depth_range:Tuple[float, float] = (0.1, 100.0)):
 
     self.image_scale = image_scale
-    self.depth_range = depth_range
+    self.camera_depth_range = depth_range
 
     self.base_path = base_path
     model_path = Path(base_path) / model_dir
@@ -78,7 +76,12 @@ class COLMAPDataset(Dataset):
       camera_t_world = torch.tensor(np.array(self.camera_t_world), dtype=torch.float32),
       projection = torch.tensor(np.array(self.projections), dtype=torch.float32),
       camera_idx = torch.tensor(self.camera_idx, dtype=torch.long))
+  
+  def depth_range(self) -> Tuple[float, float]:
+    return self.camera_depth_range
 
+  def image_sizes(self) -> torch.Tensor:
+    return torch.tensor([image.image_size for image in self.all_cameras], dtype=torch.int32)
 
   def pointcloud(self) -> PointCloud:  
     xyz = np.array([p.xyz for p in self.reconstruction.points3D.values()])
@@ -112,6 +115,11 @@ class CameraImage:
   filename:str
   image:torch.Tensor
   image_id:int
+
+  @property
+  def image_size(self) -> Tuple[int, int]:
+    h, w =  self.image.shape[:2]
+    return (w, h)
 
 class Images(torch.utils.data.Dataset):
   @beartype

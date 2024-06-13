@@ -28,7 +28,7 @@ class ScanDataset(Dataset):
     self.image_scale = image_scale
 
     scan = FrameSet.load_file(Path(scan_file))
-    self.depth_range = tuple(depth_range)
+    self.camera_depth_range = tuple(depth_range)
 
     cameras = {k: optimal_undistorted(camera, alpha=0).scale_image(image_scale)
       for k, camera in scan.cameras.items()}
@@ -58,9 +58,14 @@ class ScanDataset(Dataset):
     return images
   
 
+  def depth_range(self) -> Tuple[float, float]:
+    return self.camera_depth_range
+
+
   def image_sizes(self) -> torch.Tensor:
     return torch.Tensor([(cam.camera.image_size) for cam in self.all_cameras]).to(torch.int32)
 
+  
 
   def camera_table(self) -> CameraRigTable:
     camera_t_rig = np.array(
@@ -82,6 +87,7 @@ class ScanDataset(Dataset):
   def pointcloud(self) -> PointCloud:
     pcd_filename = find_cloud(self.scan)    
     return PointCloud.load(pcd_filename)
+
 
   
   

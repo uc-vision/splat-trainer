@@ -1,15 +1,16 @@
 
 
 from abc import abstractmethod
+from dataclasses import dataclass
 from numbers import Number
-from typing import List, Tuple
+from typing import Tuple
 
 import torch
 from torch import nn
 
 
 from splat_trainer.camera_table.pose_table import PoseTable, RigPoseTable
-from splat_trainer.util.transforms import expand_proj, make_homog, split_rt, transform44
+from splat_trainer.util.transforms import split_rt
 
 from beartype import beartype
 
@@ -19,7 +20,12 @@ class CameraTable(nn.Module):
   @abstractmethod
   def forward(self, image_idx:torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
     raise NotImplementedError
-  
+
+
+  def lookup(self, image_idx:torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+    """ Convenience function to get camera pose and projection for a single image index."""
+    camera_t_world, proj = self(image_idx.unsqueeze(0))
+    return camera_t_world.squeeze(0), proj.squeeze(0)
 
   @property
   @abstractmethod
@@ -28,7 +34,7 @@ class CameraTable(nn.Module):
   
   @property
   @abstractmethod
-  def all_cameras(self):
+  def all_cameras(self) -> torch.Tensor:
     raise NotImplementedError
 
   @property
@@ -63,6 +69,8 @@ class CameraRigTable(CameraTable):
 
 
   def forward(self, image_idx:torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:     
+    assert image_idx.dim() == 2 and image_idx.shape[1] == 2, f"Expected 2D Nx2 tensor, got: {image_idx.shape}"
+
     return self.camera_poses(image_idx), self.camera_projection[image_idx[:, 1]]
 
   @property
@@ -129,8 +137,10 @@ class MultiCameraTable(CameraTable):
 
 def camera_json(camera_table:CameraTable):
   def export_camera(i, idx:torch.Tensor):
-    camera_t_world, proj = camera_table(idx)
+    camera_t_world, proj = [x.squeeze(0) for x in camera_table(idx.unsqueeze(0))]
+
     r, t = split_rt(torch.linalg.inv(camera_t_world))
+
 
     return {
       "id": i,
@@ -142,31 +152,23 @@ def camera_json(camera_table:CameraTable):
       "cy": proj[1, 2].item(),
     }
 
-  return [export_camera(i, idx) for i, idx in enumerate(camera_table.all_cameras.unbind(0))]
+  return [export_camera(i, idx) 
+          for i, idx in enumerate(camera_table.all_cameras.unbind(0))
+        ]
+
+
+
 
 @beartype
-def point_visibility(camera_table:CameraTable, points:torch.Tensor, 
-                     image_sizes:torch.Tensor, depth_range:Tuple[Number, Number]) -> torch.Tensor:
-  
-  counts = torch.zeros(points.shape[0], dtype=torch.int32, device=camera_table.device)
+@dataclass 
+class CameraInfo:
+  camera_table:CameraTable
+  image_sizes:torch.Tensor
+  depth_range:Tuple[Number, Number]
 
-  cam_t_world, image_t_cam = camera_table(camera_table.all_cameras)
-  image_t_world = expand_proj(image_t_cam) @ cam_t_world
-
-  homog_points = make_homog(points)
-
-  for i in range(image_t_world.shape[0]):
-    image_size = image_sizes[i] if image_sizes.dim() > 1 else image_sizes
-
-    proj_points = transform44(image_t_world[i], homog_points)
-    proj_points = proj_points / proj_points[..., 2:3]
-
-    counts += (
-      (proj_points[..., 0] >= 0) & (proj_points[..., 0] < image_size[0]) 
-      & (proj_points[..., 1] >= 0) & (proj_points[..., 1] < image_size[1]) 
-      & (proj_points[..., 2] > depth_range[0]) & (proj_points[..., 2] < depth_range[1])
+  def to(self, device) -> 'CameraInfo':
+    return CameraInfo(
+      camera_table=self.camera_table.to(device),
+      image_sizes=self.image_sizes.to(device),
+      depth_range=self.depth_range,
     )
-
-  return counts
-
-

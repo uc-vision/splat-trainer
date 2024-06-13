@@ -13,8 +13,9 @@ from torchmetrics.image  import MultiScaleStructuralSimilarityIndexMeasure
 from termcolor import colored
 
  
-from splat_trainer.camera_table.camera_table import CameraTable, point_visibility
+from splat_trainer.camera_table.camera_table import CameraInfo, CameraTable
 from splat_trainer.util.pointcloud import PointCloud
+from splat_trainer.util.visibility import crop_cloud, point_visibility, random_cloud, random_points
 from taichi_splatting import Rendering, perspective
 from tqdm import tqdm
 
@@ -64,24 +65,12 @@ class TrainConfig:
   image_scaler: ImageScaler = NullScaler()
   
 
-def random_points(cam_centers:torch.Tensor, count:int, depth_range:tuple[float, float]):
-    device = cam_centers.device
-    dirs = F.normalize(torch.randn(count, 3, device=device))
-    depths = torch.rand(count, device=device) * (depth_range[1] - depth_range[0]) + depth_range[0]
-
-    points = cam_centers.unsqueeze(1) + dirs.unsqueeze(2) * depths.unsqueeze(1)
-    colors = torch.rand(count, 3, device=device)
-
-    return PointCloud(points, colors)
-    
 
 
-def crop_cloud(pcd:PointCloud, camera_table:CameraTable, image_sizes:torch.Tensor, depth_range:tuple[float, float]):
 
-    counts = point_visibility(camera_table, pcd.points, image_sizes, depth_range=depth_range)
-    print(f"Visible {(counts > 0).sum()} of {len(counts)} points")
-  
-    return pcd[counts > 0]
+
+
+
 
 
 
@@ -111,24 +100,33 @@ class Trainer:
     self.camera_table.requires_grad_(False)
 
     self.image_sizes = dataset.image_sizes().to(self.device)
-    
+    self.camera_info = CameraInfo(self.camera_table, self.image_sizes, dataset.depth_range())
 
     print(f"Initializing model from {dataset}")
-    initial_cloud = crop_cloud(dataset.pointcloud().to(self.device), 
-                               self.camera_table, dataset.image_sizes(), dataset.depth_range)
+    points = dataset.pointcloud().to(self.device)
+    cropped = crop_cloud(self.camera_info, points)
+
+
+    # rand_points = random_cloud(self.camera_info, 100000)
+    # print(f"Added {rand_points.batch_size[0]} random points")
+
+    # # select n random from cropped points
+    # idx = torch.randperm(cropped.batch_size[0])[:10000]
+    # cropped = cropped[idx]
 
     
-    # near, far = dataset.depth_range
-    # rand = random_points(self.camera_table.camera_centers, 10000, 10.0
+    if cropped.batch_size[0] == 0:
+      raise ValueError("No points visible in dataset images, check input data!")
 
-
-    initial_gaussians = from_pointcloud(initial_cloud, 
+    print(colored(f"Using {cropped.batch_size[0]} points from original {points.batch_size[0]}", 'yellow'))
+      
+    initial_gaussians = from_pointcloud(cropped, 
                                         initial_scale=config.initial_point_scale,
                                         initial_alpha=config.initial_alpha,
                                         num_neighbors=config.num_neighbors)
     
     self.output_path.mkdir(parents=True, exist_ok=True)
-    initial_cloud.save_ply(self.output_path / "input.ply")
+    cropped.save_ply(self.output_path / "input.ply")
 
     with open(self.output_path / "cameras.json", "w") as f:
       json.dump(self.dataset.camera_json(self.camera_table), f)
@@ -148,12 +146,12 @@ class Trainer:
     
 
   def camera_params(self, cam_idx:torch.Tensor, image:torch.Tensor):
-        near, far = self.dataset.depth_range
-        camera_t_world, image_t_camera = self.camera_table(cam_idx)
+        near, far = self.dataset.depth_range()
+        camera_t_world, image_t_camera = self.camera_table.lookup(cam_idx)
 
         return perspective.CameraParams(
-            T_camera_world=camera_t_world.squeeze(0),
-            T_image_camera=image_t_camera.squeeze(0),
+            T_camera_world=camera_t_world,
+            T_image_camera=image_t_camera,
             image_size=(image.shape[1], image.shape[0]),
             near_plane=near,
             far_plane=far,

@@ -36,6 +36,11 @@ class PointCloud:
 
     o3d.visualization.draw_geometries([pcl])
 
+
+  def append(self, other: 'PointCloud') -> 'PointCloud':
+    return PointCloud(
+        points = torch.cat([self.points, other.points], dim=0),
+        colors = torch.cat([self.colors, other.colors], dim=0))
   
   
   @staticmethod

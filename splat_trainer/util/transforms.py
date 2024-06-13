@@ -34,7 +34,7 @@ def make_homog(points):
 def transform44(transform, points):
 
   points = points.reshape([-1, 4, 1])
-  transformed = transform.reshape([1, 4, 4]) @ points
+  transformed = transform.reshape([-1, 4, 4]) @ points
   return transformed[..., 0].reshape(-1, 4)
 
 
@@ -51,6 +51,6 @@ def expand_proj(transform:torch.Tensor):
   expanded = torch.zeros((*transform.shape[:-2], 4, 4), dtype=transform.dtype, device=transform.device)
   
   expanded[..., :3, :3] = transform
-  expanded[..., 3, 2] = 1.0
+  expanded[..., 3, 3] = 1.0
   return expanded
         

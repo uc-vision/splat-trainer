@@ -21,6 +21,10 @@ class CameraImage:
    camera_id: int
    filename: str
 
+   @property
+   def image_size(self):
+      return self.image.shape[1], self.image.shape[0]
+
 
 def concat_lists(xs):
   return [x for x in xs for x in x]

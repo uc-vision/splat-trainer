@@ -1,11 +1,13 @@
 
 from abc import ABCMeta, abstractmethod
 from collections import namedtuple
+from numbers import Number
+from typing import Tuple
 from beartype.typing import Iterator
 
 import torch
 
-from splat_trainer.camera_table.camera_table import CameraTable
+from splat_trainer.camera_table.camera_table import CameraInfo, CameraTable
 from splat_trainer.util.pointcloud import PointCloud
 
 
@@ -22,6 +24,7 @@ class Dataset(metaclass=ABCMeta):
   def val(self) -> Iterator[CameraView]:
     raise NotImplementedError
 
+  
   @abstractmethod
   def camera_table(self) -> CameraTable:
     raise NotImplementedError
@@ -30,6 +33,17 @@ class Dataset(metaclass=ABCMeta):
   def image_sizes(self) -> torch.Tensor:
     raise NotImplementedError
 
+  @abstractmethod
+  def depth_range(self) -> Tuple[Number, Number]:
+    raise NotImplementedError
+
+  def camera_info(self) -> CameraInfo:
+    return CameraInfo(
+      camera_table=self.camera_table(),
+      image_sizes=self.image_sizes(),
+      depth_range=self.depth_range(),
+    )
+    
 
   @abstractmethod
   def pointcloud(self) -> PointCloud:
