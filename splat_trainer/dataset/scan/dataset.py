@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 from beartype.typing import Iterator, Tuple
 from camera_geometry import FrameSet
 
@@ -20,7 +20,8 @@ from splat_trainer.util.pointcloud import PointCloud
 
 class ScanDataset(Dataset):
   def __init__(self, scan_file:str,                
-        image_scale:float=1.0,
+        image_scale:Optional[float]=None,
+        resize_longest:Optional[int]=None,
         val_stride:int=10,
         depth_range:Tuple[float, float] = (0.1, 100.0)):
 
@@ -30,8 +31,16 @@ class ScanDataset(Dataset):
     scan = FrameSet.load_file(Path(scan_file))
     self.camera_depth_range = tuple(depth_range)
 
-    cameras = {k: optimal_undistorted(camera, alpha=0).scale_image(image_scale)
-      for k, camera in scan.cameras.items()}
+    cameras = {k: optimal_undistorted(camera, alpha=0)
+                 for k, camera in scan.cameras.items()}
+
+    assert resize_longest is None or image_scale is None, "Specify either resize_longest or image_scale"
+
+    if resize_longest is not None:
+      cameras = {k: camera.resize_longest(longest=resize_longest) for k, camera in cameras.items()}
+    elif image_scale is not None:
+      cameras = {k: camera.scale_image(image_scale) for k, camera in cameras.items()}
+
 
     print("Undistorted cameras:")
     for k, camera in cameras.items():

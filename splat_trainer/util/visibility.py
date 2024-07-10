@@ -1,3 +1,4 @@
+from dataclasses import replace
 from numbers import Number
 from typing import Tuple
 from beartype import beartype
@@ -65,7 +66,9 @@ def random_points(info:CameraInfo, count:int) -> torch.Tensor:
 
 
 @beartype
-def random_cloud(info:CameraInfo, count:int) -> PointCloud:
+def random_cloud(info:CameraInfo, count:int, min_depth:float=0.) -> PointCloud:
+  info = replace(info, depth_range=(max(min_depth, info.depth_range[1]), info.depth_range[1]))
+
   points = random_points(info, count)
   colors = torch.rand(count, 3, device=points.device)
   

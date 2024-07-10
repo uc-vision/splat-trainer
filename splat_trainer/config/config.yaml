@@ -11,6 +11,8 @@ hydra:
   job: 
     chdir: True
 
+
+
 trainer:
   _target_: splat_trainer.trainer.TrainConfig
   output_path: null
@@ -30,13 +32,16 @@ trainer:
   #   steps: 16000
 
 
-  steps : 20000
+  steps : 30000
   eval_steps: 2000
 
   # Initialisation from a point cloud
   num_neighbors: 5
   initial_alpha: 0.5
   initial_point_scale: 0.5
+
+  max_initial_points: null
+  background_points: 0
 
   ssim_weight: 0.2 # slower iteration but faster convergence
   ssim_scale: 0.5 # use ssim at a lower resolution (less computation)

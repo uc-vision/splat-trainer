@@ -10,7 +10,7 @@ dataset:
   image_scale: 1.0
   val_stride: 0
 
-  depth_range: [0.1, 1000.0]
+  depth_range: [0.1, 100.0]
 
 
 

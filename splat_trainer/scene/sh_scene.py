@@ -1,7 +1,8 @@
 
 import copy
-from dataclasses import  asdict, dataclass, replace
+from dataclasses import  dataclass, replace
 from pathlib import Path
+from typing import Optional
 from beartype import beartype
 from omegaconf import DictConfig, OmegaConf
 
@@ -20,7 +21,6 @@ from taichi_splatting import Gaussians3D, RasterConfig, render_gaussians, Render
 from taichi_splatting.perspective import CameraParams
 
 
-from splat_trainer.util.pointcloud import PointCloud
 
 
 @dataclass(kw_only=True, frozen=True)
@@ -28,14 +28,13 @@ class SHConfig(GaussianSceneConfig):
   learning_rates : DictConfig
   sh_ratio:float      = 20.0
   sh_degree:int       = 2
+  scene_extent:Optional[float]     = None
+  degree_steps: int = 2000
+
 
   raster : RasterConfig = RasterConfig()
 
 
-  def with_scene_extent(self, scene_extent:float) -> 'SHConfig':
-    learning_rates = copy.copy(self.learning_rates) 
-    learning_rates.position *= scene_extent
-    return replace(self, learning_rates=learning_rates)
     
 
   def from_color_gaussians(self, gaussians:Gaussians3D, camera_table:CameraTable, device:torch.device):
@@ -43,8 +42,11 @@ class SHConfig(GaussianSceneConfig):
     sh_feature[:, :, 0] = rgb_to_sh(gaussians.feature)
 
     centre, extent = camera_extents(camera_table)
-    config = self.with_scene_extent(extent)
     
+    if self.scene_extent is None:
+      centre, extent = camera_extents(camera_table)
+      config = replace(self, scene_extent=extent)
+
     return SHScene(gaussians.replace(feature=sh_feature), camera_table, device, config)
 
 
@@ -55,14 +57,12 @@ class SHScene(GaussianScene):
 
     self.raster_config = config.raster
     self.learning_rates = OmegaConf.to_container(config.learning_rates)
+    self.learning_rates ['position'] *= self.config.scene_extent
+
 
     self.points = ParameterClass.create(points.to_tensordict().to(device), 
           learning_rates = self.learning_rates)   
         
-  def with_scene_extent(self, scene_extent:float) -> 'SHScene':
-    learning_rates = copy.copy(self.learning_rates) 
-    learning_rates.position *= scene_extent
-    return replace(self, learning_rates=learning_rates)
   
   @property 
   def device(self):
@@ -81,7 +81,10 @@ class SHScene(GaussianScene):
   def __repr__(self):
     return f"GaussianScene({self.points.position.shape[0]} points)"
 
-  def step(self, visible:torch.Tensor):
+  def step(self, visible:torch.Tensor, step:int):
+    d = 1 + min(step // self.config.degree_steps, self.config.sh_degree)
+    self.points.feature.grad[..., d*d:] = 0
+    
     self.points.feature.grad[..., 1:] /= self.config.sh_ratio
     self.points.step()
 
@@ -104,18 +107,21 @@ class SHScene(GaussianScene):
   def write_to(self, output_dir:Path):
     output_dir.mkdir(parents=True, exist_ok=True)
     
-    write_gaussians(output_dir / f'point_cloud.ply', self.gaussians, with_sh=True)
+    write_gaussians(output_dir / 'point_cloud.ply', self.gaussians, with_sh=True)
 
     
   def log(self, logger:Logger, step:int):
+    for k, v in dict(log_scaling=self.points.log_scaling, alpha_logit=self.points.alpha_logit).items():
+      logger.log_histogram(f"points/{k}", v.detach(), step=step)
+
+
+  def reg_loss(self):
+    scale = torch.exp(self.points.log_scaling).mean()
+    opacity = torch.sigmoid(self.points.alpha_logit).mean()
+
     
-    point_cloud = PointCloud(
-      self.gaussians.position.detach(), 
-      sh_to_rgb(self.gaussians.feature[:, :, 0]),
-      batch_size=self.gaussians.shape[:1] )
-    logger.log_cloud("point_cloud", point_cloud, step=step)
-    
-    
+    return scale * 0.1 + opacity * 0.01
+
 
   @property
   def gaussians(self):

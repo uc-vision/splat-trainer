@@ -1,8 +1,8 @@
 
-import copy
 from dataclasses import  dataclass, replace
 from functools import partial
 from pathlib import Path
+from typing import Optional
 from beartype import beartype
 from omegaconf import DictConfig, OmegaConf
 
@@ -20,9 +20,12 @@ from splat_trainer.gaussians.split import split_gaussians_uniform
 
 from taichi_splatting.misc.parameter_class import ParameterClass
 from taichi_splatting import Gaussians3D, RasterConfig, Rendering
+from taichi_splatting.misc.sparse_adam import SparseAdam
 
 from taichi_splatting.renderer import gaussians_in_view, render_projected, project_to_image
 from taichi_splatting.perspective import CameraParams
+from taichi_splatting.misc import morton_sort 
+
 
 from splat_trainer.util.pointcloud import PointCloud
 
@@ -39,6 +42,8 @@ class TCNNConfig(GaussianSceneConfig):
 
   hidden:int             = 32
   layers:int             = 2
+
+  scene_extent:Optional[float]     = None
 
 
   def color_model(self):
@@ -69,10 +74,6 @@ class TCNNConfig(GaussianSceneConfig):
     )
 
 
-  def with_scene_extent(self, scene_extent:float) -> 'TCNNConfig':
-    learning_rates = copy.copy(self.learning_rates) 
-    learning_rates.position *= scene_extent
-    return replace(self, learning_rates=learning_rates)
   
 
 
@@ -80,13 +81,14 @@ class TCNNConfig(GaussianSceneConfig):
     color_model = self.color_model().to(device)
     color_targets = gaussians.feature.to(device)
 
-    features = torch.zeros(gaussians.batch_size[0], self.point_features)
+    features = torch.randn(gaussians.batch_size[0], self.point_features)
     gaussians = gaussians.replace(feature=features).to(device)
 
     self.pretrain_colors(gaussians.feature, color_model, color_targets, iters=1000)
     
-    centre, extent = camera_extents(camera_table)
-    config = self.with_scene_extent(extent)
+    if self.scene_extent is None:
+      centre, extent = camera_extents(camera_table)
+      config = replace(self, scene_extent=extent)
 
     return TCNNScene(gaussians, color_model, camera_table, device, config)
 
@@ -110,6 +112,9 @@ class TCNNConfig(GaussianSceneConfig):
         dirs = F.normalize(torch.randn(n, 3, device=device), dim=1)
         cam_feature = torch.zeros(n, self.image_features, device=device)
 
+        features = torch.nn.Parameter(
+          F.normalize(features.detach(), dim=1), requires_grad=True)
+
         feature = torch.cat([dirs, features, cam_feature], dim=1)
         colors = color_model(feature).to(torch.float32).sigmoid()
 
@@ -117,6 +122,7 @@ class TCNNConfig(GaussianSceneConfig):
 
         loss.backward()
         opt.step()
+        
         pbar.update(1)
         pbar.set_postfix(loss=loss.item())
 
@@ -136,11 +142,15 @@ class TCNNScene(GaussianScene):
 
     self.raster_config = RasterConfig()
     self.learning_rates = OmegaConf.to_container(config.learning_rates)
+    self.learning_rates ['position'] *= self.config.scene_extent
 
-    make_optimizer = partial(torch.optim.SparseAdam, betas=(0.7, 0.999))
+    make_optimizer = partial(SparseAdam, betas=(0.7, 0.999))
     self.points = ParameterClass.create(points.to_tensordict(), 
-          learning_rates = self.learning_rates, optimizer=make_optimizer)   
-    
+          learning_rates = self.learning_rates, 
+          optimizer=make_optimizer)   
+
+    self.sort_points()
+
     self.camera_table = camera_table
     
     image_features = torch.zeros(*camera_table.shape,  config.image_features, dtype=torch.float32, device=device)
@@ -168,28 +178,57 @@ class TCNNScene(GaussianScene):
   def update_learning_rate(self, lr_scale:float):
     # scaled_lr = {k: v * lr_scale for k, v in self.learning_rates.items()}
     # self.points.set_learning_rate(**scaled_lr)
-    self.points.set_learning_rate(position = self.learning_rates ['position'] * lr_scale)
+    self.points.set_learning_rate(position = 
+              self.learning_rates['position'] * lr_scale)
 
 
   def __repr__(self):
     return f"GaussianScene({self.points.position.shape[0]} points)"
 
-  def step(self, visible:torch.Tensor):
+  def step(self, visible:torch.Tensor, step:int):
     
-    self.points.step_sparse(visible)
+    self.points.step(visible_indexes=visible)
+    # check_finite(self.points)
     self.color_opt.step()
+    self.normalize()
+
+  
+  def normalize(self):
+
+    # max_alpha = inverse_sigmoid(self.raster_config.clamp_max_alpha)
+    # min_alpha = inverse_sigmoid(self.raster_config.alpha_threshold)
+
+    # min_size = math.log(self.config.scene_extent / 1000.0)
+    # self.points.log_scaling = torch.nn.Parameter(
+    #   torch.clamp(self.points.log_scaling.detach(), min=min_size), requires_grad=True)
+    
+    # self.points.alpha_logit = torch.nn.Parameter(
+    #   torch.clamp(self.points.alpha_logit.detach(),
+    #   min=min_alpha, max=max_alpha), requires_grad=True)
 
     self.points.rotation = torch.nn.Parameter(
       F.normalize(self.points.rotation.detach(), dim=1), requires_grad=True)
 
+
   def zero_grad(self):
     self.points.zero_grad()
 
+  def reg_loss(self):
+    scale = torch.exp(self.points.log_scaling).mean()
+    opacity = torch.sigmoid(self.points.alpha_logit).mean()
+    return scale * 0.1 + opacity * 0.01
+
+
+  def sort_points(self):
+    idx = morton_sort.argsort_dedup(self.points.position, resolution=self.config.scene_extent / 10000.0)
+    self.points = self.points[idx.long()]
+
+    return idx
 
   def split_and_prune(self, keep_mask, split_idx):
     splits = split_gaussians_uniform(self.gaussians[split_idx], n=2)
     self.points = self.points[keep_mask].append_tensors(splits.to_tensordict())
-    return self
+
 
   @property
   def gaussians(self):
@@ -214,15 +253,19 @@ class TCNNScene(GaussianScene):
     output_dir.mkdir(parents=True, exist_ok=True)
     write_gaussians(output_dir / 'point_cloud.ply', self.gaussians.detach(), with_sh=False)
 
-  def log(self, logger:Logger, step:int):
+  def get_point_cloud(self):
     image_idx = torch.zeros(len(self.camera_table.shape), device=self.device, dtype=torch.long)
     camera_position = self.camera_table.camera_centers[image_idx.unbind(0)]
 
     colors = self.evaluate_colors(torch.arange(self.num_points, device=self.device), image_idx, camera_position)
-
-    point_cloud = PointCloud(self.gaussians.position.detach(), colors)
-    logger.log_cloud("point_cloud", point_cloud, step=step)
+    return PointCloud(self.gaussians.position.detach(), colors)
     
+
+  def log(self, logger:Logger, step:int):
+    for k, v in dict(log_scaling=self.points.log_scaling, 
+                     alpha_logit=self.points.alpha_logit,
+                     feature=self.points.feature).items():
+      logger.log_histogram(f"points/{k}", v.detach(), step=step)
 
 
   def render(self, camera_params:CameraParams, image_idx:torch.Tensor, **options) -> Rendering:

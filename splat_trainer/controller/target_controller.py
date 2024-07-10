@@ -19,6 +19,8 @@ class PointStatistics:
 
   visible : torch.Tensor  # (N, ) - number of times the point was visible
   in_view : torch.Tensor  # (N, ) - number of times the point was in the view volume
+
+  radii : torch.Tensor # (N, ) - maximum screen space radii
   
 
   @staticmethod
@@ -29,6 +31,9 @@ class PointStatistics:
 
       visible=torch.zeros(batch_size, dtype=torch.int16, device=device),
       in_view=torch.zeros(batch_size, dtype=torch.int16, device=device),
+
+      radii=torch.zeros(batch_size, dtype=torch.float32, device=device),
+
       batch_size=(batch_size,)
     )
     
@@ -49,6 +54,9 @@ class TargetConfig(ControllerConfig):
 
   # min number of times a point must be visible recently to be considered for splitting/pruning
   min_visibility:int = 20 
+
+  max_radius:float = 0.1 # max screenspace radius (proportion of longest side) before splitting
+  min_radius: float = 1.0 / 1000.
 
   def make_controller(self, scene:GaussianScene, 
                densify_interval:int, total_steps:int):
@@ -93,7 +101,7 @@ class TargetController(Controller):
       t = max(0, (2 * step / self.total_steps) - 1)
 
       candidates = torch.nonzero(self.points.visible >= config.min_visibility).squeeze(1)
-      points = self.points[candidates]
+      points:PointStatistics = self.points[candidates]
 
 
       if candidates.shape[0] == 0:
@@ -103,12 +111,17 @@ class TargetController(Controller):
       else:
         # quadratic decay
         quantile = self.splits_per_densify * (1 - t)**2
-
+ 
         split_thresh = torch.quantile(points.split_score, 1 - (quantile * split_ratio))
         prune_thresh = torch.quantile(points.prune_cost, quantile * 1/split_ratio )
 
         pruneable = (points.prune_cost <= prune_thresh) 
-        splittable = (points.split_score > split_thresh) & ~pruneable
+        splittable = (
+            # ((points.radii > config.max_radius))  |
+               (points.split_score > split_thresh)
+          ) & ~pruneable
+
+
       
       split_idx, prune_idx =  candidates[splittable], candidates[pruneable]
 
@@ -121,6 +134,8 @@ class TargetController(Controller):
 
 
   def densify_and_prune(self, step:int):
+    # self.points = self.points[self.scene.sort_points()]
+
     split_idx, prune_idx, counts = self.find_split_prune_indexes(step)
 
     keep_mask = torch.ones(self.points.batch_size[0], dtype=torch.bool, device=self.scene.device)
@@ -134,6 +149,7 @@ class TargetController(Controller):
 
     new_points = PointStatistics.zeros(split_idx.shape[0] * 2, device=self.scene.device)
     self.points = torch.cat([self.points, new_points], dim=0)
+
     return counts    
 
 
@@ -151,6 +167,11 @@ class TargetController(Controller):
 
     points.prune_cost[idx] = torch.maximum(points.prune_cost[idx]  * self.ema_alpha, prune_cost) 
     points.split_score[idx] = torch.maximum(points.split_score[idx] * self.ema_alpha, split_score )  
+
+  
+    if rendering.radii is not None:
+      points.radii[idx] = torch.maximum(points.radii[idx], 
+            rendering.radii / max(rendering.image_size))
 
 
     points.in_view[idx] += 1
