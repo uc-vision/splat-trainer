@@ -18,13 +18,12 @@ from splat_trainer.scene.scene import GaussianSceneConfig, GaussianScene
 from splat_trainer.gaussians.split import split_gaussians_uniform
 
 
-from taichi_splatting.misc.parameter_class import ParameterClass
+from taichi_splatting.optim.parameter_class import ParameterClass
 from taichi_splatting import Gaussians3D, RasterConfig, Rendering
-from taichi_splatting.misc.sparse_adam import SparseAdam
+from taichi_splatting.optim.sparse_adam import SparseAdam
 
 from taichi_splatting.renderer import gaussians_in_view, render_projected, project_to_image
 from taichi_splatting.perspective import CameraParams
-from taichi_splatting.misc import morton_sort 
 
 
 from splat_trainer.util.pointcloud import PointCloud
@@ -144,12 +143,14 @@ class TCNNScene(GaussianScene):
     self.learning_rates = OmegaConf.to_container(config.learning_rates)
     self.learning_rates ['position'] *= self.config.scene_extent
 
-    make_optimizer = partial(SparseAdam, betas=(0.7, 0.999))
+    make_optimizer = partial(SparseAdam, betas=(0.9, 0.999))
+    parameter_groups = {k:dict(lr=lr) for k, lr in self.learning_rates.items()}
+
     self.points = ParameterClass.create(points.to_tensordict(), 
-          learning_rates = self.learning_rates, 
+          parameter_groups=parameter_groups, 
           optimizer=make_optimizer)   
 
-    self.sort_points()
+    # self.sort_points()
 
     self.camera_table = camera_table
     
@@ -219,11 +220,11 @@ class TCNNScene(GaussianScene):
     return scale * 0.1 + opacity * 0.01
 
 
-  def sort_points(self):
-    idx = morton_sort.argsort_dedup(self.points.position, resolution=self.config.scene_extent / 10000.0)
-    self.points = self.points[idx.long()]
+  # def sort_points(self):
+  #   idx = morton_sort.argsort_dedup(self.points.position, resolution=self.config.scene_extent / 10000.0)
+  #   self.points = self.points[idx.long()]
 
-    return idx
+  #   return idx
 
   def split_and_prune(self, keep_mask, split_idx):
     splits = split_gaussians_uniform(self.gaussians[split_idx], n=2)

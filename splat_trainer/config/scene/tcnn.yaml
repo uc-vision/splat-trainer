@@ -6,10 +6,10 @@ trainer:
     _target_: splat_trainer.scene.TCNNConfig
 
     learning_rates:
-      position:     0.000002
+      position:     0.0000002
       log_scaling:  0.02
       rotation:     0.0025
-      alpha_logit:  0.05
+      alpha_logit:  0.025
       feature:   0.1
 
 

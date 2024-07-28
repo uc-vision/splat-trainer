@@ -63,13 +63,14 @@ def split_gaussians(points: Gaussians3D, n:int=2, scaling:Optional[float]=None) 
   return split_by_samples(points, samples)
 
 
-def split_gaussians_uniform(points: Gaussians3D, n:int=2, scaling:Optional[float]=None, noise=0.1) -> Gaussians3D:
+def split_gaussians_uniform(points: Gaussians3D, n:int=2, scaling:Optional[float]=None, noise=0.0) -> Gaussians3D:
   """ Split along most significant axis """
   axis = F.one_hot(torch.argmax(points.log_scaling, dim=1), num_classes=3)
   values = torch.linspace(-1, 1, n, device=points.position.device)
 
   samples = values.view(1, -1, 1) * axis.view(-1, 1, 3)
-  samples += torch.randn_like(samples) * noise
+  if noise > 0:
+    samples += torch.randn_like(samples) * noise
 
   if scaling is None:
     scaling = 1 / math.sqrt(n)

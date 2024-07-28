@@ -1,6 +1,6 @@
 
-import copy
 from dataclasses import  dataclass, replace
+from functools import partial
 from pathlib import Path
 from typing import Optional
 from beartype import beartype
@@ -14,12 +14,12 @@ from splat_trainer.logger.logger import Logger
 from splat_trainer.scene.io import write_gaussians
 from splat_trainer.scene.scene import GaussianSceneConfig, GaussianScene
 from splat_trainer.gaussians.split import  split_gaussians_uniform
-from splat_trainer.util.misc import  rgb_to_sh, sh_to_rgb
+from splat_trainer.util.misc import  rgb_to_sh
 
-from taichi_splatting.misc.parameter_class import ParameterClass
+from taichi_splatting.optim.parameter_class import ParameterClass
 from taichi_splatting import Gaussians3D, RasterConfig, render_gaussians, Rendering
 from taichi_splatting.perspective import CameraParams
-
+from taichi_splatting.optim.sparse_adam import SparseAdam
 
 
 
@@ -59,9 +59,11 @@ class SHScene(GaussianScene):
     self.learning_rates = OmegaConf.to_container(config.learning_rates)
     self.learning_rates ['position'] *= self.config.scene_extent
 
+    parameter_groups = {k:dict(lr=lr) for k, lr in self.learning_rates.items()}
 
+    create_optimizer = partial(SparseAdam, betas=(0.7, 0.999))
     self.points = ParameterClass.create(points.to_tensordict().to(device), 
-          learning_rates = self.learning_rates)   
+          parameter_groups = parameter_groups, optimizer=create_optimizer)   
         
   
   @property 
@@ -77,7 +79,6 @@ class SHScene(GaussianScene):
     self.points.set_learning_rate(position = self.learning_rates ['position'] * lr_scale)
 
 
-
   def __repr__(self):
     return f"GaussianScene({self.points.position.shape[0]} points)"
 
@@ -86,7 +87,7 @@ class SHScene(GaussianScene):
     self.points.feature.grad[..., d*d:] = 0
     
     self.points.feature.grad[..., 1:] /= self.config.sh_ratio
-    self.points.step()
+    self.points.step(visible_indexes=visible)
 
     self.points.rotation = torch.nn.Parameter(
       F.normalize(self.points.rotation.detach(), dim=1), requires_grad=True)

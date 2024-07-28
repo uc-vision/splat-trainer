@@ -1,5 +1,7 @@
 
 from dataclasses import  dataclass
+import math
+from beartype import beartype
 from beartype.typing import Optional
 import numpy as np
 from taichi_splatting import Rendering
@@ -36,7 +38,6 @@ class PointStatistics:
 
       batch_size=(batch_size,)
     )
-    
 
 
 
@@ -46,8 +47,8 @@ class TargetConfig(ControllerConfig):
   # target point cloud size - if None then optimize for the current size
   target_count:Optional[int] = None
 
-  # base rate (relative to count) to split points every 100 iterations
-  split_rate:float = 0.05
+  # base rate (relative to count) to prune points 
+  prune_rate:float = 0.2
 
   # max ratio of points to split/prune
   max_ratio:float = 4.0
@@ -76,11 +77,10 @@ class TargetController(Controller):
     self.total_steps = total_steps
 
     self.target_count = config.target_count or scene.num_points
-    self.points = PointStatistics.zeros(scene.num_points, device=scene.device)
-       
-    self.splits_per_densify = (1 + config.split_rate) ** (densify_interval / 100) - 1.0
-    self.ema_alpha  = (0.1 ** (2.0 / config.min_visibility))
+    self.start_count = scene.num_points 
 
+    self.points = PointStatistics.zeros(scene.num_points, device=scene.device)
+    self.ema_alpha  = (0.1 ** (2.0 / config.min_visibility))
 
 
   def log_histograms(self, logger:Logger, step:int):
@@ -93,56 +93,43 @@ class TargetController(Controller):
 
 
   def find_split_prune_indexes(self, step:int):
-      config = self.config  
+    config = self.config  
+    n = self.points.shape[0]
+    t = max(0, step / self.total_steps)
+  
+    # nonlinear point count schedule
+    t_points = min(math.pow(t * 2, 0.5), 1.0)
 
-      split_ratio = np.clip(self.target_count / self.scene.num_points, 
-                              a_min=1/config.max_ratio, a_max=config.max_ratio)
-        
-      t = max(0, (2 * step / self.total_steps) - 1)
+    # number of points is controlled directly and fixed 
+    target  = math.ceil((1 - t_points) * self.start_count + t_points * config.target_count)
 
-      candidates = torch.nonzero(self.points.visible >= config.min_visibility).squeeze(1)
-      points:PointStatistics = self.points[candidates]
-
-
-      if candidates.shape[0] == 0:
-        splittable, pruneable = [
-          torch.zeros(0, dtype=torch.bool, device=candidates.device) for _ in range(2)]
-
-      else:
-        # quadratic decay
-        quantile = self.splits_per_densify * (1 - t)**2
- 
-        split_thresh = torch.quantile(points.split_score, 1 - (quantile * split_ratio))
-        prune_thresh = torch.quantile(points.prune_cost, quantile * 1/split_ratio )
-
-        pruneable = (points.prune_cost <= prune_thresh) 
-        splittable = (
-            # ((points.radii > config.max_radius))  |
-               (points.split_score > split_thresh)
-          ) & ~pruneable
+    # number of pruned points is controlled by the split rated
+    n_prune = math.ceil(config.prune_rate * n * (1 - t))
 
 
-      
-      split_idx, prune_idx =  candidates[splittable], candidates[pruneable]
+    n = self.points.split_score.shape[0]
+    prune_mask = take_n(self.points.prune_cost, n_prune, descending=False)
 
-      counts = dict(n=self.points.batch_size[0], 
-              visible=candidates.shape[0],
-              split=split_idx.shape[0],
-              prune=prune_idx.shape[0])
-         
-      return split_idx, prune_idx, counts     
+    # number of split points is directly set to achieve the target count 
+    # (and compensate for pruned points)
+    target_split = ((target - n) + n_prune) 
+    split_mask = take_n(self.points.split_score, target_split, descending=True)
 
+    both = (split_mask & prune_mask)
+    return split_mask ^ both, prune_mask ^ both
 
   def densify_and_prune(self, step:int):
-    # self.points = self.points[self.scene.sort_points()]
 
-    split_idx, prune_idx, counts = self.find_split_prune_indexes(step)
+    split_mask, prune_mask = self.find_split_prune_indexes(step)
+    split_idx = split_mask.nonzero().squeeze(1)
 
-    keep_mask = torch.ones(self.points.batch_size[0], dtype=torch.bool, device=self.scene.device)
-    keep_mask[prune_idx] = False
-    keep_mask[split_idx] = False
+    n_prune = prune_mask.sum().item()
+    n_split = split_idx.shape[0]
 
-    # keep_mask[self.points.age > 100 & (self.points.visible < 1)] = False
+    max_prune = self.points.prune_cost[prune_mask].max().item() if n_prune > 0 else 0.
+    min_split = self.points.split_score[split_idx].min().item() if n_split > 0 else 0.
+
+    keep_mask = ~(split_mask | prune_mask)
 
     self.scene.split_and_prune(keep_mask, split_idx)
     self.points = self.points[keep_mask]
@@ -150,7 +137,12 @@ class TargetController(Controller):
     new_points = PointStatistics.zeros(split_idx.shape[0] * 2, device=self.scene.device)
     self.points = torch.cat([self.points, new_points], dim=0)
 
-    return counts    
+    stats = dict(n=self.points.batch_size[0], 
+            visible=(self.points.visible > 0).sum().item(),
+            prune=n_prune,       split=n_split,
+            max_prune=max_prune, min_split=min_split)
+    
+    return stats
 
 
   def add_rendering(self, rendering:Rendering): 
@@ -181,3 +173,15 @@ class TargetController(Controller):
 
 
 
+
+@beartype
+def take_n(t:torch.Tensor, n:int, descending=False):
+  """ Return mask of n largest or smallest values in a tensor."""
+  idx = torch.argsort(t, descending=descending)[:n]
+
+  # convert to mask
+  mask = torch.zeros_like(t, dtype=torch.bool)
+  mask[idx] = True
+
+  return mask
+  

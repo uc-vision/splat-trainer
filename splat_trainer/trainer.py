@@ -60,7 +60,7 @@ class TrainConfig:
 
   eval_steps: int = 1000
   num_logged_images: int = 5
-  log_interval: int = 5
+  log_interval: int = 20
 
   ssim_weight: float = 0.2
   ssim_scale: float = 0.5
@@ -311,8 +311,9 @@ class Trainer:
       loss, losses = self.losses(rendering, image)
       loss.backward()
 
-    (visible, in_view) =  self.controller.add_rendering(rendering)
-    self.scene.step(visible, self.step)
+    with torch.no_grad():
+      (visible, in_view) =  self.controller.add_rendering(rendering)
+      self.scene.step(visible, self.step)
 
     self.scene.zero_grad()
     del loss
@@ -347,6 +348,7 @@ class Trainer:
 
           torch.cuda.empty_cache()
 
+
       if since_densify >= self.config.densify_interval:
         self.controller.log_histograms(self.logger, self.step)
         densify_metrics = self.controller.densify_and_prune(self.step)
@@ -371,8 +373,9 @@ class Trainer:
 
         means = {k:np.mean(v) for k, v in steps.items()}
         metrics = {k:f"{means[k]:.4f}" for k in ['l1', 'ssim', 'reg'] if k in means}
+        densify_pbar = {k:f"{densify_metrics[k]}" for k in ['split', 'prune', 'n'] if k in densify_metrics}
 
-        self.pbar.set_postfix(**metrics, **eval_metrics, **densify_metrics)        
+        self.pbar.set_postfix(**metrics, **eval_metrics, **densify_pbar)        
         self.log_values("train", means)
 
         # skip first step as it will include compiling kernels
