@@ -35,13 +35,19 @@ class COLMAPDataset(Dataset):
     self.projections = []
     camera_idx = {}
 
-
     for i, (k, camera) in enumerate(self.reconstruction.cameras.items()):
       camera.rescale(image_scale)
-      m = camera.calibration_matrix()
-      self.projections.append(m)
+      
+      fx = camera.focal_length_x
+      fy = camera.focal_length_y
+      cx = camera.principal_point_x
+      cy = camera.principal_point_y
+
+      proj = np.array([fx, fy, cx, cy])  
+      
+      self.projections.append(proj)
       camera_idx[k] = i
-      print(f"Camera {k}@{camera.width}x{camera.height} fx={m[0, 0]:.2f} fy={m[1, 1]:.2f} cx={m[0, 2]:.2f} cy={m[1, 2]:.2f}")
+      print(f"Camera {k}@{camera.width}x{camera.height} fx={fx:.2f} fy={fy:.2f} cx={cx:.2f} cy={cy:.2f}")
 
 
     def image_info(image:pycolmap.Image) -> Tuple[np.array, str, int]:

@@ -25,6 +25,7 @@ dependencies = [
   'scipy',
   'tensorboard',
   'wandb',
+  'termcolor',
 #  'tinycudann @ git+https://github.com/NVlabs/tiny-cuda-nn/#subdirectory=bindings/torch'
 ]
 

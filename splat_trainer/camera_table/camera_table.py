@@ -58,7 +58,7 @@ def camera_extents(cameras:CameraTable):
 class CameraRigTable(CameraTable):
   def __init__(self, rig_t_world:torch.Tensor,   # (N, 4, 4) - poses for the whole camera rig
                      camera_t_rig:torch.Tensor,  # (C, 4, 4) - camera poses inside the rig
-                     projection:torch.Tensor   # (C, 3, 3) - camera intrinsics for each camera in rig
+                     projection:torch.Tensor   # (C, 4) - camera intrinsics (fx, fy, cx, cy) for each camera in rig
                     ):
     super().__init__()
 
@@ -101,7 +101,7 @@ class MultiCameraTable(CameraTable):
   def __init__(self, 
                camera_t_world:torch.Tensor, # (N, 4, 4)
                camera_idx:torch.Tensor,     # (N,) - index into projection table (0, P-1)
-               projection:torch.Tensor     # (P, 4, 4),
+               projection:torch.Tensor     # (P, 4) fx, fy, cx, cy
               ):
     super().__init__()
 
@@ -140,17 +140,15 @@ def camera_json(camera_table:CameraTable):
     camera_t_world, proj = [x.squeeze(0) for x in camera_table(idx.unsqueeze(0))]
 
     r, t = split_rt(torch.linalg.inv(camera_t_world))
-
+    fx, fy, cx, cy = proj.cpu().tolist()
 
     return {
       "id": i,
       "position": t.cpu().numpy().tolist(),
       "rotation": r.cpu().numpy().tolist(),
-      "fy": proj[1, 1].item(),
-      "fx": proj[0, 0].item(),
-      "cx": proj[0, 2].item(),
-      "cy": proj[1, 2].item(),
-    }
+      "fx": fx, "fy": fy, 
+      "cx": cx, "cy": cy
+      }
 
   return [export_camera(i, idx) 
           for i, idx in enumerate(camera_table.all_cameras.unbind(0))

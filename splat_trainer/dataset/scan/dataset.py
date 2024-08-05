@@ -81,7 +81,7 @@ class ScanDataset(Dataset):
        [camera.camera_t_parent for camera in self.scan.cameras.values()])
     
     world_t_rig = torch.from_numpy(np.array(self.scan.rig_poses)).to(torch.float32)
-    projections = np.array([camera.intrinsic for camera in self.scan.cameras.values()])
+    projections = np.array([[*camera.focal_length, *camera.principal_point] for camera in self.scan.cameras.values()])
 
     
     return CameraRigTable(

@@ -1,3 +1,4 @@
+import argparse
 import signal
 import traceback
 import hydra
@@ -7,13 +8,26 @@ from splat_trainer.util import config
 
 import numpy as np
 import torch
+import debugpy
 
 
 config.add_resolvers()
 
 
-@hydra.main(config_name="config", config_path="../config", version_base="1.2")
-def main(cfg):
+def main():
+  parser = argparse.ArgumentParser()
+  parser.add_argument("overrides", nargs="*", help="hydra overrides var=value")
+  parser.add_argument("--debug_port", type=int, default=None, help="Enable python remote debugger on port")
+  args = parser.parse_args()
+
+  hydra.initialize(config_path="../config", version_base="1.2")
+  cfg = hydra.compose(config_name="config", overrides=args.overrides)
+
+  if args.debug_port is not None:
+    debugpy.listen(("localhost", args.debug_port))
+    print(f"Waiting for debugger attach on port {args.debug_port}")
+    debugpy.wait_for_client()
+
   train_with_config(cfg)
 
 def train_with_config(cfg):

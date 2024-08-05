@@ -22,7 +22,7 @@ from taichi_splatting.optim.parameter_class import ParameterClass
 from taichi_splatting import Gaussians3D, RasterConfig, Rendering
 from taichi_splatting.optim.sparse_adam import SparseAdam
 
-from taichi_splatting.renderer import gaussians_in_view, render_projected, project_to_image
+from taichi_splatting.renderer import render_projected, project_to_image
 from taichi_splatting.perspective import CameraParams
 
 
@@ -252,7 +252,7 @@ class TCNNScene(GaussianScene):
 
   def write_to(self, output_dir:Path):
     output_dir.mkdir(parents=True, exist_ok=True)
-    write_gaussians(output_dir / 'point_cloud.ply', self.gaussians.detach(), with_sh=False)
+    write_gaussians(output_dir / 'point_cloud.ply', self.gaussians.apply(torch.detach), with_sh=False)
 
   def get_point_cloud(self):
     image_idx = torch.zeros(len(self.camera_table.shape), device=self.device, dtype=torch.long)
@@ -270,13 +270,10 @@ class TCNNScene(GaussianScene):
 
 
   def render(self, camera_params:CameraParams, image_idx:torch.Tensor, **options) -> Rendering:
-    
     config = self.raster_config
-    indexes = gaussians_in_view(self.points.position, camera_params, config.tile_size, config.margin_tiles)
 
+    gaussians2d, depthvars, indexes = project_to_image(self.gaussians, camera_params, config)
     features = self.evaluate_colors(indexes, image_idx, camera_params.camera_position)
-    gaussians2d, depthvars = project_to_image(self.gaussians, indexes, camera_params)
-
 
     return render_projected(indexes, gaussians2d, features, depthvars, 
             camera_params, config, **options)

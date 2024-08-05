@@ -39,7 +39,11 @@ class PointStatistics:
       batch_size=(batch_size,)
     )
 
-
+def smoothstep(x, a, b, interval=(0, 1)):
+  # interpolate with smoothstep function
+  r = interval[1] - interval[0]
+  x =  np.clip((x - interval[0]) / r, 0, 1)
+  return a + (b - a) * (3 * x ** 2 - 2 * x ** 3)
 
 @dataclass
 class TargetConfig(ControllerConfig):
@@ -92,16 +96,15 @@ class TargetController(Controller):
     logger.log_histogram("points/visible", self.points.visible, step)
 
 
+
+
   def find_split_prune_indexes(self, step:int):
     config = self.config  
     n = self.points.shape[0]
     t = max(0, step / self.total_steps)
   
     # nonlinear point count schedule
-    t_points = min(math.pow(t * 2, 0.5), 1.0)
-
-    # number of points is controlled directly and fixed 
-    target  = math.ceil((1 - t_points) * self.start_count + t_points * config.target_count)
+    target = math.ceil(smoothstep(t, self.start_count, config.target_count, interval=(0.0, 0.6)))
 
     # number of pruned points is controlled by the split rated
     n_prune = math.ceil(config.prune_rate * n * (1 - t))
@@ -126,8 +129,8 @@ class TargetController(Controller):
     n_prune = prune_mask.sum().item()
     n_split = split_idx.shape[0]
 
-    max_prune = self.points.prune_cost[prune_mask].max().item() if n_prune > 0 else 0.
-    min_split = self.points.split_score[split_idx].min().item() if n_split > 0 else 0.
+    prune_thresh = self.points.prune_cost[prune_mask].max().item() if n_prune > 0 else 0.
+    split_thresh = self.points.split_score[split_idx].min().item() if n_split > 0 else 0.
 
     keep_mask = ~(split_mask | prune_mask)
 
@@ -140,7 +143,7 @@ class TargetController(Controller):
     stats = dict(n=self.points.batch_size[0], 
             visible=(self.points.visible > 0).sum().item(),
             prune=n_prune,       split=n_split,
-            max_prune=max_prune, min_split=min_split)
+            max_prune=prune_thresh, min_split=split_thresh)
     
     return stats
 
@@ -172,6 +175,8 @@ class TargetController(Controller):
     return (vis_idx, idx)
 
 
+  def step(self, rendering:Rendering):
+    (vis_idx, idx) = self.add_rendering(rendering)
 
 
 @beartype

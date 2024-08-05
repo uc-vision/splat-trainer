@@ -46,11 +46,29 @@ def transform33(transform, points):
   return transformed[..., 0].reshape(-1, 3)
 
 
-def expand_proj(transform:torch.Tensor):
+def expand_proj(transform:torch.Tensor, batch_dims=1):
   # expand 3x3 to 4x4 by padding 
-  expanded = torch.zeros((*transform.shape[:-2], 4, 4), dtype=transform.dtype, device=transform.device)
-  
-  expanded[..., :3, :3] = transform
-  expanded[..., 3, 3] = 1.0
-  return expanded
+  dims = transform.shape[:batch_dims]
+
+  if transform.shape[batch_dims:] == (3, 3):
+    expanded = torch.zeros((*batch_dims, 4, 4), dtype=transform.dtype, device=transform.device)
+
+    expanded[..., :3, :3] = transform
+    expanded[..., 3, 3] = 1.0
+    return expanded
+  elif transform.shape[batch_dims:] == (4,):
+    expanded = torch.zeros((*dims, 4, 4), dtype=transform.dtype, device=transform.device)
+
+    fx, fy, cx, cy = transform.unbind(-1)
+    expanded[..., 0, 0] = fx
+    expanded[..., 1, 1] = fy
+    expanded[..., 0, 2] = cx
+    expanded[..., 1, 2] = cy
+
+    expanded[..., 2, 2] = 1.0
+    expanded[..., 3, 3] = 1.0
+    return expanded
+  else:
+    raise ValueError(f"Expected (..., 3,3) matrix or (..., 4) intrinsic (fx, fy, cx, cy) tensor, got: {transform.shape}")
+
         

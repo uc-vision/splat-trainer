@@ -151,11 +151,11 @@ class Trainer:
 
   def camera_params(self, cam_idx:torch.Tensor, image:torch.Tensor):
         near, far = self.dataset.depth_range()
-        camera_t_world, image_t_camera = self.camera_table.lookup(cam_idx)
+        camera_t_world, projection = self.camera_table.lookup(cam_idx)
 
         return perspective.CameraParams(
             T_camera_world=camera_t_world,
-            T_image_camera=image_t_camera,
+            projection=projection,
             image_size=(image.shape[1], image.shape[0]),
             near_plane=near,
             far_plane=far,

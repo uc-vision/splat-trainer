@@ -82,8 +82,8 @@ def point_visibility(info:CameraInfo,
   
   counts = torch.zeros(points.shape[0], dtype=torch.int32, device=info.camera_table.device)
 
-  cam_t_world, image_t_cam = info.camera_table(info.camera_table.all_cameras)
-  image_t_world = expand_proj(image_t_cam) @ cam_t_world
+  cam_t_world, proj = info.camera_table(info.camera_table.all_cameras)
+  image_t_world = expand_proj(proj, 1) @ cam_t_world
 
   homog_points = make_homog(points)
 
