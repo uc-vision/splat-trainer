@@ -159,7 +159,6 @@ class Trainer:
             image_size=(image.shape[1], image.shape[0]),
             near_plane=near,
             far_plane=far,
-            blur_cov=self.blur_cov
         ).to(self.device, dtype=torch.float32)
 
 

@@ -8,7 +8,6 @@ from omegaconf import DictConfig, OmegaConf
 
 import torch
 import torch.nn.functional as F
-import tinycudann as tcnn
 from tqdm import tqdm
 
 from splat_trainer.camera_table.camera_table import CameraTable, camera_extents
@@ -47,6 +46,7 @@ class TCNNConfig(GaussianSceneConfig):
 
   def color_model(self):
     num_features = self.image_features + self.point_features
+    import tinycudann as tcnn
 
     return tcnn.NetworkWithInputEncoding(
       num_features + 3, 3,
