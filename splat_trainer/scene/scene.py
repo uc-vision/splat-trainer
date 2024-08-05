@@ -34,9 +34,8 @@ class GaussianScene(metaclass=ABCMeta):
   def log(self, logger:Logger):
     raise NotImplementedError
   
-
-  @abstractmethod
   @property
+  @abstractmethod
   def num_points(self) -> int:
     raise NotImplementedError
 
