@@ -7,6 +7,7 @@ from taichi_splatting.perspective import CameraParams
 from splat_trainer.camera_table.camera_table import CameraTable
 from splat_trainer.logger.logger import Logger
 
+
   
 
 class GaussianScene(metaclass=ABCMeta):  
@@ -33,6 +34,17 @@ class GaussianScene(metaclass=ABCMeta):
   @abstractmethod
   def log(self, logger:Logger):
     raise NotImplementedError
+  
+  @property
+  @abstractmethod
+  def scale(self):
+    raise NotImplementedError
+  
+  @property
+  @abstractmethod
+  def opacity(self):
+    raise NotImplementedError
+  
   
 
   @property

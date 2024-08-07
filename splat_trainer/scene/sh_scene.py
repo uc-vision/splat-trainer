@@ -112,12 +112,13 @@ class SHScene(GaussianScene):
       logger.log_histogram(f"points/{k}", v.detach(), step=step)
 
 
-  def reg_loss(self):
-    scale = torch.exp(self.points.log_scaling).mean()
-    opacity = torch.sigmoid(self.points.alpha_logit).mean()
-
-    
-    return scale * 0.1 + opacity * 0.01
+  @property
+  def scale(self):
+    return torch.exp(self.points.log_scaling)
+  
+  @property
+  def opacity(self):
+    return torch.sigmoid(self.points.alpha_logit)
 
 
   @property

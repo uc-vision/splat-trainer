@@ -194,18 +194,6 @@ class TCNNScene(GaussianScene):
 
   
   def normalize(self):
-
-    # max_alpha = inverse_sigmoid(self.raster_config.clamp_max_alpha)
-    # min_alpha = inverse_sigmoid(self.raster_config.alpha_threshold)
-
-    # min_size = math.log(self.config.scene_extent / 1000.0)
-    # self.points.log_scaling = torch.nn.Parameter(
-    #   torch.clamp(self.points.log_scaling.detach(), min=min_size), requires_grad=True)
-    
-    # self.points.alpha_logit = torch.nn.Parameter(
-    #   torch.clamp(self.points.alpha_logit.detach(),
-    #   min=min_alpha, max=max_alpha), requires_grad=True)
-
     self.points.rotation = torch.nn.Parameter(
       F.normalize(self.points.rotation.detach(), dim=1), requires_grad=True)
 
@@ -213,17 +201,17 @@ class TCNNScene(GaussianScene):
   def zero_grad(self):
     self.points.zero_grad()
 
-  def reg_loss(self):
-    scale = torch.exp(self.points.log_scaling).mean()
-    opacity = torch.sigmoid(self.points.alpha_logit).mean()
-    return scale * 0.1 + opacity * 0.01
+
+  @property
+  def scale(self):
+    return torch.exp(self.points.log_scaling)
+  
+  @property
+  def opacity(self):
+    return torch.sigmoid(self.points.alpha_logit)
 
 
-  # def sort_points(self):
-  #   idx = morton_sort.argsort_dedup(self.points.position, resolution=self.config.scene_extent / 10000.0)
-  #   self.points = self.points[idx.long()]
 
-  #   return idx
 
   def split_and_prune(self, keep_mask, split_idx):
     splits = split_gaussians_uniform(self.gaussians[split_idx], n=2)

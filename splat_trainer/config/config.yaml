@@ -44,6 +44,9 @@ trainer:
   ssim_weight: 1.0 # ssim is expensive but converges faster than just l1 loss
   ssim_scale: 0.5 # use ssim at a lower resolution (less computation)
 
+  scale_reg: 0.1
+  opacity_reg: 0.01
+
   blur_cov: 0.3
 
   raster_config: 

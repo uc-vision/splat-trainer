@@ -65,6 +65,9 @@ class TrainConfig:
   ssim_weight: float = 0.2
   ssim_scale: float = 0.5
 
+  scale_reg: float = 0.1
+  opacity_reg: float = 0.1
+
   radii_weight: float = 0.001
 
   blur_cov: float = 0.3
@@ -292,7 +295,7 @@ class Trainer:
       loss += ssim * self.config.ssim_weight 
       losses["ssim"] = ssim.item()
 
-    reg_loss = self.scene.reg_loss()
+    reg_loss = self.scene.scale.mean() * self.config.scale_reg + self.scene.opacity.mean() * self.config.opacity_reg
     losses["reg"] = reg_loss.item()
     loss += reg_loss 
 
