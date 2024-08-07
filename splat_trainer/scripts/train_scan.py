@@ -18,15 +18,28 @@ def main():
   parser = argparse.ArgumentParser()
   parser.add_argument("overrides", nargs="*", help="hydra overrides var=value")
   parser.add_argument("--debug_port", type=int, default=None, help="Enable python remote debugger on port")
-  args = parser.parse_args()
+  parser.add_argument("--target", type=int, default=None, help="Target point count")
+  parser.add_argument("--image_scale", type=float, default=None, help="Image scale")
+  parser.add_argument("--steps", type=int, default=None, help="Number of training steps")
 
-  hydra.initialize(config_path="../config", version_base="1.2")
-  cfg = hydra.compose(config_name="config", overrides=args.overrides)
+  args = parser.parse_args()
 
   if args.debug_port is not None:
     debugpy.listen(("localhost", args.debug_port))
     print(f"Waiting for debugger attach on port {args.debug_port}")
     debugpy.wait_for_client()
+
+  hydra.initialize(config_path="../config", version_base="1.2")
+  cfg = hydra.compose(config_name="config", overrides=args.overrides)
+
+  if args.target is not None:
+    cfg.trainer.controller.target_count = args.target
+
+  if args.image_scale is not None:
+    cfg.dataset.image_scale = args.image_scale
+
+  if args.steps is not None:
+    cfg.trainer.steps = args.steps
 
   train_with_config(cfg)
 
