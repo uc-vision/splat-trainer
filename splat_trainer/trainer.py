@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import gc
 import json
 import math
@@ -18,7 +18,7 @@ from termcolor import colored
  
 from splat_trainer.camera_table.camera_table import CameraInfo
 from splat_trainer.util.visibility import crop_cloud, random_cloud, random_points
-from taichi_splatting import Rendering, perspective
+from taichi_splatting import Gaussians3D, RasterConfig, Rendering, perspective
 from tqdm import tqdm 
 
 from splat_trainer.dataset import Dataset
@@ -30,7 +30,7 @@ from splat_trainer.logger.histogram import Histogram
 
 from splat_trainer.scene.sh_scene import  GaussianSceneConfig
 from splat_trainer.scheduler import Scheduler, Uniform
-from splat_trainer.util.colorize import colorize_depth, get_cv_colormap
+from splat_trainer.util.colorize import colorize, colorize_depth, get_cv_colormap
 from splat_trainer.util.containers import transpose_rows
 from splat_trainer.util.misc import CudaTimer, strided_indexes
 
@@ -71,6 +71,8 @@ class TrainConfig:
 
   lr_scheduler: Scheduler = Uniform()
   image_scaler: ImageScaler = NullScaler()
+
+  raster_config: RasterConfig = RasterConfig()
   
 
 class Trainer:
@@ -116,18 +118,24 @@ class Trainer:
       raise ValueError("No points visible in dataset images, check input data!")
 
     print(colored(f"Using {cropped.batch_size[0]} points from original {points.batch_size[0]}", 'yellow'))
-      
-    if config.background_points > 0:
-      near, far = self.camera_info.depth_range
-      bg_points = random_cloud(self.camera_info, self.config.background_points, 
-                               min_depth=(near + far * 0.1))
-      cropped = cropped.append(bg_points)
-
-
-    initial_gaussians = from_pointcloud(cropped, 
+  
+    initial_gaussians:Gaussians3D = from_pointcloud(cropped, 
                                         initial_scale=config.initial_point_scale,
                                         initial_alpha=config.initial_alpha,
                                         num_neighbors=config.num_neighbors)
+    
+    if config.background_points > 0:
+      near, far = self.camera_info.depth_range
+      bg_points = random_cloud(self.camera_info, self.config.background_points, 
+                               min_depth=(near + far * 0.01))
+    
+      bg_gaussians = from_pointcloud(bg_points, 
+                                        initial_scale=config.initial_point_scale * 2,
+                                        initial_alpha=config.initial_alpha,
+                                        num_neighbors=config.num_neighbors)
+      
+      initial_gaussians = initial_gaussians.concat(bg_gaussians)
+      
     
     self.output_path.mkdir(parents=True, exist_ok=True)
     cropped.save_ply(self.output_path / "input.ply")
@@ -189,7 +197,9 @@ class Trainer:
     pbar = tqdm(total=len(data), desc=f"rendering {name}", leave=False)
     for i, (filename, camera_params, cam_idx, image) in enumerate(self.iter_data(data)):
 
-      rendering = self.scene.render(camera_params, cam_idx, compute_radii=True, render_depth=True)
+      config = replace(self.config.raster_config, compute_split_heuristics=True, blur_cov=self.blur_cov)  
+      rendering = self.scene.render(camera_params, config, cam_idx, compute_radii=True, render_depth=True)
+      
       psnr = compute_psnr(rendering.image, image)
       l1 = torch.nn.functional.l1_loss(rendering.image, image)
 
@@ -200,7 +210,7 @@ class Trainer:
         self.log_image(f"{name}_images/{image_id}/render", rendering.image, 
                        caption=f"{filename} PSNR={psnr:.2f} L1={l1:.2f} step={self.step}")
         self.log_image(f"{name}_images/{image_id}/depth", 
-            colorize_depth(self.color_map, rendering.depth, 0.1), caption=filename)
+            colorize(self.color_map, rendering.depth), caption=filename)
 
         if self.step == 0:
           self.log_image(f"{name}_images/{image_id}/image", image, caption=filename)
@@ -303,8 +313,8 @@ class Trainer:
     image, camera_params = self.config.image_scaler(image, camera_params, self.image_scale)
 
     with timer:
-      rendering = self.scene.render(camera_params, image_idx, 
-                                    compute_split_heuristics=True,
+      config = replace(self.config.raster_config, compute_split_heuristics=True, blur_cov=self.blur_cov)  
+      rendering = self.scene.render(camera_params, config, image_idx, 
                                     compute_radii=True)
 
       loss, losses = self.losses(rendering, image)

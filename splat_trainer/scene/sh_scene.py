@@ -32,10 +32,7 @@ class SHConfig(GaussianSceneConfig):
   degree_steps: int = 2000
 
 
-  raster : RasterConfig = RasterConfig()
 
-
-    
 
   def from_color_gaussians(self, gaussians:Gaussians3D, camera_table:CameraTable, device:torch.device):
     sh_feature = torch.zeros(gaussians.batch_size[0], 3, (self.sh_degree + 1)**2)
@@ -55,7 +52,6 @@ class SHScene(GaussianScene):
     self.config = config
     self.camera_table = camera_table
 
-    self.raster_config = config.raster
     self.learning_rates = OmegaConf.to_container(config.learning_rates)
     self.learning_rates ['position'] *= self.config.scene_extent
 
@@ -129,13 +125,13 @@ class SHScene(GaussianScene):
       return Gaussians3D.from_tensordict(self.points.tensors)
       
 
-  def render(self, camera_params:CameraParams, cam_idx:torch.Tensor, 
+  def render(self, camera_params:CameraParams, config:RasterConfig, cam_idx:torch.Tensor, 
              **options) -> Rendering:
     
     
     return render_gaussians(self.gaussians, 
                      use_sh        = True,
-                     config        = self.raster_config,
+                     config        = config,
                      camera_params = camera_params,
                      **options)
   

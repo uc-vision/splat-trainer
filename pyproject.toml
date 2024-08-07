@@ -11,7 +11,7 @@ maintainers = [
 ]
 
 dependencies = [
-  'taichi-splatting >= 0.12.0',
+  'taichi-splatting >= 0.16.0',
   'tqdm',
   'plyfile',
   'pypcd4',
@@ -26,6 +26,7 @@ dependencies = [
   'tensorboard',
   'wandb',
   'termcolor',
+  'debugpy'
 #  'tinycudann @ git+https://github.com/NVlabs/tiny-cuda-nn/#subdirectory=bindings/torch'
 ]
 

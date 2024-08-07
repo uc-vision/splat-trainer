@@ -139,7 +139,6 @@ class TCNNScene(GaussianScene):
 
     self.color_model = color_model
 
-    self.raster_config = RasterConfig()
     self.learning_rates = OmegaConf.to_container(config.learning_rates)
     self.learning_rates ['position'] *= self.config.scene_extent
 
@@ -269,8 +268,7 @@ class TCNNScene(GaussianScene):
       logger.log_histogram(f"points/{k}", v.detach(), step=step)
 
 
-  def render(self, camera_params:CameraParams, image_idx:torch.Tensor, **options) -> Rendering:
-    config = self.raster_config
+  def render(self, camera_params:CameraParams, config:RasterConfig, image_idx:torch.Tensor, **options) -> Rendering:
 
     gaussians2d, depthvars, indexes = project_to_image(self.gaussians, camera_params, config)
     features = self.evaluate_colors(indexes, image_idx, camera_params.camera_position)

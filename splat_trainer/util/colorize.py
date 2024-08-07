@@ -18,3 +18,9 @@ def colorize_depth(color_map, depth, near=0.1):
   inv_depth = (255 * inv_depth).to(torch.int)
 
   return (color_map[inv_depth])
+
+
+def colorize(color_map, t):
+
+  t =  (t.clamp(0, 1) * 255).to(torch.int) 
+  return (color_map[t])

@@ -15,7 +15,7 @@ trainer:
 
     # TCNN specific
     image_features: 8
-    point_features: 8
+    point_features: 16
 
     hidden: 32
     layers: 4

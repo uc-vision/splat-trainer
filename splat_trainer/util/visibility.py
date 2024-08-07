@@ -42,6 +42,22 @@ def crop_cloud(info:CameraInfo, pcd:PointCloud) -> PointCloud:
     counts = point_visibility(info, pcd.points)
     return pcd[counts > 0]
 
+
+
+def inverse_ndc_depth(ndc_depth: torch.Tensor, near: float, far: float) -> torch.Tensor:
+  # ndc from 0 to 1 (instead of -1 to 1)
+  return (near * far - ndc_depth * near) / (far - ndc_depth * (far - near))
+
+
+@beartype 
+def random_ndc(n, depth_range:Tuple[Number, Number], device=None) -> torch.Tensor:
+    if device is None:
+        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+    depths = torch.rand((n, 1), device=device) 
+    return inverse_ndc_depth(depths, *depth_range)
+
+
 @beartype
 def random_points(info:CameraInfo, count:int) -> torch.Tensor:
     
@@ -55,7 +71,8 @@ def random_points(info:CameraInfo, count:int) -> torch.Tensor:
     norm_points = torch.rand(count, 2, device=device)
     image_points = norm_points * info.image_sizes[camera_idx]
 
-    depths = torch.rand((count, 1), device=device) * (depth_range[1] - depth_range[0]) + depth_range[0]
+    # depths = torch.rand((count, 1), device=device) * (depth_range[1] - depth_range[0]) + depth_range[0]
+    depths = random_ndc(count, depth_range, device=device)
     ones = torch.ones((count, 1), device=device)
 
     homog = torch.cat([image_points * depths, depths, ones], dim=1)

@@ -22,6 +22,9 @@ class WandbLogger(Logger):
 
     if dir is not None:
       dir = Path(dir).mkdir(parents=True, exist_ok=True)
+
+    wandb.require("core")
+
     self.run = wandb.init(project=project, 
                           name=name, 
                           config=log_config, 

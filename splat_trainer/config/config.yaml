@@ -11,8 +11,6 @@ hydra:
   job: 
     chdir: True
 
-
-
 trainer:
   _target_: splat_trainer.trainer.TrainConfig
   output_path: null
@@ -41,13 +39,15 @@ trainer:
   initial_point_scale: 0.5
 
   max_initial_points: null
-  background_points: 0
+  background_points: 50000
 
-  ssim_weight: 0.2 # ssim is expensive but converges faster than just l1 loss
+  ssim_weight: 1.0 # ssim is expensive but converges faster than just l1 loss
   ssim_scale: 0.5 # use ssim at a lower resolution (less computation)
 
   blur_cov: 0.3
 
+  raster_config: 
+    _target_: taichi_splatting.RasterConfig
 
 wait_exit: False
 debug: False

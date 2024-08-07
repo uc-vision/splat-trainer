@@ -15,5 +15,3 @@ trainer:
     sh_degree: 2
 
 
-    raster: 
-      _target_: taichi_splatting.RasterConfig
