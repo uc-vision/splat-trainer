@@ -60,7 +60,7 @@ class TrainConfig:
 
   eval_steps: int = 1000
   num_logged_images: int = 5
-  log_interval: int = 20
+  log_interval: int = 10
 
   ssim_weight: float = 0.2
   ssim_scale: float = 0.5

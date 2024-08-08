@@ -3,7 +3,6 @@ from numbers import Number
 from typing import Tuple
 from beartype import beartype
 import torch
-import torch.nn.functional as F
 
 from splat_trainer.camera_table.camera_table import CameraInfo, CameraTable
 from splat_trainer.util.pointcloud import PointCloud

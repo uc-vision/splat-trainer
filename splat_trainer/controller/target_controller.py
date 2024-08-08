@@ -23,6 +23,7 @@ class PointStatistics:
   in_view : torch.Tensor  # (N, ) - number of times the point was in the view volume
 
   radii : torch.Tensor # (N, ) - maximum screen space radii
+  running_depth : torch.Tensor # (N, ) - running average depth
   
 
   @staticmethod
@@ -35,6 +36,7 @@ class PointStatistics:
       in_view=torch.zeros(batch_size, dtype=torch.int16, device=device),
 
       radii=torch.zeros(batch_size, dtype=torch.float32, device=device),
+      running_depth=torch.zeros(batch_size, dtype=torch.float32, device=device),
 
       batch_size=(batch_size,)
     )
@@ -134,11 +136,10 @@ class TargetController(Controller):
 
     keep_mask = ~(split_mask | prune_mask)
 
+    #new_points =  PointStatistics.zeros(split_idx.shape[0] * 2, device=self.scene.device)
+    to_split = self.points[split_idx]
+    self.points = torch.cat([self.points[keep_mask], to_split, to_split], dim=0)
     self.scene.split_and_prune(keep_mask, split_idx)
-    self.points = self.points[keep_mask]
-
-    new_points = PointStatistics.zeros(split_idx.shape[0] * 2, device=self.scene.device)
-    self.points = torch.cat([self.points, new_points], dim=0)
 
     stats = dict(n=self.points.batch_size[0], 
             visible=(self.points.visible > 0).sum().item(),
