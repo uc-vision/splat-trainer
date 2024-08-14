@@ -138,9 +138,17 @@ class TCNNScene(GaussianScene):
     self.device = device
 
     self.color_model = color_model
-
     self.learning_rates = OmegaConf.to_container(config.learning_rates)
-    self.learning_rates ['position'] *= self.config.scene_extent
+
+    parameter_groups = dict(
+      position = dict(lr=self.learning_rates['position']),
+      log_scaling = dict(lr=self.learning_rates['log_scaling']),
+      alpha_logit = dict(lr=self.learning_rates['alpha_logit']),
+      feature = dict(lr=self.learning_rates['feature']),
+      rotation = dict(lr=self.learning_rates['rotation'])
+    )
+
+    
 
     make_optimizer = partial(SparseAdam, betas=(0.9, 0.999))
     parameter_groups = {k:dict(lr=lr) for k, lr in self.learning_rates.items()}
@@ -153,7 +161,7 @@ class TCNNScene(GaussianScene):
 
     self.camera_table = camera_table
     
-    image_features = torch.zeros(*camera_table.shape,  config.image_features, dtype=torch.float32, device=device)
+    image_features = torch.zeros(len(camera_table),  config.image_features, dtype=torch.float32, device=device)
     self.image_features = torch.nn.Parameter(image_features, requires_grad=True)
 
     self.color_opt = self.make_color_optimizer()
@@ -166,7 +174,7 @@ class TCNNScene(GaussianScene):
       dict(params=self.image_features, lr=config.lr_image_feature, name="image_features")
     ]
 
-    return torch.optim.Adam(param_groups)
+    return torch.optim.Adam(param_groups, betas=(0.7, 0.999))
 
   
   
@@ -185,8 +193,8 @@ class TCNNScene(GaussianScene):
   def __repr__(self):
     return f"GaussianScene({self.points.position.shape[0]} points)"
 
-  def step(self, visible:torch.Tensor, step:int):
-    
+  def step(self, visible:torch.Tensor, learning_rates:torch.Tensor, step:int):
+    self.points.update_group('position', point_lr=learning_rates)
     self.points.step(visible_indexes=visible)
     # check_finite(self.points)
     self.color_opt.step()
@@ -223,7 +231,7 @@ class TCNNScene(GaussianScene):
       return Gaussians3D.from_tensordict(self.points.tensors)
       
   def evaluate_colors(self, indexes, image_idx, camera_position):
-    cam_feature = self.image_features[image_idx.unbind(0)]  
+    cam_feature = self.image_features[image_idx]  
     cam_feature = cam_feature.unsqueeze(0).expand(indexes.shape[0], -1)
 
     dir = F.normalize(self.points.position[indexes].detach() - camera_position)
@@ -241,9 +249,8 @@ class TCNNScene(GaussianScene):
     output_dir.mkdir(parents=True, exist_ok=True)
     write_gaussians(output_dir / 'point_cloud.ply', self.gaussians.apply(torch.detach), with_sh=False)
 
-  def get_point_cloud(self):
-    image_idx = torch.zeros(len(self.camera_table.shape), device=self.device, dtype=torch.long)
-    camera_position = self.camera_table.camera_centers[image_idx.unbind(0)]
+  def get_point_cloud(self, image_idx:int = 0):
+    camera_position = self.camera_table.camera_centers[image_idx]
 
     colors = self.evaluate_colors(torch.arange(self.num_points, device=self.device), image_idx, camera_position)
     return PointCloud(self.gaussians.position.detach(), colors)
@@ -255,15 +262,16 @@ class TCNNScene(GaussianScene):
                      feature=self.points.feature).items():
       logger.log_histogram(f"points/{k}", v.detach(), step=step)
 
-
-  def render(self, camera_params:CameraParams, config:RasterConfig, image_idx:torch.Tensor, **options) -> Rendering:
+  @beartype
+  def render(self, camera_params:CameraParams, config:RasterConfig, image_idx:int, **options) -> Rendering:
 
     gaussians2d, depthvars, indexes = project_to_image(self.gaussians, camera_params, config)
     features = self.evaluate_colors(indexes, image_idx, camera_params.camera_position)
 
     return render_projected(indexes, gaussians2d, features, depthvars, 
             camera_params, config, **options)
-
+      
+    
 
 
 

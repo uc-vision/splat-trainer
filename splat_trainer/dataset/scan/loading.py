@@ -17,8 +17,8 @@ from splat_trainer.dataset import CameraView
 class CameraImage:
    camera : Camera
    image : torch.Tensor
-   frame_id: int
-   camera_id: int
+   image_id: int
+
    filename: str
 
    @property
@@ -48,8 +48,7 @@ def preload_images(scan:FrameSet, undistorted:Dict[str, Camera]) -> List[CameraI
     return CameraImage(
         camera=undistortion.undistorted.transform(rig_pose),
         image=torch.from_numpy(image).pin_memory(),
-        frame_id=frame_index,
-        camera_id=camera_id,
+        image_id=frame_index * len(camera_names) + camera_id,
         filename=image_file
     )
 
@@ -67,9 +66,7 @@ class PreloadedImages(torch.utils.data.Dataset):
 
   def __getitem__(self, index) -> CameraView:
     camera_image:CameraImage = self.camera_images[index]
-
-    idx = torch.tensor([camera_image.frame_id, camera_image.camera_id], dtype=torch.long).pin_memory()
-    return camera_image.filename, camera_image.image, idx
+    return camera_image.filename, camera_image.image, camera_image.image_id
      
   def __iter__(self) -> Iterator[CameraView]:
     order = torch.randperm(len(self)) if self.shuffle else torch.arange(len(self))

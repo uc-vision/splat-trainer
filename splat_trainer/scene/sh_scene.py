@@ -53,7 +53,7 @@ class SHScene(GaussianScene):
     self.camera_table = camera_table
 
     self.learning_rates = OmegaConf.to_container(config.learning_rates)
-    self.learning_rates ['position'] *= self.config.scene_extent
+    # self.learning_rates ['position'] *= self.config.scene_extent
 
     parameter_groups = {k:dict(lr=lr) for k, lr in self.learning_rates.items()}
 

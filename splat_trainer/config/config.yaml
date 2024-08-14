@@ -5,7 +5,7 @@ defaults:
   - dataset: scan
   - logger: tensorboard
   - controller: target
-  - scene: sh
+  - scene: tcnn
 
 hydra:
   job: 

@@ -37,11 +37,11 @@ class RigPoseTable(nn.Module):
     self.rig_t_world.normalize()
 
   
-  def forward(self, image_index:torch.Tensor):
-    assert image_index.dim() == 2 and image_index.shape[1] == 2, \
-      f"Expected (rig_index, camera_index) N, 2 tensor, got: {image_index.shape}"
+  def forward(self, frame_camera_indices:torch.Tensor):
+    assert frame_camera_indices.dim() == 2 and frame_camera_indices.shape[1] == 2, \
+      f"Expected (rig_index, camera_index) N, 2 tensor, got: {frame_camera_indices.shape}"
 
-    rig_index, camera_index = image_index.unbind(-1)
+    rig_index, camera_index = frame_camera_indices.unbind(-1)
 
     camera_t_rig = self.camera_t_rig(camera_index)
     rig_t_world = self.rig_t_world(rig_index)
@@ -67,18 +67,19 @@ class PoseTable(nn.Module):
 
 
   def forward(self, indices):
+    assert indices.dim() == 1, f"Expected 1D tensor, got: {indices.shape}"
     assert (indices < self.q.shape[0]).all(), f"Index out of bounds: {indices} >= {self.q.shape[0]}"
 
     q, t = F.normalize(self.q[indices], dim=-1), self.t[indices]
-    return join_rt(roma.unitquat_to_rotmat(q), t)
+    pose = join_rt(roma.unitquat_to_rotmat(q), t)
+    return pose
   
   def normalize(self):
     self.q.data = F.normalize(self.q.data, dim=-1)
     return self
 
-  @property
-  def shape(self):
-    return self.t.shape[:-1]
+  def __len__(self):
+    return self.t.shape[0]
 
 
   
