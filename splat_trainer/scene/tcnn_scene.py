@@ -25,6 +25,7 @@ from taichi_splatting.renderer import render_projected, project_to_image
 from taichi_splatting.perspective import CameraParams
 
 
+from splat_trainer.util.misc import lerp
 from splat_trainer.util.pointcloud import PointCloud
 
 
@@ -41,7 +42,8 @@ class TCNNConfig(GaussianSceneConfig):
   hidden:int             = 32
   layers:int             = 2
 
-  scene_extent:Optional[float]     = None
+  depth_ema:float = 0.95
+
 
 
   def color_model(self):
@@ -73,7 +75,6 @@ class TCNNConfig(GaussianSceneConfig):
     )
 
 
-  
 
 
   def from_color_gaussians(self, gaussians:Gaussians3D, camera_table:CameraTable, device:torch.device):
@@ -85,11 +86,8 @@ class TCNNConfig(GaussianSceneConfig):
 
     self.pretrain_colors(gaussians.feature, color_model, color_targets, iters=1000)
     
-    if self.scene_extent is None:
-      centre, extent = camera_extents(camera_table)
-      config = replace(self, scene_extent=extent)
 
-    return TCNNScene(gaussians, color_model, camera_table, device, config)
+    return TCNNScene(gaussians, color_model, camera_table, device, self)
 
 
   def pretrain_colors(self, features, color_model, target_colors, iters):
@@ -126,6 +124,8 @@ class TCNNConfig(GaussianSceneConfig):
         pbar.set_postfix(loss=loss.item())
 
 
+
+
 @beartype
 class TCNNScene(GaussianScene):
   def __init__(self, points: Gaussians3D, 
@@ -153,15 +153,17 @@ class TCNNScene(GaussianScene):
     make_optimizer = partial(SparseAdam, betas=(0.9, 0.999))
     parameter_groups = {k:dict(lr=lr) for k, lr in self.learning_rates.items()}
 
-    self.points = ParameterClass.create(points.to_tensordict(), 
+    d = points.to_tensordict()
+    d['running_depth'] = torch.zeros(d.batch_size[0], device=device)
+    
+    self.points = ParameterClass.create(d, 
           parameter_groups=parameter_groups, 
           optimizer=make_optimizer)   
 
-    # self.sort_points()
 
     self.camera_table = camera_table
     
-    image_features = torch.zeros(len(camera_table),  config.image_features, dtype=torch.float32, device=device)
+    image_features = torch.zeros(camera_table.num_cameras,  config.image_features, dtype=torch.float32, device=device)
     self.image_features = torch.nn.Parameter(image_features, requires_grad=True)
 
     self.color_opt = self.make_color_optimizer()
@@ -193,9 +195,22 @@ class TCNNScene(GaussianScene):
   def __repr__(self):
     return f"GaussianScene({self.points.position.shape[0]} points)"
 
-  def step(self, visible:torch.Tensor, learning_rates:torch.Tensor, step:int):
-    self.points.update_group('position', point_lr=learning_rates)
-    self.points.step(visible_indexes=visible)
+
+  def update_depth(self, rendering:Rendering):
+    fx = rendering.camera.focal_length[0]
+    depth_scales = rendering.point_depth[rendering.visible_mask].squeeze(1) / fx  
+    
+    running_depth = self.points.running_depth[rendering.visible_indices]
+    running_depth[:] = lerp(self.config.depth_ema, depth_scales, running_depth)
+
+    self.points.update_group('position', point_lr=running_depth)
+    self.points.position.grad[rendering.visible_indices] /= depth_scales.unsqueeze(1)
+
+
+  def step(self, rendering:Rendering, step:int):
+
+    self.update_depth(rendering)
+    self.points.step(visible_indexes=rendering.visible_indices)
     # check_finite(self.points)
     self.color_opt.step()
     self.normalize()
@@ -231,7 +246,9 @@ class TCNNScene(GaussianScene):
       return Gaussians3D.from_tensordict(self.points.tensors)
       
   def evaluate_colors(self, indexes, image_idx, camera_position):
-    cam_feature = self.image_features[image_idx]  
+    cam_idx = self.camera_table.camera_id(image_idx)
+
+    cam_feature = self.image_features[cam_idx]  
     cam_feature = cam_feature.unsqueeze(0).expand(indexes.shape[0], -1)
 
     dir = F.normalize(self.points.position[indexes].detach() - camera_position)
@@ -264,6 +281,7 @@ class TCNNScene(GaussianScene):
 
   @beartype
   def render(self, camera_params:CameraParams, config:RasterConfig, image_idx:int, **options) -> Rendering:
+
 
     gaussians2d, depthvars, indexes = project_to_image(self.gaussians, camera_params, config)
     features = self.evaluate_colors(indexes, image_idx, camera_params.camera_position)

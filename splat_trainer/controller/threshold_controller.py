@@ -113,7 +113,16 @@ class ThresholdController(Controller):
     self.points.point_grad[idx] += point_grad
     self.points.visible[idx] += visible_mask
 
-    return (idx[visible_mask], idx)
+    return idx[visible_mask]
 
 
 
+
+
+  def step(self, rendering:Rendering, step:int):
+    vis_idx, depth_scales = self.add_rendering(rendering)
+
+    self.scene.points.position.grad[vis_idx] /= depth_scales.unsqueeze(1)
+    self.scene.step(vis_idx, self.points.learning_rate, step)
+
+    return dict(in_view = rendering.points_in_view.shape[0], visible = vis_idx.shape[0])

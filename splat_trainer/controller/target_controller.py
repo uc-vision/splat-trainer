@@ -12,12 +12,15 @@ from splat_trainer.logger.logger import Logger
 from .controller import Controller, ControllerConfig
 from splat_trainer.scene import GaussianScene
 
+from taichi_splatting import render_gaussians, RasterConfig
+from taichi_splatting.perspective import CameraParams
 
 
 @tensorclass
 class PointStatistics:
   split_score : torch.Tensor  # (N, ) - averaged split score
   prune_cost : torch.Tensor  # (N, ) - max prune cost
+
 
   learning_rate : torch.Tensor # (N, ) - learning rate
 
@@ -28,7 +31,6 @@ class PointStatistics:
     return PointStatistics(
       split_score=torch.zeros(batch_size, dtype=torch.float32, device=device),
       prune_cost=torch.zeros(batch_size, dtype=torch.float32, device=device),
-      learning_rate=torch.full((batch_size,), 1e-3, dtype=torch.float32, device=device),
 
       batch_size=(batch_size,)
     )
@@ -39,23 +41,9 @@ def smoothstep(x, a, b, interval=(0, 1)):
   x =  np.clip((x - interval[0]) / r, 0, 1)
   return a + (b - a) * (3 * x ** 2 - 2 * x ** 3)
 
-def log_lerp(t, a, b):
-  return torch.exp(torch.lerp(torch.log(a), torch.log(b), t))
-
-def exp_lerp(t, a, b):
-    max_ab = torch.max(a, b)
-    return max_ab + torch.log(torch.lerp(torch.exp(a - max_ab), torch.exp(b - max_ab), t))
-
-def lerp(t, a, b):
-  return a + (b - a) * t
 
 
-def ema(xs, lerp, alpha):
-  total = xs[0]
-  for x in xs[1:]:
-    total = lerp(alpha, total, x)
 
-  return total
 
 @dataclass
 class TargetConfig(ControllerConfig):
@@ -70,7 +58,7 @@ class TargetConfig(ControllerConfig):
   max_ratio:float = 4.0
 
   # ema half life
-  ema_half_life:int = 50
+  ema_half_life:int = 20
 
   max_radius:float = 0.1 # max screenspace radius (proportion of longest side) before splitting
   min_radius: float = 1.0 / 1000.
@@ -96,7 +84,9 @@ class TargetController(Controller):
     self.start_count = scene.num_points 
 
     self.points = PointStatistics.zeros(scene.num_points, device=scene.device)
-    self.ema_alpha  = (0.1 ** (2.0 / config.ema_half_life))
+
+    # alpha which gives number of iterations to decay by half
+    self.ema_alpha = 0.5 ** (1.0 / config.ema_half_life)
 
 
   def log_histograms(self, logger:Logger, step:int):
@@ -128,7 +118,9 @@ class TargetController(Controller):
     # number of split points is directly set to achieve the target count 
     # (and compensate for pruned points)
     target_split = ((target - n) + n_prune) 
-    split_mask = take_n(self.points.split_score, target_split, descending=True)
+
+    split_score = self.points.split_score #/ (self.points.visible + 1)
+    split_mask = take_n(split_score, target_split, descending=True)
 
     both = (split_mask & prune_mask)
     return split_mask ^ both, prune_mask ^ both
@@ -146,10 +138,11 @@ class TargetController(Controller):
 
     keep_mask = ~(split_mask | prune_mask)
 
-    new_points =  PointStatistics.zeros(split_idx.shape[0] * 2, device=self.scene.device)
-    self.points = torch.cat([self.points[keep_mask], new_points], dim=0)
+
 
     self.scene.split_and_prune(keep_mask, split_idx)
+    self.points = PointStatistics.zeros(self.scene.num_points, device=self.scene.device)
+
 
     stats = dict(n=self.points.batch_size[0], 
             prune=n_prune,       
@@ -164,28 +157,29 @@ class TargetController(Controller):
     idx = rendering.points_in_view
     split_score, prune_cost = rendering.split_heuristics.unbind(1)
 
-    vis_mask = prune_cost > 0
-    vis_idx = idx[vis_mask]
-
     points = self.points
 
-    points.prune_cost[idx] = torch.maximum(points.prune_cost[idx]  * self.ema_alpha, prune_cost) 
-    points.split_score[idx] = torch.maximum(points.split_score[idx] * self.ema_alpha, split_score ) 
+    points.prune_cost[idx] = torch.maximum(points.prune_cost[idx], prune_cost) 
+    points.split_score[idx] = torch.maximum(points.split_score[idx], split_score) 
+      
+
+  def render(self, camera_params:CameraParams, config:RasterConfig, cam_idx:torch.Tensor, 
+             **options) -> Rendering:
+    
+      return self.scene.render(config = config,
+                  camera_params = camera_params,
+                  cam_idx=cam_idx,
+                  compute_split_heuristics=True,
+                  **options)
   
-    fx = rendering.camera.focal_length[0]
-    depth_scales = rendering.point_depth[vis_mask].squeeze(1) / fx  
-    points.learning_rate[vis_idx] = log_lerp(self.ema_alpha, depth_scales, points.learning_rate[vis_idx])
-  
-    return vis_idx, depth_scales
 
 
   def step(self, rendering:Rendering, step:int):
-    vis_idx, depth_scales = self.add_rendering(rendering)
+    self.add_rendering(rendering)
+    self.scene.step(step)
 
-    self.scene.points.position.grad[vis_idx] /= depth_scales.unsqueeze(1)
-    self.scene.step(vis_idx, self.points.learning_rate, step)
-
-    return dict(in_view = rendering.points_in_view.shape[0], visible = vis_idx.shape[0])
+    return dict(in_view = rendering.points_in_view.shape[0], 
+                visible = rendering.visible_indices.shape[0])
 
 
 @beartype
