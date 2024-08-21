@@ -1,6 +1,7 @@
 
 from dataclasses import  dataclass
 import math
+from typing import Dict
 from beartype import beartype
 from beartype.typing import Optional
 import numpy as np
@@ -13,28 +14,17 @@ from .controller import Controller, ControllerConfig
 from splat_trainer.scene import GaussianScene
 
 
-
 @tensorclass
 class PointStatistics:
   split_score : torch.Tensor  # (N, ) - averaged split score
   prune_cost : torch.Tensor  # (N, ) - max prune cost
 
-  visible : torch.Tensor  # (N, ) - number of times the point was visible
-  in_view : torch.Tensor  # (N, ) - number of times the point was in the view volume
-
-  radii : torch.Tensor # (N, ) - maximum screen space radii
-  
 
   @staticmethod
   def zeros(batch_size, device:Optional[torch.device] = None):
     return PointStatistics(
       split_score=torch.zeros(batch_size, dtype=torch.float32, device=device),
       prune_cost=torch.zeros(batch_size, dtype=torch.float32, device=device),
-
-      visible=torch.zeros(batch_size, dtype=torch.int16, device=device),
-      in_view=torch.zeros(batch_size, dtype=torch.int16, device=device),
-
-      radii=torch.zeros(batch_size, dtype=torch.float32, device=device),
 
       batch_size=(batch_size,)
     )
@@ -44,6 +34,10 @@ def smoothstep(x, a, b, interval=(0, 1)):
   r = interval[1] - interval[0]
   x =  np.clip((x - interval[0]) / r, 0, 1)
   return a + (b - a) * (3 * x ** 2 - 2 * x ** 3)
+
+
+
+
 
 @dataclass
 class TargetConfig(ControllerConfig):
@@ -57,8 +51,8 @@ class TargetConfig(ControllerConfig):
   # max ratio of points to split/prune
   max_ratio:float = 4.0
 
-  # min number of times a point must be visible recently to be considered for splitting/pruning
-  min_visibility:int = 20 
+  # ema half life
+  ema_half_life:int = 20
 
   max_radius:float = 0.1 # max screenspace radius (proportion of longest side) before splitting
   min_radius: float = 1.0 / 1000.
@@ -84,7 +78,9 @@ class TargetController(Controller):
     self.start_count = scene.num_points 
 
     self.points = PointStatistics.zeros(scene.num_points, device=scene.device)
-    self.ema_alpha  = (0.1 ** (2.0 / config.min_visibility))
+
+    # alpha which gives number of iterations to decay by half
+    self.ema_alpha = 0.5 ** (1.0 / config.ema_half_life)
 
 
   def log_histograms(self, logger:Logger, step:int):
@@ -93,7 +89,7 @@ class TargetController(Controller):
 
     logger.log_histogram("points/log_split_score", split_score[split_score.isfinite()], step)
     logger.log_histogram("points/log_prune_cost",  prune_cost[prune_cost.isfinite()], step)
-    logger.log_histogram("points/visible", self.points.visible, step)
+
 
 
 
@@ -109,14 +105,15 @@ class TargetController(Controller):
     # number of pruned points is controlled by the split rated
     n_prune = math.ceil(config.prune_rate * n * (1 - t))
 
-
     n = self.points.split_score.shape[0]
-    prune_mask = take_n(self.points.prune_cost, n_prune, descending=False)
+    prune_mask = take_n(self.points.prune_cost, n_prune, descending=False) | (~torch.isfinite(self.points.prune_cost))
 
     # number of split points is directly set to achieve the target count 
     # (and compensate for pruned points)
     target_split = ((target - n) + n_prune) 
-    split_mask = take_n(self.points.split_score, target_split, descending=True)
+
+    split_score = self.points.split_score #/ (self.points.visible + 1)
+    split_mask = take_n(split_score, target_split, descending=True)
 
     both = (split_mask & prune_mask)
     return split_mask ^ both, prune_mask ^ both
@@ -134,49 +131,33 @@ class TargetController(Controller):
 
     keep_mask = ~(split_mask | prune_mask)
 
-    self.scene.split_and_prune(keep_mask, split_idx)
-    self.points = self.points[keep_mask]
 
-    new_points = PointStatistics.zeros(split_idx.shape[0] * 2, device=self.scene.device)
-    self.points = torch.cat([self.points, new_points], dim=0)
+
+    self.scene.split_and_prune(keep_mask, split_idx)
+    self.points = PointStatistics.zeros(self.scene.num_points, device=self.scene.device)
+
 
     stats = dict(n=self.points.batch_size[0], 
-            visible=(self.points.visible > 0).sum().item(),
-            prune=n_prune,       split=n_split,
-            max_prune=prune_thresh, min_split=split_thresh)
+            prune=n_prune,       
+            split=n_split,
+            max_prune_score=prune_thresh, 
+            min_split_score=split_thresh)
     
     return stats
 
 
-  def add_rendering(self, rendering:Rendering): 
+  def step(self, rendering:Rendering, step:int)  -> Dict[str, float]: 
     idx = rendering.points_in_view
     split_score, prune_cost = rendering.split_heuristics.unbind(1)
 
-    vis_mask = prune_cost > 0
-    vis_idx = idx[vis_mask]
-
     points = self.points
 
-    # weight = torch.where(self.points.in_view[vis_idx] > 0, self.ema_alpha, 1.0)
-    # points.split_score[vis_idx] = (1 - weight) * points.split_score[vis_idx] + weight * split_score[vis_mask]
+    points.prune_cost[idx] = torch.maximum(points.prune_cost[idx], prune_cost) 
+    points.split_score[idx] = torch.maximum(points.split_score[idx], split_score) 
 
-    points.prune_cost[idx] = torch.maximum(points.prune_cost[idx]  * self.ema_alpha, prune_cost) 
-    points.split_score[idx] = torch.maximum(points.split_score[idx] * self.ema_alpha, split_score )  
+    return dict(in_view = rendering.points_in_view.shape[0], 
+                visible = rendering.visible_indices.shape[0])      
 
-  
-    if rendering.radii is not None:
-      points.radii[idx] = torch.maximum(points.radii[idx], 
-            rendering.radii / max(rendering.image_size))
-
-
-    points.in_view[idx] += 1
-    points.visible[vis_idx] += 1
-
-    return (vis_idx, idx)
-
-
-  def step(self, rendering:Rendering):
-    (vis_idx, idx) = self.add_rendering(rendering)
 
 
 @beartype

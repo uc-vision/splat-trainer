@@ -1,6 +1,7 @@
 
 from dataclasses import  dataclass
 import math
+from typing import Dict
 from beartype.typing import Optional
 from taichi_splatting import Rendering
 from tensordict import tensorclass
@@ -9,6 +10,9 @@ import torch
 from splat_trainer.logger.logger import Logger
 from .controller import Controller, ControllerConfig
 from splat_trainer.scene import GaussianScene
+
+from taichi_splatting import RasterConfig
+from taichi_splatting.perspective import CameraParams
 
 
 
@@ -38,6 +42,8 @@ class ThresholdConfig(ControllerConfig):
 
   # min number of times a point must be visible recently to be considered for splitting/cloning
   min_visibility:int = 40 
+
+
 
   def make_controller(self, scene:GaussianScene, 
                densify_interval:int, total_steps:int):
@@ -102,7 +108,7 @@ class ThresholdController(Controller):
 
 
 
-  def add_rendering(self, rendering:Rendering): 
+  def step(self, rendering:Rendering) -> Dict[str, float]: 
     idx = rendering.points_in_view
 
     longest_side = max(*rendering.image_size)
@@ -113,7 +119,7 @@ class ThresholdController(Controller):
     self.points.point_grad[idx] += point_grad
     self.points.visible[idx] += visible_mask
 
-    return (idx[visible_mask], idx)
-
+    return dict(in_view = rendering.points_in_view.shape[0], 
+                visible = rendering.visible_indices.shape[0])  
 
 

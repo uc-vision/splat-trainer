@@ -84,7 +84,7 @@ class COLMAPDataset(Dataset):
       camera_idx = torch.tensor(self.camera_idx, dtype=torch.long))
   
   def depth_range(self) -> Tuple[float, float]:
-    return self.camera_depth_range
+    return tuple(self.camera_depth_range)
 
   def image_sizes(self) -> torch.Tensor:
     return torch.tensor([image.image_size for image in self.all_cameras], dtype=torch.int32)
@@ -138,9 +138,7 @@ class Images(torch.utils.data.Dataset):
 
   def __getitem__(self, index) -> CameraView:
     camera_image:CameraImage = self.camera_images[index]
-
-    idx = torch.tensor([camera_image.image_id], dtype=torch.long).pin_memory()
-    return camera_image.filename, camera_image.image, idx
+    return camera_image.filename, camera_image.image, camera_image.image_id
      
   def __iter__(self) -> Iterator[CameraView]:
     order = torch.randperm(len(self)) if self.shuffle else torch.arange(len(self))

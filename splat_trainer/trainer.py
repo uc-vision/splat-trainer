@@ -60,7 +60,7 @@ class TrainConfig:
 
   eval_steps: int = 1000
   num_logged_images: int = 5
-  log_interval: int = 20
+  log_interval: int = 10
 
   ssim_weight: float = 0.2
   ssim_scale: float = 0.5
@@ -133,7 +133,7 @@ class Trainer:
                                min_depth=(near + far * 0.01))
     
       bg_gaussians = from_pointcloud(bg_points, 
-                                        initial_scale=config.initial_point_scale * 2,
+                                        initial_scale=config.initial_point_scale,
                                         initial_alpha=config.initial_alpha,
                                         num_neighbors=config.num_neighbors)
       
@@ -213,7 +213,7 @@ class Trainer:
         self.log_image(f"{name}_images/{image_id}/render", rendering.image, 
                        caption=f"{filename} PSNR={psnr:.2f} L1={l1:.2f} step={self.step}")
         self.log_image(f"{name}_images/{image_id}/depth", 
-            colorize(self.color_map, rendering.depth), caption=filename)
+            colorize(self.color_map, rendering.ndc_depth), caption=filename)
 
         if self.step == 0:
           self.log_image(f"{name}_images/{image_id}/image", image, caption=filename)
@@ -268,13 +268,13 @@ class Trainer:
 
   def iter_data(self, iter):
     for filename, image, image_idx in iter:
-      image, image_idx = [x.to(self.device, non_blocking=True) 
-                    for x in (image, image_idx)]
+      image = image.to(self.device, non_blocking=True) 
+
       
       image = image.to(dtype=torch.float) / 255.0
       camera_params = self.camera_params(image_idx, image)
 
-      yield filename, camera_params, image_idx.squeeze(0), image
+      yield filename, camera_params, image_idx, image
 
   @torch.compile()
   def compute_ssim(self, image:torch.Tensor, ref:torch.Tensor, scale:float=1.0):
@@ -299,17 +299,8 @@ class Trainer:
     losses["reg"] = reg_loss.item()
     loss += reg_loss 
 
-    # if rendering.radii is not None:
-    #   # scale = max(rendering.image_size)
-    #   loss_radii = (rendering.radii - 4.0).mean()  
-    #   loss += loss_radii * self.config.radii_weight
-    #   losses["radii"] = loss_radii.item()
-
 
     return loss, losses
-
-
-
 
 
   def training_step(self, filename, camera_params, image_idx, image, timer):
@@ -317,21 +308,19 @@ class Trainer:
 
     with timer:
       config = replace(self.config.raster_config, compute_split_heuristics=True, blur_cov=self.blur_cov)  
-      rendering = self.scene.render(camera_params, config, image_idx, 
-                                    compute_radii=True)
+      rendering = self.scene.render(camera_params, config, image_idx)
 
       loss, losses = self.losses(rendering, image)
       loss.backward()
 
     with torch.no_grad():
-      (visible, in_view) =  self.controller.add_rendering(rendering)
-      self.scene.step(visible, self.step)
-
-    self.scene.zero_grad()
+      metrics =  self.controller.step(rendering, self.step)
+      self.scene.step(rendering, self.step)
+      
     del loss
 
     self.step += 1
-    return dict(**losses, visible=visible.shape[0], in_view=in_view.shape[0])
+    return dict(**losses, **metrics)
 
 
   def train(self):
@@ -357,7 +346,6 @@ class Trainer:
           self.scene.update_learning_rate(lr_scale)
 
           self.log_values("train", dict(lr_scale=lr_scale, blur_cov=self.blur_cov, image_scale=self.image_scale))
-
           torch.cuda.empty_cache()
 
 

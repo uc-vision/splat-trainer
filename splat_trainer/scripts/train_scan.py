@@ -8,7 +8,6 @@ from splat_trainer.util import config
 
 import numpy as np
 import torch
-import debugpy
 
 
 config.add_resolvers()
@@ -17,29 +16,53 @@ config.add_resolvers()
 def main():
   parser = argparse.ArgumentParser()
   parser.add_argument("overrides", nargs="*", help="hydra overrides var=value")
-  parser.add_argument("--debug_port", type=int, default=None, help="Enable python remote debugger on port")
+  parser.add_argument("--debug", action="store_true", help="Enable taichi debugging")
+
   parser.add_argument("--target", type=int, default=None, help="Target point count")
   parser.add_argument("--image_scale", type=float, default=None, help="Image scale")
   parser.add_argument("--steps", type=int, default=None, help="Number of training steps")
+  parser.add_argument("--background_points", type=int, default=None, help="Number of background points")
 
+  parser.add_argument("--scan", type=str, default=None, help="Scan json scene file to load")
+  parser.add_argument("--colmap", type=str, default=None, help="Colmap scene to load")
+
+  parser.add_argument("--wandb", type=str, default=None, help="Enable wandb with project name")
   args = parser.parse_args()
 
-  if args.debug_port is not None:
-    debugpy.listen(("localhost", args.debug_port))
-    print(f"Waiting for debugger attach on port {args.debug_port}")
-    debugpy.wait_for_client()
-
+  
   hydra.initialize(config_path="../config", version_base="1.2")
-  cfg = hydra.compose(config_name="config", overrides=args.overrides)
+  overrides = args.overrides
+
+  if args.debug is not None:
+    overrides.append(f"debug={args.debug}")
+
+  if args.scan is not None:
+    overrides.append("dataset=scan")
+    overrides.append(f"dataset.scan_file={args.scan}")
+
+  if args.colmap is not None:
+    overrides.append("dataset=colmap")
+    overrides.append(f"dataset.base_path={args.colmap}")
 
   if args.target is not None:
-    cfg.trainer.controller.target_count = args.target
+    overrides.append("controller=target")
+    overrides.append(f"trainer.controller.target_count={args.target}")
 
   if args.image_scale is not None:
-    cfg.dataset.image_scale = args.image_scale
+    overrides.append(f"dataset.image_scale={args.image_scale}")
 
   if args.steps is not None:
-    cfg.trainer.steps = args.steps
+    overrides.append(f"trainer.steps={args.steps}")
+
+  if args.background_points is not None:
+    overrides.append(f"trainer.background_points={args.background_points}")
+
+  if args.wandb is not None:
+    overrides.append("logger=wandb")
+    overrides.append(f"logger.project={args.wandb}")
+
+
+  cfg = hydra.compose(config_name="config", overrides=overrides)
 
   train_with_config(cfg)
 

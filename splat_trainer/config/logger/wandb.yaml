@@ -4,5 +4,5 @@ logger:
   _target_: splat_trainer.logger.WandbLogger
   dir: "log"
   entity: null
-  project: ${project_name}
+  project: null
 
