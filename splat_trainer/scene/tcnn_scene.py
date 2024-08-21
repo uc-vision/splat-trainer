@@ -6,6 +6,7 @@ from typing import Optional
 from beartype import beartype
 from omegaconf import DictConfig, OmegaConf
 
+from tensordict import TensorDict
 import torch
 import torch.nn.functional as F
 from tqdm import tqdm
@@ -43,6 +44,9 @@ class TCNNConfig(GaussianSceneConfig):
   layers:int             = 2
 
   depth_ema:float = 0.95
+  use_depth_lr:bool = True
+
+  scene_extents:Optional[float] = None
 
 
 
@@ -76,52 +80,19 @@ class TCNNConfig(GaussianSceneConfig):
 
 
 
-
   def from_color_gaussians(self, gaussians:Gaussians3D, camera_table:CameraTable, device:torch.device):
     color_model = self.color_model().to(device)
     color_targets = gaussians.feature.to(device)
 
     features = torch.randn(gaussians.batch_size[0], self.point_features)
     gaussians = gaussians.replace(feature=features).to(device)
-
-    self.pretrain_colors(gaussians.feature, color_model, color_targets, iters=1000)
     
+    centre, extents = camera_extents(camera_table)
+    if self.scene_extents is None:
+      config = replace(self, scene_extents=extents)
 
-    return TCNNScene(gaussians, color_model, camera_table, device, self)
+    return TCNNScene(gaussians, color_model, camera_table, device, config)
 
-
-  def pretrain_colors(self, features, color_model, target_colors, iters):
-    with torch.enable_grad():
-      n = target_colors.shape[0]
-      device = features.device
-
-      features = torch.nn.Parameter(features, requires_grad=True)
-      param_groups = [
-        dict(params=color_model.parameters(), lr=self.lr_nn, name="color_model"),
-        dict(params=features, lr=self.learning_rates["feature"], name="point_features")
-      ]
-
-      opt = torch.optim.Adam(param_groups)
-
-      pbar = tqdm(total=iters, desc="initializing colors")
-      for i in range(iters):
-        opt.zero_grad()
-        dirs = F.normalize(torch.randn(n, 3, device=device), dim=1)
-        cam_feature = torch.zeros(n, self.image_features, device=device)
-
-        features = torch.nn.Parameter(
-          F.normalize(features.detach(), dim=1), requires_grad=True)
-
-        feature = torch.cat([dirs, features, cam_feature], dim=1)
-        colors = color_model(feature).to(torch.float32).sigmoid()
-
-        loss = F.mse_loss(colors, target_colors)
-
-        loss.backward()
-        opt.step()
-        
-        pbar.update(1)
-        pbar.set_postfix(loss=loss.item())
 
 
 
@@ -140,23 +111,16 @@ class TCNNScene(GaussianScene):
     self.color_model = color_model
     self.learning_rates = OmegaConf.to_container(config.learning_rates)
 
-    parameter_groups = dict(
-      position = dict(lr=self.learning_rates['position']),
-      log_scaling = dict(lr=self.learning_rates['log_scaling']),
-      alpha_logit = dict(lr=self.learning_rates['alpha_logit']),
-      feature = dict(lr=self.learning_rates['feature']),
-      rotation = dict(lr=self.learning_rates['rotation'])
-    )
-
-    
+    parameter_groups = {k:dict(lr=lr) 
+            for k, lr in self.learning_rates.items()}
 
     make_optimizer = partial(SparseAdam, betas=(0.9, 0.999))
     parameter_groups = {k:dict(lr=lr) for k, lr in self.learning_rates.items()}
 
-    d = points.to_tensordict()
-    d['running_depth'] = torch.zeros(d.batch_size[0], device=device)
+    d:TensorDict = points.to_tensordict().replace(
+      running_depth = torch.zeros(points.batch_size[0], device=device))
     
-    self.points = ParameterClass.create(d, 
+    self.points = ParameterClass(d, 
           parameter_groups=parameter_groups, 
           optimizer=make_optimizer)   
 
@@ -179,50 +143,57 @@ class TCNNScene(GaussianScene):
     return torch.optim.Adam(param_groups, betas=(0.7, 0.999))
 
   
-  
   @property
   def num_points(self):
     return self.points.position.shape[0]
+
+  def __repr__(self):
+    return f"GaussianScene({self.points.position.shape[0]} points)"
 
   @beartype
   def update_learning_rate(self, lr_scale:float):
     # scaled_lr = {k: v * lr_scale for k, v in self.learning_rates.items()}
     # self.points.set_learning_rate(**scaled_lr)
+    if not self.config.use_depth_lr:
+      lr_scale *= self.config.scene_extents
+    
     self.points.set_learning_rate(position = 
               self.learning_rates['position'] * lr_scale)
 
 
-  def __repr__(self):
-    return f"GaussianScene({self.points.position.shape[0]} points)"
-
 
   def update_depth(self, rendering:Rendering):
+    """ Method for scaling learning rates by point depth. 
+        Take running average of running_depth = depth/fx.
+
+        Scale gradients by 1/running depth and learning rates by running depth.
+    """
     fx = rendering.camera.focal_length[0]
     depth_scales = rendering.point_depth[rendering.visible_mask].squeeze(1) / fx  
     
     running_depth = self.points.running_depth[rendering.visible_indices]
     running_depth[:] = lerp(self.config.depth_ema, depth_scales, running_depth)
 
-    self.points.update_group('position', point_lr=running_depth)
+    self.points.update_group('position', point_lr=self.points.running_depth)
     self.points.position.grad[rendering.visible_indices] /= depth_scales.unsqueeze(1)
 
-
+  @beartype
   def step(self, rendering:Rendering, step:int):
 
-    self.update_depth(rendering)
+    if self.config.use_depth_lr:
+      self.update_depth(rendering)
+
+
     self.points.step(visible_indexes=rendering.visible_indices)
     # check_finite(self.points)
     self.color_opt.step()
-    self.normalize()
-
-  
-  def normalize(self):
     self.points.rotation = torch.nn.Parameter(
       F.normalize(self.points.rotation.detach(), dim=1), requires_grad=True)
+    
 
-
-  def zero_grad(self):
     self.points.zero_grad()
+    self.color_opt.zero_grad()
+
 
 
   @property
@@ -234,16 +205,16 @@ class TCNNScene(GaussianScene):
     return torch.sigmoid(self.points.alpha_logit)
 
 
-
-
   def split_and_prune(self, keep_mask, split_idx):
-    splits = split_gaussians_uniform(self.gaussians[split_idx], n=2)
-    self.points = self.points[keep_mask].append_tensors(splits.to_tensordict())
+    splits = split_gaussians_uniform(
+      self.points[split_idx].detach(), n=2)
 
+    self.points = self.points[keep_mask].append_tensors(splits)
 
   @property
   def gaussians(self):
-      return Gaussians3D.from_tensordict(self.points.tensors)
+      points = self.points.tensors.select('position', 'rotation', 'log_scaling', 'alpha_logit', 'feature')
+      return Gaussians3D.from_tensordict(points)
       
   def evaluate_colors(self, indexes, image_idx, camera_position):
     cam_idx = self.camera_table.camera_id(image_idx)

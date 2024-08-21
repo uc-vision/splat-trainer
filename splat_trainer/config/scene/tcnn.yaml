@@ -21,6 +21,6 @@ trainer:
     layers: 3
 
     lr_image_feature: 0.00001
-    lr_nn: 0.00001
+    lr_nn: 0.0001
 
 

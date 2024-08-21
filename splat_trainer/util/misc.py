@@ -28,23 +28,28 @@ def inverse_sigmoid(x):
 
 sh0 = 0.282094791773878
 
+@torch.compile
 def rgb_to_sh(rgb):
     return (rgb - 0.5) / sh0
 
+@torch.compile
 def sh_to_rgb(sh):
     return sh * sh0 + 0.5
 
-
+@torch.compile
 def log_lerp(t, a, b):
   return torch.exp(torch.lerp(torch.log(a), torch.log(b), t))
 
+@torch.compile
 def inv_lerp(t, a, b):
   return 1 / (torch.lerp(1/a, 1/b, t))
 
+@torch.compile
 def exp_lerp(t, a, b):
     max_ab = torch.max(a, b)
     return max_ab + torch.log(torch.lerp(torch.exp(a - max_ab), torch.exp(b - max_ab), t))
 
+@torch.compile
 def lerp(t, a, b):
   return a + (b - a) * t
 

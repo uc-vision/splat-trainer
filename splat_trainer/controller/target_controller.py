@@ -1,6 +1,7 @@
 
 from dataclasses import  dataclass
 import math
+from typing import Dict
 from beartype import beartype
 from beartype.typing import Optional
 import numpy as np
@@ -12,18 +13,11 @@ from splat_trainer.logger.logger import Logger
 from .controller import Controller, ControllerConfig
 from splat_trainer.scene import GaussianScene
 
-from taichi_splatting import render_gaussians, RasterConfig
-from taichi_splatting.perspective import CameraParams
-
 
 @tensorclass
 class PointStatistics:
   split_score : torch.Tensor  # (N, ) - averaged split score
   prune_cost : torch.Tensor  # (N, ) - max prune cost
-
-
-  learning_rate : torch.Tensor # (N, ) - learning rate
-
 
 
   @staticmethod
@@ -96,7 +90,6 @@ class TargetController(Controller):
     logger.log_histogram("points/log_split_score", split_score[split_score.isfinite()], step)
     logger.log_histogram("points/log_prune_cost",  prune_cost[prune_cost.isfinite()], step)
 
-    logger.log_histogram("points/learning_rate",  self.points.learning_rate, step)
 
 
 
@@ -153,7 +146,7 @@ class TargetController(Controller):
     return stats
 
 
-  def add_rendering(self, rendering:Rendering): 
+  def step(self, rendering:Rendering, step:int)  -> Dict[str, float]: 
     idx = rendering.points_in_view
     split_score, prune_cost = rendering.split_heuristics.unbind(1)
 
@@ -161,25 +154,10 @@ class TargetController(Controller):
 
     points.prune_cost[idx] = torch.maximum(points.prune_cost[idx], prune_cost) 
     points.split_score[idx] = torch.maximum(points.split_score[idx], split_score) 
-      
-
-  def render(self, camera_params:CameraParams, config:RasterConfig, cam_idx:torch.Tensor, 
-             **options) -> Rendering:
-    
-      return self.scene.render(config = config,
-                  camera_params = camera_params,
-                  cam_idx=cam_idx,
-                  compute_split_heuristics=True,
-                  **options)
-  
-
-
-  def step(self, rendering:Rendering, step:int):
-    self.add_rendering(rendering)
-    self.scene.step(step)
 
     return dict(in_view = rendering.points_in_view.shape[0], 
-                visible = rendering.visible_indices.shape[0])
+                visible = rendering.visible_indices.shape[0])      
+
 
 
 @beartype
