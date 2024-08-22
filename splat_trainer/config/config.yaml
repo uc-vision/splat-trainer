@@ -39,7 +39,7 @@ trainer:
   initial_point_scale: 0.5
 
   max_initial_points: null
-  background_points: 50000
+  background_points: 0
 
   ssim_weight: 1.0 # ssim is expensive but converges faster than just l1 loss
   ssim_scale: 0.5 # use ssim at a lower resolution (less computation)

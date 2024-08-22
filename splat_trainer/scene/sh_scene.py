@@ -6,6 +6,7 @@ from typing import Optional
 from beartype import beartype
 from omegaconf import DictConfig, OmegaConf
 
+from tensordict import TensorDict
 import torch
 import torch.nn.functional as F
 
@@ -57,8 +58,11 @@ class SHScene(GaussianScene):
 
     parameter_groups = {k:dict(lr=lr) for k, lr in self.learning_rates.items()}
 
+    d:TensorDict = points.to_tensordict().update(dict(
+      running_depth = torch.zeros(points.batch_size[0], device=device)))
+
     create_optimizer = partial(SparseAdam, betas=(0.7, 0.999))
-    self.points = ParameterClass.create(points.to_tensordict().to(device), 
+    self.points = ParameterClass.create(d.to(device), 
           parameter_groups = parameter_groups, optimizer=create_optimizer)   
         
   

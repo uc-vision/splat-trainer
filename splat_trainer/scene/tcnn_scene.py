@@ -9,7 +9,6 @@ from omegaconf import DictConfig, OmegaConf
 from tensordict import TensorDict
 import torch
 import torch.nn.functional as F
-from tqdm import tqdm
 
 from splat_trainer.camera_table.camera_table import CameraTable, camera_extents
 from splat_trainer.logger.logger import Logger
@@ -117,8 +116,8 @@ class TCNNScene(GaussianScene):
     make_optimizer = partial(SparseAdam, betas=(0.9, 0.999))
     parameter_groups = {k:dict(lr=lr) for k, lr in self.learning_rates.items()}
 
-    d:TensorDict = points.to_tensordict().replace(
-      running_depth = torch.zeros(points.batch_size[0], device=device))
+    d:TensorDict = points.to_tensordict().update(dict(
+      running_depth = torch.zeros(points.batch_size[0], device=device)))
     
     self.points = ParameterClass(d, 
           parameter_groups=parameter_groups, 
@@ -210,7 +209,7 @@ class TCNNScene(GaussianScene):
       self.points[split_idx].detach(), n=2)
 
     self.points = self.points[keep_mask].append_tensors(splits)
-
+ 
   @property
   def gaussians(self):
       points = self.points.tensors.select('position', 'rotation', 'log_scaling', 'alpha_logit', 'feature')
