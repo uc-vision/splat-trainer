@@ -49,6 +49,7 @@ dependency_links = ["https://pypi.taichi.graphics/simple/"]
 
 [project.scripts]  # Optional
 splat-trainer = "splat_trainer.scripts.train_scan:main"
+splat-trainer-multirun = "splat_trainer.scripts.train_scan_multirun:main"
 
 
 [tool.setuptools.package-data]

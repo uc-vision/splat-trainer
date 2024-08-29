@@ -250,7 +250,7 @@ dependencies:
       - tensorboard-data-server==0.7.2
       - tensordict==0.5.0
       - termcolor==2.4.0
-      - tinycudann==1.7
+      # - tinycudann==1.7
       - tomli==2.0.1
       - torchmetrics==1.4.1
       - tqdm==4.66.5
