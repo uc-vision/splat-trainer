@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Optional
 from beartype import beartype
 from beartype.typing import Iterator, Tuple, List
 
@@ -20,8 +21,11 @@ import pycolmap
 class COLMAPDataset(Dataset):
   def __init__(self, base_path:str,
         model_dir:str = "sparse/0",
-        image_dir:str = "images",                
-        image_scale:float=1.0,
+        image_dir:str = "images",          
+
+        image_scale:Optional[float]=None,
+        resize_longest:Optional[int]=None,
+                
         val_stride:int=10,
         depth_range:Tuple[float, float] = (0.1, 100.0)):
 
@@ -35,8 +39,17 @@ class COLMAPDataset(Dataset):
     self.projections = []
     camera_idx = {}
 
+    assert resize_longest is None or image_scale is None, "Specify either resize_longest or image_scale"
+
+
     for i, (k, camera) in enumerate(self.reconstruction.cameras.items()):
-      camera.rescale(image_scale)
+
+      if image_scale is not None:
+        camera.rescale(image_scale)
+      elif resize_longest is not None:
+        w, h = camera.width, camera.height
+        scale = resize_longest / max(w, h)
+        camera.rescale(round(w * scale), round(h * scale))
       
       fx = camera.focal_length_x
       fy = camera.focal_length_y
@@ -60,7 +73,9 @@ class COLMAPDataset(Dataset):
     self.camera_t_world, self.image_names, self.camera_idx = zip(
       *[image_info(image) for image in self.reconstruction.images.values()])
     
-    images = load_images(list(self.image_names), Path(base_path) / image_dir, image_scale=image_scale)
+    images = load_images(list(self.image_names), Path(base_path) / image_dir, 
+                         image_scale=image_scale, resize_longest=resize_longest)
+    
     self.all_cameras = [CameraImage(filename, torch.from_numpy(image).pin_memory(), i) 
                for i, (filename, image) in enumerate(zip(self.image_names, images))]  
   

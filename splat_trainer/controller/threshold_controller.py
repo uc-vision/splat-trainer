@@ -52,15 +52,11 @@ class ThresholdConfig(ControllerConfig):
 
 class ThresholdController(Controller):
   def __init__(self, config:ThresholdConfig, 
-               scene:GaussianScene,
-               densify_interval:int, 
-               total_steps:int):
+               scene:GaussianScene):
     
     self.config = config
     self.scene = scene
 
-    self.densify_interval = densify_interval
-    self.total_steps = total_steps
     self.points = PointStatistics.zeros(scene.num_points, device=scene.device)
  
 
@@ -72,7 +68,7 @@ class ThresholdController(Controller):
     logger.log_histogram("points/visible", self.points.visible, step)
 
 
-  def find_split_prune_indexes(self, step:int):
+  def find_split_prune_indexes(self):
       config = self.config  
 
       grad_mean = self.points.point_grad / self.points.visible
@@ -92,9 +88,9 @@ class ThresholdController(Controller):
       return keep_mask, split_idx, counts     
 
 
-  def densify_and_prune(self, step:int):
+  def densify_and_prune(self, step:int, total_steps:int) -> Dict[str, float]:
 
-    keep_mask, split_idx, counts = self.find_split_prune_indexes(step)
+    keep_mask, split_idx, counts = self.find_split_prune_indexes()
 
     if self.config.enabled:
       self.scene.split_and_prune(keep_mask, split_idx)
@@ -108,7 +104,7 @@ class ThresholdController(Controller):
 
 
 
-  def step(self, rendering:Rendering) -> Dict[str, float]: 
+  def step(self, rendering:Rendering, step:int) -> Dict[str, float]: 
     idx = rendering.points_in_view
 
     longest_side = max(*rendering.image_size)

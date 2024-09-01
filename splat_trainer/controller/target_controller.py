@@ -35,10 +35,6 @@ def smoothstep(x, a, b, interval=(0, 1)):
   x =  np.clip((x - interval[0]) / r, 0, 1)
   return a + (b - a) * (3 * x ** 2 - 2 * x ** 3)
 
-
-
-
-
 @dataclass
 class TargetConfig(ControllerConfig):
 
@@ -57,22 +53,23 @@ class TargetConfig(ControllerConfig):
   max_radius:float = 0.1 # max screenspace radius (proportion of longest side) before splitting
   min_radius: float = 1.0 / 1000.
 
-  def make_controller(self, scene:GaussianScene, 
-               densify_interval:int, total_steps:int):
-    return TargetController(self, scene,  densify_interval, total_steps)
+  def make_controller(self, scene:GaussianScene):
+    return TargetController(self, scene)
 
+  def from_state_dict(self, state_dict:dict, scene:GaussianScene) -> Controller:
+    controller = TargetController(self, scene)
+    
+    controller.points.load_state_dict(state_dict['points'])
+    controller.start_count = state_dict['start_count']
+
+    return controller
 
 class TargetController(Controller):
   def __init__(self, config:TargetConfig, 
-               scene:GaussianScene,
-               densify_interval:int, 
-               total_steps:int):
+               scene:GaussianScene):
     
     self.config = config
     self.scene = scene
-
-    self.densify_interval = densify_interval
-    self.total_steps = total_steps
 
     self.target_count = config.target_count or scene.num_points
     self.start_count = scene.num_points 
@@ -91,14 +88,15 @@ class TargetController(Controller):
     logger.log_histogram("points/log_prune_cost",  prune_cost[prune_cost.isfinite()], step)
 
 
+  def state_dict(self) -> dict:
+    return dict(points=self.points.state_dict(), 
+                start_count=self.start_count)
 
 
-
-  def find_split_prune_indexes(self, step:int):
+  def find_split_prune_indexes(self, t:float):
     config = self.config  
     n = self.points.shape[0]
-    t = max(0, step / self.total_steps)
-  
+
     # nonlinear point count schedule
     target = math.ceil(smoothstep(t, self.start_count, config.target_count, interval=(0.0, 0.6)))
 
@@ -118,9 +116,10 @@ class TargetController(Controller):
     both = (split_mask & prune_mask)
     return split_mask ^ both, prune_mask ^ both
 
-  def densify_and_prune(self, step:int):
+  def densify_and_prune(self, step:int, total_steps:int) -> Dict[str, float]:
 
-    split_mask, prune_mask = self.find_split_prune_indexes(step)
+    t = max(0, step / total_steps)
+    split_mask, prune_mask = self.find_split_prune_indexes(t)
     split_idx = split_mask.nonzero().squeeze(1)
 
     n_prune = prune_mask.sum().item()

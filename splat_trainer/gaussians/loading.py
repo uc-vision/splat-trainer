@@ -21,7 +21,7 @@ def from_pointcloud(pcd:PointCloud,
     log_scaling=torch.log(scales).unsqueeze(1).expand(-1, 3),
     rotation=F.normalize(torch.randn(pcd.points.shape[0], 4), dim=1),
     alpha_logit=torch.full( (pcd.points.shape[0], 1), 
-                            fill_value=inverse_sigmoid(initial_alpha)),
+                            fill_value=inverse_sigmoid(initial_alpha - 1e-4)),
     feature=pcd.colors,
     batch_size=(pcd.points.shape[0],)
   )
