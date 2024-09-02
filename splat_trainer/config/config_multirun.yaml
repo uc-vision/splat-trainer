@@ -2,10 +2,11 @@
 
 defaults:
   - _self_
-  - dataset: scan
+  - dataset: ???
   - logger: wandb
   - controller: target
   - scene: sh
+  # - experiment: ???
   - override hydra/launcher: rq
 
 hydra:
@@ -18,7 +19,16 @@ hydra:
   sweeper:
     params:
       trainer.steps: 1000, 2000, 3000
-      dataset.scan_file: /csse/users/yya164/scan_11/scene.json, /csse/users/yya164/scan_10/scene.json
+      dataset: scan, colmap
+      # experiment: a, b
+      dataset.scan_file: ${dataset.scan_file}
+
+      # datasets.scan_file: ${a.dataset.scan_file}
+      # foo: {'dataset':colmap, base_path:'/local/something'}, {'dataset':colmap, base_path:'/local/something'}
+
+
+
+
 
 trainer:
   _target_: splat_trainer.trainer.TrainConfig

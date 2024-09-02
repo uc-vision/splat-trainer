@@ -1,6 +1,6 @@
 # @package _global_
-mipnerf_path: '/uc/research/CropVision/splat_datasets/mipnerf-360'
-scan_path: '/uc/research/CropVision/splat_datasets/'
+mipnerf_path: '/mnt/maara/splat_datasets/mipnerf-360'
+scan_path: '/mnt/maara/splat_datasets/'
 
 
 test_datasets:
@@ -25,8 +25,17 @@ test_datasets:
       
     common: 
       _target_: splat_trainer.dataset.COLMAPDataset
-      resize_longest: 1536
       base_path: ???
+
+      model_dir: "sparse/0"
+      image_dir: "images"
+
+      image_scale: null
+      resize_longest: 1536
+      val_stride: 0
+
+      depth_range: [0.1, 100.0]
+
 
 
   apple_tests:
@@ -42,5 +51,10 @@ test_datasets:
 
     common: 
       _target_: splat_trainer.dataset.ScanDataset
-      resize_longest: 1536
       scan_file: ???
+
+      image_scale: null
+      resize_longest: 1536
+      val_stride: 0
+
+      depth_range: [0.1, 100.0]

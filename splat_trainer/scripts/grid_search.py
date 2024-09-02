@@ -19,7 +19,7 @@ def find_dataset_config(name:str, test_datasets:DictConfig):
 
 
 @hydra.main(config_path="../config", version_base="1.2", config_name="grid_search")
-def my_app(cfg : DictConfig) -> None:
+def main(cfg : DictConfig) -> None:
     
   dataset_cfg = find_dataset_config(cfg.test_scene, cfg.test_datasets)
   OmegaConf.update(cfg, "dataset", dataset_cfg, force_add=True)
@@ -34,4 +34,4 @@ def my_app(cfg : DictConfig) -> None:
 
 
 if __name__ == "__main__":
-    my_app()
+    main()
