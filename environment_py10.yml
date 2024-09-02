@@ -121,6 +121,7 @@ dependencies:
   - ncurses=6.5=h59595ed_0
   - nettle=3.9.1=h7ab15ed_0
   - networkx=3.3=pyhd8ed1ab_1
+  - numpy=1.26.4=py310hb13e2d6_0
   - ocl-icd=2.3.2=hd590300_1
   - openh264=2.4.1=h59595ed_0
   - openjpeg=2.5.2=h488ebb8_0
@@ -215,7 +216,6 @@ dependencies:
       - multidict==6.0.5
       - natsort==8.4.0
       - ninja==1.11.1.1
-      - numpy==1.26.4
       - numpy-quaternion==2023.0.4
       - omegaconf==2.3.0
       - opencv-python==4.10.0.84
@@ -250,7 +250,7 @@ dependencies:
       - tensorboard-data-server==0.7.2
       - tensordict==0.5.0
       - termcolor==2.4.0
-      # - tinycudann==1.7
+      - https://github.com/OutofAi/tiny-cuda-nn-wheels/releases/download/1.7.1/tinycudann-1.7.post75231121-cp310-cp310-linux_x86_64.whl 
       - tomli==2.0.1
       - torchmetrics==1.4.1
       - tqdm==4.66.5

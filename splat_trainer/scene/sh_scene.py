@@ -15,6 +15,7 @@ from splat_trainer.logger.logger import Logger
 from splat_trainer.scene.io import write_gaussians
 from splat_trainer.scene.scene import GaussianSceneConfig, GaussianScene
 from splat_trainer.gaussians.split import  split_gaussians_uniform
+from splat_trainer.scene.util import update_depth
 from splat_trainer.util.misc import  lerp, rgb_to_sh
 
 from taichi_splatting.optim.parameter_class import ParameterClass
@@ -78,28 +79,10 @@ class SHScene(GaussianScene):
   def update_learning_rate(self, lr_scale:float):
     if not self.config.use_depth_lr:
       lr_scale *= self.config.scene_extents
-
     self.points.set_learning_rate(position = self.learning_rates ['position'] * lr_scale)
-
 
   def __repr__(self):
     return f"GaussianScene({self.points.position.shape[0]} points)"
-
-
-  def update_depth(self, rendering:Rendering):
-    """ Method for scaling learning rates by point depth. 
-        Take running average of running_depth = depth/fx.
-
-        Scale gradients by 1/running depth and learning rates by running depth.
-    """
-    fx = rendering.camera.focal_length[0]
-    depth_scales = rendering.point_depth[rendering.visible_mask].squeeze(1) / fx  
-    
-    running_depth = self.points.running_depth[rendering.visible_indices]
-    running_depth[:] = lerp(self.config.depth_ema, depth_scales, running_depth)
-
-    self.points.update_group('position', point_lr=self.points.running_depth)
-    self.points.position.grad[rendering.visible_indices] /= depth_scales.unsqueeze(1)
 
 
   def sh_mask(self, step):
@@ -114,6 +97,8 @@ class SHScene(GaussianScene):
   @beartype
   def step(self, rendering:Rendering, step:int):
     self.points.update_group('feature', mask_lr=self.sh_mask(step))
+    update_depth(self.points, rendering, self.config.depth_ema)
+
 
     self.points.step(visible_indexes=rendering.visible_indices)
 
@@ -142,6 +127,10 @@ class SHScene(GaussianScene):
       logger.log_histogram(f"points/{k}", v.detach(), step=step)
 
 
+
+
+  
+
   @property
   def scale(self):
     return torch.exp(self.points.log_scaling)
@@ -150,6 +139,9 @@ class SHScene(GaussianScene):
   def opacity(self):
     return torch.sigmoid(self.points.alpha_logit)
 
+
+  def state_dict(self):
+    return dict(points=self.points.state_dict())
 
   @property
   def gaussians(self):

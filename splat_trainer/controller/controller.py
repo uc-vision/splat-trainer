@@ -8,10 +8,13 @@ from splat_trainer.scene import GaussianScene
 class ControllerConfig(metaclass=ABCMeta):
 
   @abstractmethod
-  def make_controller(self, scene:GaussianScene, 
-                      densify_interval:int, total_steps:int) -> 'Controller':
+  def make_controller(self, scene:GaussianScene) -> 'Controller':
     raise NotImplementedError
   
+  @abstractmethod
+  def from_state_dict(self, state_dict:dict, scene:GaussianScene) -> 'Controller':
+    raise NotImplementedError
+
 
 class Controller(metaclass=ABCMeta):
   @abstractmethod
@@ -30,5 +33,7 @@ class Controller(metaclass=ABCMeta):
     raise NotImplementedError
 
 
-  
-
+  @abstractmethod
+  def state_dict(self) -> dict:
+    """ Return controller state for checkpointing """
+    raise NotImplementedError

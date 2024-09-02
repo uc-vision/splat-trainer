@@ -1,0 +1,46 @@
+# @package _global_
+mipnerf_path: '/uc/research/CropVision/splat_datasets/mipnerf-360'
+scan_path: '/uc/research/CropVision/splat_datasets/'
+
+
+test_datasets:
+  mipnerf_360:
+    scenes:    
+      bicycle: 
+        base_path: ${mipnerf_path}/bicycle
+      bonsai:
+        base_path: ${mipnerf_path}/bonsai
+      counter:
+        base_path: ${mipnerf_path}/counter
+      flowers:
+        base_path: ${mipnerf_path}/flowers
+      garden:
+        base_path: ${mipnerf_path}/garden
+      kitchen:
+        base_path: ${mipnerf_path}/kitchen
+      room:
+        base_path: ${mipnerf_path}/room
+      stump:
+        base_path: ${mipnerf_path}/stump
+      
+    common: 
+      _target_: splat_trainer.dataset.COLMAPDataset
+      resize_longest: 1536
+      base_path: ???
+
+
+  apple_tests:
+    scenes:
+      scan_1457_east:
+        scan_file: ${scan_path}/vines/scan_1457_east/capture.json
+      scan_1457_west:
+        scan_file: ${scan_path}/vines/scan_1457_west/capture.json
+      scan_21:
+        scan_file: ${scan_path}/apples/scan_21/scene.json
+      scan_23:
+        scan_file: ${scan_path}/apples/scan_23/scene.json
+
+    common: 
+      _target_: splat_trainer.dataset.ScanDataset
+      resize_longest: 1536
+      scan_file: ???

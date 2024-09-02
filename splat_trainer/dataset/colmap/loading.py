@@ -1,7 +1,9 @@
 from functools import partial
+import math
 from multiprocessing import cpu_count, get_logger
 from multiprocessing.pool import ThreadPool
 from pathlib import Path
+from typing import Optional
 from beartype.typing import List
 
 
@@ -46,16 +48,21 @@ def parmap_list(f, xs, j=cpu_count() // 2, chunksize=1, pool=ThreadPool, progres
 
 
 @beartype
-def load_image(filename:Path, image_scale:float=1.0):
+def load_image(filename:Path, image_scale:Optional[float]=1.0, resize_longest:Optional[int]=None):
   assert filename.is_file(), f"load_image: file {filename} does not exist"
 
   image = cv2.imread(str(filename), cv2.IMREAD_COLOR)
 
-  if image_scale != 1.0:
+  if image_scale is not None:
     h, w, _ = image.shape
     dsize = (int(w * image_scale), int(h * image_scale))
-
     image = cv2.resize(image, dsize=dsize, fx=image_scale, fy=image_scale, interpolation=cv2.INTER_AREA)
+
+  if resize_longest is not None:
+    h, w, _ = image.shape
+    scale = resize_longest / max(w, h)
+    dsize = (round(w * scale), round(h * scale))
+    image = cv2.resize(image, dsize=dsize, interpolation=cv2.INTER_AREA)
 
   image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
 
@@ -63,5 +70,8 @@ def load_image(filename:Path, image_scale:float=1.0):
   return image
 
 @beartype
-def load_images(filenames:List[str], base_path:Path, image_scale:float, **map_options):
-  return parmap_list(partial(load_image, image_scale=image_scale), [base_path / f for f in filenames], **map_options)  
+def load_images(filenames:List[str], base_path:Path, 
+                image_scale:Optional[float], resize_longest:Optional[int], **map_options):
+  
+  return parmap_list(partial(load_image, image_scale=image_scale, resize_longest=resize_longest), 
+                     [base_path / f for f in filenames], **map_options)  

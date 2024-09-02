@@ -7,50 +7,13 @@ defaults:
   - controller: target
   - scene: tcnn
 
+  - trainer: default
+
 hydra:
   job: 
     chdir: True
 
-trainer:
-  _target_: splat_trainer.trainer.TrainConfig
-  output_path: null
-  load_model: null
-
-  device: "cuda:0"
-
-  lr_scheduler:
-    _target_: splat_trainer.scheduler.ExponentialDecay
-    base_lr: 1.0
-    final_lr:  0.01
-    warmup_steps: 0
-
-  # image_scaler: 
-  #   _target_: splat_trainer.image_scaler.ExponentialScaler
-  #   initial_scale: 0.25
-  #   steps: 16000
-
-
-  steps : 20000
-  eval_steps: 2000
-
-  # Initialisation from a point cloud
-  num_neighbors: 5
-  initial_alpha: 0.5
-  initial_point_scale: 0.5
-
-  max_initial_points: null
-  background_points: 0
-
-  ssim_weight: 1.0 # ssim is expensive but converges faster than just l1 loss
-  ssim_scale: 0.5 # use ssim at a lower resolution (less computation)
-
-  scale_reg: 0.1
-  opacity_reg: 0.01
-
-  blur_cov: 0.3
-
-  raster_config: 
-    _target_: taichi_splatting.RasterConfig
+project: ???
 
 wait_exit: False
 debug: False

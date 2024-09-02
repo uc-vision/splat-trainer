@@ -20,7 +20,10 @@ trainer:
     hidden: 32
     layers: 3
 
-    lr_image_feature: 0.00001
-    lr_nn: 0.0001
+    # Per image features (as opposed to per-camera features)
+    per_image: True
+
+    lr_image_feature: 0.01
+    lr_nn: 0.001
 
 

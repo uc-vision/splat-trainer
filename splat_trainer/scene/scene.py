@@ -44,12 +44,17 @@ class GaussianScene(metaclass=ABCMeta):
   @abstractmethod
   def opacity(self):
     raise NotImplementedError
-  
-  
+
 
   @property
   @abstractmethod
   def num_points(self) -> int:
+    raise NotImplementedError
+
+
+  @abstractmethod
+  def state_dict(self) -> dict:
+    """ Return controller state for checkpointing """
     raise NotImplementedError
 
 
@@ -58,5 +63,9 @@ class GaussianSceneConfig(metaclass=ABCMeta):
 
   @abstractmethod
   def from_color_gaussians(self, gaussians:Gaussians3D, camera_table:CameraTable, device:torch.device) -> GaussianScene:
+    raise NotImplementedError
+  
+  @abstractmethod
+  def from_state_dict(self, state_dict:dict, device:torch.device) -> GaussianScene:
     raise NotImplementedError
 

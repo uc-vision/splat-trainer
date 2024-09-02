@@ -14,14 +14,15 @@ from splat_trainer.util.pointcloud import PointCloud
 from .logger import Logger
 
 class WandbLogger(Logger):
+
+  @beartype
   def __init__(self, project:str | None, 
                entity:str | None, 
                log_config:dict, 
-               name:str | None=None, 
-               dir:str | None = None):
-
-    if dir is not None:
-      dir = Path(dir).mkdir(parents=True, exist_ok=True)
+               name:str | None=None):
+    
+    dir = Path.cwd() / "wandb"
+    dir.mkdir(parents=True, exist_ok=True)  
 
     wandb.require("core")
 
@@ -30,6 +31,7 @@ class WandbLogger(Logger):
                           config=log_config, 
                           dir=dir, 
                           entity=entity,
+                          sweep_id=None,
                           settings=wandb.Settings(start_method='thread'))
 
     self.queue = Queue()

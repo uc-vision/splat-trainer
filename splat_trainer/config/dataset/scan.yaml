@@ -4,7 +4,8 @@ dataset:
   _target_: splat_trainer.dataset.ScanDataset
   scan_file: ???
 
-  image_scale: 1.0
+  image_scale: null
+  resize_longest: 1536
   val_stride: 0
 
   depth_range: [0.1, 100.0]

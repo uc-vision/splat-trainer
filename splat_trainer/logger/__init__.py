@@ -1,4 +1,4 @@
-from .logger import Logger
+from .logger import Logger, NullLogger
 from .tensorboard import TensorboardLogger
 
 def WandbLogger(*args, **kwargs):
@@ -6,4 +6,4 @@ def WandbLogger(*args, **kwargs):
     return WandbLogger(*args, **kwargs)
 
 
-__all__ = ["WandbLogger", "TensorboardLogger", "Logger"]
+__all__ = ["WandbLogger", "TensorboardLogger", "Logger", "NullLogger"]

@@ -1,6 +1,6 @@
 [project]
 name = "splat-trainer"  
-version = "0.1.5"  
+version = "0.1.6"  
 description = "Gaussian Splatting scene reconstruction with taichi-splatting"  
 readme = "README.md" 
 requires-python = ">=3.10"
@@ -11,7 +11,7 @@ maintainers = [
 ]
 
 dependencies = [
-  'taichi-splatting >= 0.20.2',
+  'taichi-splatting >= 0.21.0',
   'tqdm',
   'plyfile',
   'pypcd4',
@@ -50,6 +50,8 @@ dependency_links = ["https://pypi.taichi.graphics/simple/"]
 [project.scripts]  # Optional
 splat-trainer = "splat_trainer.scripts.train_scan:main"
 splat-trainer-multirun = "splat_trainer.scripts.train_scan_multirun:main"
+trainer-grid-search = "splat_trainer.scripts.grid_search:main"
+
 
 
 [tool.setuptools.package-data]
