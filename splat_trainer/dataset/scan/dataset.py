@@ -17,7 +17,6 @@ from .loading import  CameraImage, PreloadedImages, preload_images
 from splat_trainer.util.pointcloud import PointCloud
 
 
-
 class ScanDataset(Dataset):
   def __init__(self, scan_file:str,                
         image_scale:Optional[float]=None,

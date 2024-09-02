@@ -31,7 +31,6 @@ class WandbLogger(Logger):
                           config=log_config, 
                           dir=dir, 
                           entity=entity,
-                          sweep_id=None,
                           settings=wandb.Settings(start_method='thread'))
 
     self.queue = Queue()
