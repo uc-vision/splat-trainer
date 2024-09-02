@@ -28,7 +28,7 @@ hydra:
   sweeper:
     params:
       trainer.scene.learning_rates.position: 0.1, 0.05, 0.01
-      +test_scene: scan_21, bonsai, scan_1457_west
+      +test_scene: bonsai, scan_1457_west, scan_21
 
 
 wait_exit: False

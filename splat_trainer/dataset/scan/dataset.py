@@ -27,6 +27,7 @@ class ScanDataset(Dataset):
 
     self.scan_file = scan_file
     self.image_scale = image_scale
+    self.resize_longest = resize_longest
 
     scan = FrameSet.load_file(Path(scan_file))
     self.camera_depth_range = tuple(depth_range)
@@ -54,7 +55,14 @@ class ScanDataset(Dataset):
     self.train_cameras, self.val_cameras = split_stride(self.all_cameras, val_stride)
     
   def __repr__(self) -> str:
-    return f"ScanDataset({self.scan_file}, image_scale={self.image_scale} cloud={find_cloud(self.scan)})"
+    args = ["near={self.camera_depth_range[0]:.3f} far={self.camera_depth_range[1]:.3f}"]
+    if self.image_scale is not None:
+      args += [f"image_scale={self.image_scale}"]
+
+    if self.resize_longest is not None:
+      args += [f"resize_longest={self.resize_longest}"]
+
+    return f"ScanDataset({self.scan_file} {', '.join(args)})"
 
   def train(self, shuffle=True) -> Iterator[CameraView]:
     images = PreloadedImages(self.train_cameras, shuffle=shuffle)
