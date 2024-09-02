@@ -83,6 +83,8 @@ def main():
   if args.wandb is not None:
     overrides.append("logger=wandb")
 
+  if args.checkpoint:
+    overrides.append("trainer.save_checkpoints=true")
   
   if args.project is not None:
     overrides.append(f"project={args.project}")

@@ -186,7 +186,6 @@ class Trainer:
     checkpoint = self.state_dict()
     torch.save(checkpoint, path)
 
-    print(f"Wrote checkpoint to {path}")
 
   @staticmethod
   def from_state_dict(config:TrainConfig, dataset:Dataset, logger:Logger, state_dict:dict):
