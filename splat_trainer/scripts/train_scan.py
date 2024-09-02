@@ -37,8 +37,7 @@ def main():
   parser.add_argument("--output_path", type=str, default=None, help="Override output path")
 
   parser.add_argument("--random_points", type=int, default=None,  help="Initialise with N random points only")
-  parser.add_argument("--checkpoint", type=int, default=None, help="Save checkpoints every N evaluations")
-
+  parser.add_argument("--checkpoint", action="store_true")
 
   parser.add_argument("--wandb", action="store_true", help="Use wandb logging")
   args = parser.parse_args()

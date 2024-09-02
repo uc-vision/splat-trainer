@@ -54,12 +54,14 @@ class ScanDataset(Dataset):
     self.train_cameras, self.val_cameras = split_stride(self.all_cameras, val_stride)
     
   def __repr__(self) -> str:
-    args = ["near={self.camera_depth_range[0]:.3f} far={self.camera_depth_range[1]:.3f}"]
+    args = [] 
     if self.image_scale is not None:
       args += [f"image_scale={self.image_scale}"]
 
     if self.resize_longest is not None:
       args += [f"resize_longest={self.resize_longest}"]
+
+    args += [f"near={self.camera_depth_range[0]:.3f}", f"far={self.camera_depth_range[1]:.3f}"]
 
     return f"ScanDataset({self.scan_file} {', '.join(args)})"
 
