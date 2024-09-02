@@ -59,7 +59,7 @@ class TCNNConfig(GaussianSceneConfig):
   
   def from_state_dict(self, state:dict, camera_table:CameraTable):
     points = ParameterClass.from_state_dict(state['points'])
-    scene = TCNNScene(self, points, self, camera_table)
+    scene = TCNNScene(points, self, camera_table)
 
     scene.color_model.load_state_dict(state['color_model'])
     scene.color_opt.load_state_dict(state['color_opt'])
