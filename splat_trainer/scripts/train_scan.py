@@ -7,6 +7,7 @@ import hydra
 
 from omegaconf import OmegaConf
 from termcolor import colored
+from splat_trainer.logger.logger import Logger
 from splat_trainer.util import config
 
 import numpy as np
@@ -111,10 +112,14 @@ def train_with_config(cfg):
   torch.set_float32_matmul_precision('high')
 
   # print(config.pretty(cfg))
-  print(f"Output path {colored(Path.cwd(), 'light_green')}")
+  output_path = Path.cwd()
+  print(f"Output path {colored(output_path, 'light_green')}")
 
+  with open(output_path / "config.yaml", "w") as f:
+      OmegaConf.save(cfg, f)
 
-  logger = hydra.utils.instantiate(cfg.logger, _partial_=True)(log_config=OmegaConf.to_container(cfg, resolve=True))
+  logger:Logger = hydra.utils.instantiate(cfg.logger)
+  logger.log_config(OmegaConf.to_container(cfg, resolve=True))
   # logger = hydra.utils.instantiate(cfg.logger) 
 
   trainer = None

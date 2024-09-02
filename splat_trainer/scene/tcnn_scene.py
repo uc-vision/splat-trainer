@@ -50,16 +50,16 @@ class TCNNConfig(GaussianSceneConfig):
                            camera_table:CameraTable, device:torch.device):
     
     
-    features = torch.randn(gaussians.batch_size[0], self.point_features)
-    gaussians = gaussians.replace(feature=features).to(device)
+    feature = torch.randn(gaussians.batch_size[0], self.point_features)
+    gaussians = gaussians.replace(feature=feature).to(device)
     
     points = parameters_from_gaussians(gaussians, OmegaConf.to_container(self.learning_rates))
     return TCNNScene(points, self, camera_table)
 
   
-  def from_state_dict(self, state:dict):
+  def from_state_dict(self, state:dict, camera_table:CameraTable):
     points = ParameterClass.from_state_dict(state['points'])
-    scene = TCNNScene(self, points, self)
+    scene = TCNNScene(self, points, self, camera_table)
 
     scene.color_model.load_state_dict(state['color_model'])
     scene.color_opt.load_state_dict(state['color_opt'])

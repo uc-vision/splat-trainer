@@ -159,12 +159,7 @@ class Trainer:
     if config.save_output:
       output_path = Path.cwd()
 
-      output_path.mkdir(parents=True, exist_ok=True)
       cropped.save_ply(output_path / "input.ply")
-
-      with open(output_path / "config.yaml", "w") as f:
-        OmegaConf.save(config, f)
-
       with open(output_path / "cameras.json", "w") as f:
         json.dump(dataset.camera_json(camera_info.camera_table), f)
 
@@ -182,7 +177,8 @@ class Trainer:
     return Path.cwd() 
 
   def write_checkpoint(self):
-    path = self.output_path / f"checkpoint_{self.step}.pt"
+    path = self.output_path / "checkpoint" / f"checkpoint_{self.step}.pt"
+    path.parent.mkdir(parents=True, exist_ok=True)
     checkpoint = self.state_dict()
     torch.save(checkpoint, path)
 
@@ -190,12 +186,10 @@ class Trainer:
   @staticmethod
   def from_state_dict(config:TrainConfig, dataset:Dataset, logger:Logger, state_dict:dict):
 
-    trainer = Trainer(config, dataset, logger)
-    trainer.step = state_dict['step']
+    scene = config.scene.from_state_dict(state_dict['scene'], dataset.camera_info().camera_table)
+    controller = config.controller.from_state_dict(state_dict['controller'], scene)
 
-    trainer.scene.load_state_dict(state_dict['scene'])
-    trainer.controller.load_state_dict(state_dict['controller'])
-    return trainer
+    return Trainer(config, scene, controller, dataset, logger, step=state_dict['step'])
     
     
   @property

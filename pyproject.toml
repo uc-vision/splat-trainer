@@ -49,7 +49,8 @@ dependency_links = ["https://pypi.taichi.graphics/simple/"]
 
 [project.scripts]  # Optional
 splat-trainer = "splat_trainer.scripts.train_scan:main"
-trainer-grid-search = "splat_trainer.scripts.grid_search:main"
+grid-search-trainer = "splat_trainer.scripts.grid_search:main"
+evaluate-trainer = "splat_trainer.scripts.evaluate:main"
 
 
 

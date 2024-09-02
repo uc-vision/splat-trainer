@@ -60,12 +60,11 @@ class GaussianScene(metaclass=ABCMeta):
 
 class GaussianSceneConfig(metaclass=ABCMeta):
 
-
   @abstractmethod
   def from_color_gaussians(self, gaussians:Gaussians3D, camera_table:CameraTable, device:torch.device) -> GaussianScene:
     raise NotImplementedError
   
   @abstractmethod
-  def from_state_dict(self, state_dict:dict, device:torch.device) -> GaussianScene:
+  def from_state_dict(self, state:dict, camera_table:CameraTable) -> GaussianScene:
     raise NotImplementedError
 
