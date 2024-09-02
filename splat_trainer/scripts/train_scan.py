@@ -64,16 +64,16 @@ def main():
 
   if args.image_scale is not None:
     overrides.append(f"dataset.image_scale={args.image_scale}")
-    overrides.append(f"dataset.resize_longest=null")
+    overrides.append("dataset.resize_longest=null")
   
   if args.resize_longest is not None:
     overrides.append(f"dataset.resize_longest={args.resize_longest}")
-    overrides.append(f"dataset.image_scale=null")
+    overrides.append("dataset.image_scale=null")
   
   
   if args.no_alpha:
-    overrides.append(f"trainer.initial_alpha=1.0")
-    overrides.append(f"trainer.scene.learning_rates.alpha_logit=0.0")
+    overrides.append("trainer.initial_alpha=1.0")
+    overrides.append("trainer.scene.learning_rates.alpha_logit=0.0")
 
   if args.steps is not None:
     overrides.append(f"trainer.steps={args.steps}")
@@ -90,10 +90,13 @@ def main():
 
   cfg = hydra.compose(config_name="config", overrides=overrides)
 
-  if args.output_path is not None:
-    output_path = Path(args.output_path) / cfg.project 
-    output_path.mkdir(parents=True, exist_ok=True)
-    os.chdir(str(output_path))
+  if args.output_path is None:
+    args.output_path = Path.cwd()
+
+  output_path = Path(args.output_path) / cfg.project 
+  output_path.mkdir(parents=True, exist_ok=True)
+  os.chdir(str(output_path))
+  
 
   train_with_config(cfg)
 
