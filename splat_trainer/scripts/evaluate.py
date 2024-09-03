@@ -1,4 +1,5 @@
 from argparse import ArgumentParser
+import os
 from pathlib import Path
 from typing import Optional
 
@@ -37,7 +38,9 @@ def init_from_checkpoint(config, output_path:Path, step:Optional[int]=None):
   dataset = hydra.utils.instantiate(config.dataset)  
   train_config = hydra.utils.instantiate(config.trainer)
 
-  trainer = Trainer.from_state_dict(train_config, dataset, NullLogger(), state_dict)
+  logger = hydra.utils.instantiate(config.logger)
+
+  trainer = Trainer.from_state_dict(train_config, dataset, logger, state_dict)
   return trainer
 
 def main():
@@ -52,11 +55,16 @@ def main():
   args = parser.parse_args()
   overrides = args.override or []
   
-
   ti.init(arch=ti.cuda, debug=args.debug)
 
   config = OmegaConf.load(args.output_path / "config.yaml")
   print(OmegaConf.to_yaml(config))
+
+  os.chdir(str(args.output_path))
+
+  for override in overrides:
+    key, value = override.split("=")
+    OmegaConf.update(config, key, value)
 
   if args.scale_images is not None:
     dataset = config.dataset
@@ -66,10 +74,18 @@ def main():
     if config.dataset.resize_longest is not None:
       dataset.resize_longest = int(dataset.resize_longest * args.scale_images)
 
+  
+
   trainer = init_from_checkpoint(config, args.output_path, args.step)
   result = trainer.evaluate()
 
   print(result)
+
+  trainer.close()
+  trainer.logger.close()
+
+  print("Done")
+
 
     
 
