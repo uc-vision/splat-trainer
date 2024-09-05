@@ -6,6 +6,9 @@ defaults:
   - scene: tcnn
   - trainer: default
   - test_datasets: default
+  - /hydra/callbacks:
+    - average_result
+  - override hydra/launcher: rq
   - _self_
 
 
@@ -15,20 +18,26 @@ trainer:
 
   steps: 1000 # tiny number for testing
 
+test_scene: ???
 
 hydra:
+  launcher:
+    enqueue:
+      job_timeout: '1d'
+  sweep:
+    dir: multirun/${now:%Y-%m-%d}/${now:%H-%M-%S}
+    subdir: ${hydra.job.override_dirname}/${hydra.job.num}__test_scene=${test_scene}
   job:
     chdir: True
-  sweep:
-    dir: ${oc.env:HOME}/grid_search
-    subdir: ${hydra.job.num}
-
-
+    config:
+      override_dirname:
+        exclude_keys:
+         - test_scene
   mode: MULTIRUN
   sweeper:
     params:
       trainer.scene.learning_rates.position: 0.1, 0.05, 0.01
-      +test_scene: scan_21, bonsai, scan_1457_west
+      test_scene: scan_21, bonsai, scan_1457_west
 
 
 wait_exit: False

@@ -25,11 +25,11 @@ def main(cfg : DictConfig) -> None:
   OmegaConf.update(cfg, "dataset", dataset_cfg, force_add=True)
   
   result = train_with_config(cfg)
-  print(result)
 
   # save result to yaml - TODO: use a different wandb logger to upload result too?
-  with open("result.yaml", "w") as f:
-    OmegaConf.save(cfg, f)
+
+
+  return result
   
 
 
