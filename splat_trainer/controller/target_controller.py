@@ -44,14 +44,12 @@ class TargetConfig(ControllerConfig):
   # base rate (relative to count) to prune points 
   prune_rate:float = 0.2
 
-  # max ratio of points to split/prune
-  max_ratio:float = 4.0
+  # interval to densify and prune
+  densify_interval: int = 100
 
   # ema half life
   ema_half_life:int = 20
 
-  max_radius:float = 0.1 # max screenspace radius (proportion of longest side) before splitting
-  min_radius: float = 1.0 / 1000.
 
   def make_controller(self, scene:GaussianScene):
     return TargetController(self, scene)
@@ -80,6 +78,9 @@ class TargetController(Controller):
     self.ema_alpha = 0.5 ** (1.0 / config.ema_half_life)
 
 
+  def __repr__(self):
+    return f"TargetController(points={self.points.batch_size[0]})"
+
   def log_histograms(self, logger:Logger, step:int):
 
     split_score, prune_cost = self.points.split_score.log(), self.points.prune_cost.log()
@@ -101,7 +102,8 @@ class TargetController(Controller):
     target = math.ceil(smoothstep(t, self.start_count, config.target_count, interval=(0.0, 0.6)))
 
     # number of pruned points is controlled by the split rated
-    n_prune = math.ceil(config.prune_rate * n * (1 - t))
+    prune_rate = (config.prune_rate * config.densify_interval/100)
+    n_prune = math.ceil(prune_rate * n * 1 - t)
 
     n = self.points.split_score.shape[0]
     prune_mask = take_n(self.points.prune_cost, n_prune, descending=False) | (~torch.isfinite(self.points.prune_cost))

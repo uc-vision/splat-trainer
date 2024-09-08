@@ -74,6 +74,9 @@ class SHScene(GaussianScene):
   @property
   def num_points(self):
     return self.points.position.shape[0]
+  
+  def __repr__(self):
+    return f"SHScene({self.num_points} points)"
 
   @beartype
   def update_learning_rate(self, lr_scale:float):
@@ -81,8 +84,6 @@ class SHScene(GaussianScene):
       lr_scale *= self.config.scene_extents
     self.points.set_learning_rate(position = self.learning_rates ['position'] * lr_scale)
 
-  def __repr__(self):
-    return f"GaussianScene({self.points.position.shape[0]} points)"
 
 
   def sh_mask(self, step):
@@ -127,9 +128,6 @@ class SHScene(GaussianScene):
       logger.log_histogram(f"points/{k}", v.detach(), step=step)
 
 
-
-
-  
 
   @property
   def scale(self):

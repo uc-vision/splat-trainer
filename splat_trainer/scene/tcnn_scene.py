@@ -15,7 +15,7 @@ from splat_trainer.scene.scene import GaussianSceneConfig, GaussianScene
 from splat_trainer.gaussians.split import split_gaussians_uniform
 
 
-from taichi_splatting.optim.parameter_class import ParameterClass
+from taichi_splatting.optim import ParameterClass, SparseAdam
 from taichi_splatting import Gaussians3D, RasterConfig, Rendering
 
 from taichi_splatting.renderer import render_projected, project_to_image
@@ -24,7 +24,6 @@ from taichi_splatting.perspective import CameraParams
 
 from splat_trainer.scene.util import parameters_from_gaussians, update_depth
 from splat_trainer.util.pointcloud import PointCloud
-
 
     
 @dataclass(kw_only=True, frozen=True)
@@ -58,7 +57,9 @@ class TCNNConfig(GaussianSceneConfig):
 
   
   def from_state_dict(self, state:dict, camera_table:CameraTable):
-    points = ParameterClass.from_state_dict(state['points'])
+    points = ParameterClass.from_state_dict(state['points'], 
+          optimizer=SparseAdam, betas=(0.9, 0.999))
+    
     scene = TCNNScene(points, self, camera_table)
 
     scene.color_model.load_state_dict(state['color_model'])
@@ -99,7 +100,7 @@ class TCNNScene(GaussianScene):
     return self.points.position.shape[0]
 
   def __repr__(self):
-    return f"GaussianScene({self.points.position.shape[0]} points)"
+    return f"TCNNScene({self.num_points} points)"
 
   @beartype
   def update_learning_rate(self, lr_scale:float):
@@ -153,6 +154,7 @@ class TCNNScene(GaussianScene):
 
   def write_to(self, output_dir:Path):
     output_dir.mkdir(parents=True, exist_ok=True)
+
     write_gaussians(output_dir / 'point_cloud.ply', self.gaussians.apply(torch.detach), with_sh=False)
 
     d = self.color_model.state_dict()

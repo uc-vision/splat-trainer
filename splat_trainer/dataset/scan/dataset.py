@@ -102,12 +102,13 @@ class ScanDataset(Dataset):
     return torch.Size([self.scan.num_frames, len(self.scan.cameras)])
   
 
-  def pointcloud(self) -> PointCloud:
+  def pointcloud(self) -> Optional[PointCloud]:
     pcd_filename = find_cloud(self.scan)    
+    if pcd_filename is None:
+      return None
+    
     return PointCloud.load(pcd_filename)
 
-
-  
   
   def camera_json(self, camera_table:CameraTable):
 
@@ -129,5 +130,7 @@ class ScanDataset(Dataset):
 
 
 def find_cloud(scan:FrameSet) -> Tuple[np.ndarray, np.ndarray]:
-  assert 'sparse' in scan.models, "No sparse model found in scene.json"
+  if 'sparse' not in scan.models:
+    return None
+  
   return Path(scan.find_file(scan.models.sparse.filename))

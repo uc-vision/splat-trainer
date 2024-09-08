@@ -62,8 +62,8 @@ class PoseTable(nn.Module):
     R, t = split_rt(m)
     q = roma.rotmat_to_unitquat(R)
 
-    self.t = nn.Parameter(t.to(torch.float32))
-    self.q = nn.Parameter(q.to(torch.float32))
+    self.t = nn.Parameter(t.to(torch.float32), requires_grad=False)
+    self.q = nn.Parameter(q.to(torch.float32), requires_grad=False)
 
 
   def forward(self, indices):

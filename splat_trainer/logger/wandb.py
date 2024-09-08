@@ -20,9 +20,7 @@ class WandbLogger(Logger):
                entity:str | None, 
                name:str | None=None):
     
-    dir = Path.cwd() / "wandb"
-    dir.mkdir(parents=True, exist_ok=True)  
-
+    dir = Path.cwd()
     wandb.require("core")
 
     self.run = wandb.init(project=project, 

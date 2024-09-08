@@ -1,55 +1,58 @@
 import argparse
-import os
 from pathlib import Path
-import signal
-import traceback
 import hydra
-
+import numpy as np
 from omegaconf import OmegaConf
 from termcolor import colored
 from splat_trainer.logger.logger import Logger
 from splat_trainer.util import config
 
-import numpy as np
 import torch
-
+import os
 
 config.add_resolvers()
 
 
-def main():
+
+def cfg_from_args():
   parser = argparse.ArgumentParser()
+
+  # General arguments
   parser.add_argument("overrides", nargs="*", help="hydra overrides var=value")
   parser.add_argument("--debug", action="store_true", help="Enable taichi debugging")
 
-  parser.add_argument("--target", type=int, default=None, help="Target point count")
-  parser.add_argument("--image_scale", type=float, default=None, help="Image scale")
-  parser.add_argument("--resize_longest", type=float, default=None, help="Resize longest side")
+  # Dataset group
+  dataset_group = parser.add_argument_group("Dataset")
+  dataset_group.add_argument("--scan", type=str, default=None, help="Scan json scene file to load")
+  dataset_group.add_argument("--colmap", type=str, default=None, help="Colmap scene to load")
+  dataset_group.add_argument("--image_scale", type=float, default=None, help="Image scale")
+  dataset_group.add_argument("--resize_longest", type=float, default=None, help="Resize longest side")
 
-  parser.add_argument("--no_alpha", action="store_true", help="Fix point alpha=1.0 in training")
+  # Training group
+  training_group = parser.add_argument_group("Training")
+  training_group.add_argument("--target", type=int, default=None, help="Target point count")
+  training_group.add_argument("--no_alpha", action="store_true", help="Fix point alpha=1.0 in training")
+  training_group.add_argument("--steps", type=int, default=None, help="Number of training steps")
+  training_group.add_argument("--background_points", type=int, default=None, help="Add random background points")
+  training_group.add_argument("--random_points", type=int, default=None, help="Initialise with N random points only")
 
-  parser.add_argument("--steps", type=int, default=None, help="Number of training steps")
-  parser.add_argument("--background_points", type=int, default=None, help="Number of background points")
+  # Output group
+  output_group = parser.add_argument_group("Output")
+  output_group.add_argument("--project", type=str, required=True, help="Project name")
+  output_group.add_argument("--run", type=str, default=None, help="Name for this run")
+  output_group.add_argument("--base_path", type=str, default=None, help="Base output path")
+  output_group.add_argument("--checkpoint", action="store_true", help="Save checkpoints")
+  output_group.add_argument("--wandb", action="store_true", help="Use wandb logging")
 
-  parser.add_argument("--scan", type=str, default=None, help="Scan json scene file to load")
-  parser.add_argument("--colmap", type=str, default=None, help="Colmap scene to load")
-
-  parser.add_argument("--project", type=str, default=None, help="Use project name")
-  parser.add_argument("--output_path", type=str, default=None, help="Override output path")
-
-  parser.add_argument("--random_points", type=int, default=None,  help="Initialise with N random points only")
-  parser.add_argument("--checkpoint", action="store_true")
-
-  parser.add_argument("--wandb", action="store_true", help="Use wandb logging")
   args = parser.parse_args()
 
-  
-  hydra.initialize(config_path="../config", version_base="1.2")
   overrides = args.overrides
 
+  # General arguments
   if args.debug:
     overrides.append(f"debug={args.debug}")
 
+  # Dataset group
   if args.scan is not None:
     overrides.append("dataset=scan")
     overrides.append(f"dataset.scan_file={args.scan}")
@@ -58,10 +61,6 @@ def main():
     overrides.append("dataset=colmap")
     overrides.append(f"dataset.base_path={args.colmap}")
 
-  if args.target is not None:
-    overrides.append("controller=target")
-    overrides.append(f"trainer.controller.target_count={args.target}")
-
   if args.image_scale is not None:
     overrides.append(f"dataset.image_scale={args.image_scale}")
     overrides.append("dataset.resize_longest=null")
@@ -69,7 +68,11 @@ def main():
   if args.resize_longest is not None:
     overrides.append(f"dataset.resize_longest={args.resize_longest}")
     overrides.append("dataset.image_scale=null")
-  
+
+  # Training group
+  if args.target is not None:
+    overrides.append("controller=target")
+    overrides.append(f"trainer.controller.target_count={args.target}")
   
   if args.no_alpha:
     overrides.append("trainer.initial_alpha=1.0")
@@ -79,37 +82,39 @@ def main():
     overrides.append(f"trainer.steps={args.steps}")
 
   if args.background_points is not None:
-    overrides.append(f"trainer.background_points={args.background_points}")
+    overrides.append(f"trainer.initial_points={args.background_points}")
+    overrides.append("trainer.add_initial_points=true")
 
+  if args.random_points is not None:
+    overrides.append(f"trainer.initial_points={args.random_points}")
+    overrides.append("trainer.load_dataset_cloud=false")
+
+  # Output group
   if args.wandb is not None:
     overrides.append("logger=wandb")
 
   if args.checkpoint:
     overrides.append("trainer.save_checkpoints=true")
   
-  if args.project is not None:
-    overrides.append(f"project={args.project}")
+  run_path, args.run = config.setup_project(args.project, args.run, base_path=args.base_path)
+  os.chdir(str(run_path))
 
-  cfg = hydra.compose(config_name="config", overrides=overrides)
+  overrides += [f"run_name={args.run}", f"project={args.project}", f"base_path={args.base_path}"]
 
-  if args.output_path is None:
-    args.output_path = Path.cwd()
+  hydra.initialize(config_path="../config", version_base="1.2")
+  return hydra.compose(config_name="config", overrides=overrides)
 
-  output_path = Path(args.output_path) / cfg.project 
-  output_path.mkdir(parents=True, exist_ok=True)
-  os.chdir(str(output_path))
-  
 
-  train_with_config(cfg)
 
-def train_with_config(cfg):
+def train_with_config(cfg) -> dict | str:
   import taichi as ti
   from splat_trainer.trainer import Trainer
 
   torch.set_grad_enabled(False)
+  torch.set_float32_matmul_precision('high')
+
   torch.set_printoptions(precision=4, sci_mode=False)
   np.set_printoptions(precision=4, suppress=True)
-  torch.set_float32_matmul_precision('high')
 
   # print(config.pretty(cfg))
   output_path = Path.cwd()
@@ -123,6 +128,7 @@ def train_with_config(cfg):
   # logger = hydra.utils.instantiate(cfg.logger) 
 
   trainer = None
+  result = None
 
   try:
     ti.init(arch=ti.cuda, debug=cfg.debug, device_memory_GB=0.1)
@@ -138,15 +144,18 @@ def train_with_config(cfg):
 
   except KeyboardInterrupt:
     pass
-  except Exception:
-    # print exception and stack trace and exit
-     traceback.print_exc()
 
-  if trainer is not None:
-    trainer.close()
-  
-  logger.close()
+  finally:
+    if trainer is not None:
+      trainer.close()
+    
+    logger.close()
   return result
     
+def main():
+  cfg = cfg_from_args()
+  train_with_config(cfg)
+
+
 if __name__ == "__main__":
   main()

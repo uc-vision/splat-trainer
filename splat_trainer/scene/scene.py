@@ -37,12 +37,12 @@ class GaussianScene(metaclass=ABCMeta):
   
   @property
   @abstractmethod
-  def scale(self):
+  def scale(self) -> torch.Tensor:
     raise NotImplementedError
   
   @property
   @abstractmethod
-  def opacity(self):
+  def opacity(self) -> torch.Tensor:
     raise NotImplementedError
 
 

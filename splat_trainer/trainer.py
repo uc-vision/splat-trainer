@@ -1,15 +1,20 @@
+from collections import abc
 from dataclasses import dataclass, replace
 from functools import partial
 import gc
 import heapq
 import json
 import math
+from numbers import Number
 import os
 from pathlib import Path
+from typing import Generic, Protocol
 
+from beartype import beartype
 from beartype.typing import Optional
 import numpy as np
 from omegaconf import OmegaConf
+from pyparsing import TypeVar, abstractmethod
 import torch
 
 import torch.nn.functional as F
@@ -23,6 +28,7 @@ from termcolor import colored
 from splat_trainer.camera_table.camera_table import CameraInfo
 from splat_trainer.controller.controller import Controller
 from splat_trainer.scene.scene import GaussianScene
+from splat_trainer.util.config import Varying
 from splat_trainer.util.visibility import crop_cloud, random_cloud, random_points
 from taichi_splatting import Gaussians3D, RasterConfig, Rendering, perspective
 from tqdm import tqdm 
@@ -37,10 +43,13 @@ from splat_trainer.scene.sh_scene import  GaussianSceneConfig
 from splat_trainer.scheduler import Scheduler, Uniform
 from splat_trainer.util.colorize import colorize, get_cv_colormap
 from splat_trainer.util.containers import transpose_rows
-from splat_trainer.util.misc import CudaTimer, strided_indexes
+from splat_trainer.util.misc import CudaTimer, next_multiple, strided_indexes
 
 from splat_trainer.controller import ControllerConfig
 
+  
+
+@beartype
 @dataclass(kw_only=True)
 class TrainConfig:
   device: str
@@ -51,37 +60,38 @@ class TrainConfig:
 
   load_model: Optional[str] = None
 
-  num_neighbors:int   = 3
-  initial_point_scale:float = 0.5
-  initial_alpha:float = 0.5 
+  num_neighbors:int  
+  initial_point_scale:float 
+  initial_alpha:float 
 
-  max_initial_points: Optional[int] = None
 
-  background_points : int = 0
-  densify_interval: int = 50
+  initial_points : int 
+  add_initial_points: bool = False
+  load_dataset_cloud: bool = True
 
-  eval_steps: int = 1000
-  num_logged_images: int = 5
-  log_worst_images: int = 2
+  eval_steps: int    
+  log_interval: int  = 20
 
-  log_interval: int = 10
+  num_logged_images: int = 8
+  log_worst_images: int  = 2
 
-  ssim_weight: float = 0.2
-  ssim_scale: float = 0.5
+  densify_interval: int
 
-  scale_reg: float = 100.0
-  opacity_reg: float = 0.1
+  ssim_weight: float
+  ssim_scale: float 
 
-  blur_cov: float = 0.3
+  scale_reg:  float
+  opacity_reg: float
+
+  blur_cov: float
   antialias: bool = True
 
   save_checkpoints: bool = False
   save_output: bool = True
 
-  lr_scheduler: Scheduler = Uniform()
+  lr: Varying[float]
   raster_config: RasterConfig = RasterConfig()
   
-
 
 class Trainer:
   def __init__(self, config:TrainConfig,
@@ -106,7 +116,6 @@ class Trainer:
 
     self.last_checkpoint = None
     
-
     self.ssim = MultiScaleStructuralSimilarityIndexMeasure(
         data_range=1.0, kernel_size=11, betas=(0.3, 0.3, 0.3)).to(self.device)
     
@@ -123,34 +132,37 @@ class Trainer:
     camera_info = dataset.camera_info().to(device)
 
     print(f"Initializing model from {dataset}")
-    points = dataset.pointcloud().to(device)
-    cropped = crop_cloud(camera_info, points)
+    dataset_cloud = dataset.pointcloud() if config.load_dataset_cloud else None
+    initial_gaussians = None
 
-    # random subset of cropped
-    if config.max_initial_points is not None:
-      perm = torch.randperm(cropped.batch_size[0])
-      cropped = cropped[perm[:config.max_initial_points]]
+    if dataset_cloud is not None:
+      points = dataset_cloud.to(device)
+      points = crop_cloud(camera_info, points)
 
-    if cropped.batch_size[0] == 0:
-      raise ValueError("No points visible in dataset images, check input data!")
+      if points.batch_size[0] == 0:
+        raise ValueError("No points visible in dataset images, check input data!")
 
-    print(colored(f"Using {cropped.batch_size[0]} points from original {points.batch_size[0]}", 'yellow'))
-  
-    initial_gaussians:Gaussians3D = from_pointcloud(cropped, 
-                                        initial_scale=config.initial_point_scale,
-                                        initial_alpha=config.initial_alpha,
-                                        num_neighbors=config.num_neighbors)
+      print(colored(f"Using {points.batch_size[0]} points from original {dataset_cloud.batch_size[0]}", 'yellow'))
     
-    if config.background_points > 0:
-      near, _ = camera_info.depth_range
-      bg_points = random_cloud(camera_info, config.background_points, min_depth=near * 2)
-    
-      bg_gaussians = from_pointcloud(bg_points, 
-                                        initial_scale=config.initial_point_scale,
-                                        initial_alpha=config.initial_alpha,
-                                        num_neighbors=config.num_neighbors)
+      initial_gaussians:Gaussians3D = from_pointcloud(points, 
+                                          initial_scale=config.initial_point_scale,
+                                          initial_alpha=config.initial_alpha,
+                                          num_neighbors=config.num_neighbors)
       
-      initial_gaussians = initial_gaussians.concat(bg_gaussians)
+    if config.add_initial_points or dataset_cloud is None:
+      near, _ = camera_info.depth_range
+      points = random_cloud(camera_info, config.initial_points)
+    
+      gaussians = from_pointcloud(points, 
+                                        initial_scale=config.initial_point_scale,
+                                        initial_alpha=config.initial_alpha,
+                                        num_neighbors=config.num_neighbors)
+      if initial_gaussians is not None:
+        print(f"Adding {gaussians.batch_size[0]} random points")
+        initial_gaussians = initial_gaussians.concat(gaussians)
+      else:
+        print(f"Using {gaussians.batch_size[0]} random points")
+        initial_gaussians = gaussians
       
 
     scene = config.scene.from_color_gaussians(initial_gaussians, camera_info.camera_table, device)
@@ -159,7 +171,7 @@ class Trainer:
     if config.save_output:
       output_path = Path.cwd()
 
-      cropped.save_ply(output_path / "input.ply")
+      points.save_ply(output_path / "input.ply")
       with open(output_path / "cameras.json", "w") as f:
         json.dump(dataset.camera_json(camera_info.camera_table), f)
 
@@ -199,6 +211,14 @@ class Trainer:
   @property
   def blur_cov(self):
     return  self.config.blur_cov if not self.config.antialias else 0.0
+  
+  @property
+  def t(self):
+    return self.step / self.config.steps
+  
+
+  def __repr__(self):
+    return f"Trainer(step={self.step}, scene={self.scene} controller={self.controller})"
 
 
   def camera_params(self, cam_idx:torch.Tensor, image:torch.Tensor):
@@ -357,9 +377,13 @@ class Trainer:
       losses["ssim"] = ssim.item()
 
 
-    area = rendering.area / (rendering.camera.focal_length[0]**2)
+    # area = rendering.area / (rendering.camera.focal_length[0]**2)
+    # + (area / rendering.point_depth.squeeze(1)).mean() * self.config.scale_reg)
+
+    scale = rendering.scale / rendering.camera.focal_length[0]
     reg_loss = (  self.scene.opacity.mean() * self.config.opacity_reg
-                + (area / rendering.point_depth.squeeze(1)).mean() * self.config.scale_reg)
+                 + (scale).mean() * self.config.scale_reg)
+                  
     
     losses["reg"] = reg_loss.item()
     loss += reg_loss 
@@ -390,16 +414,15 @@ class Trainer:
     self.step += 1
     return dict(**losses, **metrics)
 
+  
+
 
   def train(self):
-    print(f"Writing to model path {os.getcwd()}")
 
-
-    self.pbar = tqdm(total=self.config.steps, desc="training")
-    self.step = 0
-    since_densify = 0
+    self.pbar = tqdm(total=self.config.steps - self.step, desc="training")
     densify_metrics = dict(n = self.scene.num_points)
-
+    next_densify = next_multiple(self.step, self.config.densify_interval)
+    
     iter_train = self.iter_train()
     step_timer = CudaTimer()
 
@@ -408,21 +431,19 @@ class Trainer:
       if self.step % self.config.eval_steps == 0:
           eval_metrics = self.evaluate(self.config.save_checkpoints)
 
-          lr_scale = self.config.lr_scheduler(self.step, self.config.steps)
+          lr_scale = self.config.lr(self.t)
           self.scene.update_learning_rate(lr_scale)
 
           self.log_values("train", dict(lr_scale=lr_scale, blur_cov=self.blur_cov))
           torch.cuda.empty_cache()
 
-
-      if since_densify >= self.config.densify_interval:
+      if self.step - next_densify > 0:
         self.controller.log_histograms(self.logger, self.step)
         densify_metrics = self.controller.densify_and_prune(self.step, self.config.steps)
 
         self.log_values("densify", densify_metrics)
-        since_densify = 0
+        next_densify += self.config.densify_interval
       
-        
 
       with torch.enable_grad():
         with step_timer:
@@ -430,7 +451,6 @@ class Trainer:
                   for timer in self.render_timers]
 
       torch.cuda.empty_cache()
-      since_densify += len(steps)
 
       if self.step % self.config.log_interval  == 0:
         steps = transpose_rows(steps)

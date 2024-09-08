@@ -82,8 +82,7 @@ def random_points(info:CameraInfo, count:int) -> torch.Tensor:
 
 
 @beartype
-def random_cloud(info:CameraInfo, count:int, min_depth:float=0.) -> PointCloud:
-  info = replace(info, depth_range=(max(min_depth, info.depth_range[1]), info.depth_range[1]))
+def random_cloud(info:CameraInfo, count:int) -> PointCloud:
 
   points = random_points(info, count)
   colors = torch.rand(count, 3, device=points.device)
