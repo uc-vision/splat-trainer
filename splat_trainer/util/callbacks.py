@@ -1,10 +1,14 @@
+import json
+import os
+from collections import namedtuple, defaultdict
+from typing import Any
+
+from hydra.core.utils import JobReturn, JobStatus
 from hydra.experimental.callback import Callback
 from omegaconf import DictConfig, OmegaConf
-from hydra.core.utils import JobReturn, JobStatus
-from typing import Any
-from collections import namedtuple, defaultdict
 import pandas as pd
-import os
+
+
 
 class Average_result(Callback):
     def __init__(self, output_dir: str, sweep_params: DictConfig) -> None:
@@ -12,7 +16,7 @@ class Average_result(Callback):
         self.config_fields = None
         self.Config = None
         self.Result = None
-        self.data = []
+        self.results_file = os.path.join(self.output_dir, "results.json")
 
         if sweep_params:
             self.create_config_namedtuple(sweep_params)
@@ -41,41 +45,50 @@ class Average_result(Callback):
                 self.Result = namedtuple('Result', job_return.return_value.keys())
             result_instance = self.Result(**job_return.return_value)
 
-        self.data.append((job_num, config_instance._asdict(), result_instance._asdict()))
+        result_data = {
+            "job_num": job_num,
+            "config": config_instance._asdict(),
+            "result": result_instance._asdict()
+        }
 
-        with open("data.yaml", "w") as f:
-            OmegaConf.save(OmegaConf.create({**config_instance._asdict(), **result_instance._asdict()}), f)
+        with open(self.results_file, "a") as f:
+            f.write(json.dumps(result_data) + "\n")
+            print(f"Job {job_num} result has been saved to {self.results_file}\n")
 
 
     def on_multirun_end(self, config: DictConfig, **kwargs: Any) -> None:
-        "Calculating average results..."
+        print("Averaging training results across the scenes...")
         results = defaultdict(list)
-        for job_num, config_instance, result_instance in self.data:
-            config_key = tuple(value for name, value in config_instance.items() if name != 'test_scene')
-            results[config_key].append(result_instance)
 
-        averaged_results = {}
-        for config_key, result_list in results.items():
-            result_sums = defaultdict(float)
-            result_counts = len(result_list)
+        try:
+            with open(self.results_file, "r") as f:
+                for line in f:
+                    result_data = json.loads(line.strip())
+                    job_num = result_data["job_num"]
+                    config_instance = result_data["config"]
+                    result_instance = result_data["result"]
 
-            for result_instance in result_list:
-                for field_name, value in result_instance.items():
-                    result_sums[field_name] += float(value)
-        
-            averaged_results[config_key] = {
-                field_name: result_sums[field_name] / result_counts for field_name in result_sums
-            }
+                    config_key = tuple(value for name, value in config_instance.items() if name != 'test_scene')
+                    results[config_key].append(result_instance)
 
-        for config_key, averages in averaged_results.items():
-            avg_str = ", ".join([f"{key}={value}" for key, value in averages.items()])
-            config_str = ", ".join([f"{name}={value}" for name, value in zip(config_instance.keys(), config_key)])
-            print(f"Config ({config_str}) -> {avg_str}")
+            averaged_results = {}
+            for config_key, result_list in results.items():
+                result_sums = defaultdict(float)
+                result_counts = len(result_list)
 
-        print("averaged_results: ", averaged_results)
+                for result_instance in result_list:
+                    for field_name, value in result_instance.items():
+                        result_sums[field_name] += float(value)
             
-        filename = "average_results.csv"
-        self.save_to_csv(averaged_results, filename)
+                averaged_results[config_key] = {
+                    field_name: result_sums[field_name] / result_counts for field_name in result_sums
+                }
+                
+            filename = "average_results.csv"
+            self.save_to_csv(averaged_results, filename)
+
+        except OSError as e:
+                print(f"Error reading file {self.results_file}: {e}")
 
     def sanitize_field_name(self, name: str) -> str:
         return name.replace('.', '__')
@@ -86,9 +99,6 @@ class Average_result(Callback):
 
     def save_to_csv(self, averaged_results, filename):
         data_rows = []
-
-        if not os.path.exists(self.output_dir):
-            os.makedirs(self.output_dir)
 
         output_file = os.path.join(self.output_dir, filename)
 

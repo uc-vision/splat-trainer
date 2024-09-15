@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Machine Load Dashboard</title>
+    <link href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css" rel="stylesheet">
+</head>
+<body>
+    <div class="container mt-5">
+        <h1 class="mb-4">System monitor</h1>
+        {% for group, machines in data.items() %}
+        <h3>{{ group }}</h3>
+        <table class="table table-hover table-sm">
+            <thead class="thead-light">
+                <tr>
+                    <th>Machine</th>
+                    <th>Result</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for machine in machines %}
+                {% if machine.error is not none %}
+                <tr>
+                    <td>{{ machine.hostname }}</td>
+                    <td colspan="7" class="text-danger">{{ machine.error }}</td>
+                </tr>
+                {% else %}
+                <tr id="{{ machine.hostname }}">
+                    <td>{{ machine.hostname }}</td>
+                    <td class="result-cell"><pre> {{ machine.result }} </pre></td>
+                </tr>
+                {% endif %}
+                {% endfor %}
+            </tbody>
+        </table>
+        {% endfor %}
+    </div>
+    <script src="https://code.jquery.com/jquery-3.5.1.slim.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@popperjs/core@2.9.2/dist/umd/popper.min.js"></script>
+    <script src="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/js/bootstrap.min.js"></script>
+</body>
+</html>

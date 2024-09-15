@@ -1,0 +1,6 @@
+defaults:
+  - rq
+
+  
+enqueue:
+  job_timeout: '1d'

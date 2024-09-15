@@ -49,9 +49,9 @@ dependency_links = ["https://pypi.taichi.graphics/simple/"]
 
 [project.scripts]  # Optional
 splat-trainer = "splat_trainer.scripts.train_scan:main"
-splat-trainer-multirun = "splat_trainer.scripts.train_scan_multirun:main"
 trainer-grid-search = "splat_trainer.scripts.grid_search:main"
-
+rq-worker = "splat_trainer.scripts.rq_worker:main"
+rq-worker-launcher = "splat_trainer.scripts.rq_worker_launcher:main"
 
 
 [tool.setuptools.package-data]

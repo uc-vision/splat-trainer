@@ -1,6 +1,6 @@
 # @package _global_
-mipnerf_path: '/mnt/maara/splat_datasets/mipnerf-360'
-scan_path: '/mnt/maara/splat_datasets/'
+mipnerf_path: '/uc/research/CropVision/splat_datasets/mipnerf-360'
+scan_path: '/uc/research/CropVision/splat_datasets'
 
 
 test_datasets:
