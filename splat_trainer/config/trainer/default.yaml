@@ -36,6 +36,10 @@ trainer:
   blur_cov: 0.3
   antialias: True
   
+  # Enable bilateral grid. (experimental)
+  use_bilateral_grid: True
+  # Shape of the bilateral grid (X, Y, W)
+  bilateral_grid_shape: [16, 16, 8]
 
   raster_config: 
     _target_: taichi_splatting.RasterConfig
