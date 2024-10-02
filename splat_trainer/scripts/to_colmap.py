@@ -9,27 +9,30 @@ from splat_trainer import config
 import torch
 from splat_trainer.scripts.train_scan import cfg_from_args
 from splat_trainer.trainer import Trainer
+from splat_trainer.util.transforms import split_rt
 
 
 
 config.add_resolvers()
 
+
+
 def export_colmap(trainer: Trainer):
     import pycolmap
 
     # Get cameras from trainer
-    cameras = trainer.dataset.cameras
+    cameras = trainer.dataset.camera_table()
 
     # Create a COLMAP reconstruction object
     reconstruction = pycolmap.Reconstruction()
 
     # Add cameras to the reconstruction
-    for idx, camera in enumerate(cameras):
-        # Assuming camera parameters are available in the trainer's dataset
-        # Adjust these lines based on your specific camera representation
-        width, height = camera.image_size
-        fx, fy = camera.focal_length
-        cx, cy = camera.principal_point
+    for idx in range(cameras.num_images):
+        camera_t_world, proj = cameras.lookup(idx)
+        fx, fy, cx, cy = proj.cpu().tolist()
+        
+        # Assuming image sizes are available in the trainer's dataset
+        width, height = trainer.dataset.image_sizes()[idx].tolist()
 
         colmap_camera = pycolmap.Camera(
             model="PINHOLE",
@@ -39,11 +42,39 @@ def export_colmap(trainer: Trainer):
         )
         reconstruction.add_camera(colmap_camera, camera_id=idx)
 
+        # Add image to the reconstruction
+        r, t = split_rt(torch.linalg.inv(camera_t_world))
+        qvec = pycolmap.rotmat_to_qvec(r.cpu().numpy())
+        tvec = t.cpu().numpy()
+        
+        image_name = trainer.dataset.all_cameras[idx].filename
+        reconstruction.add_image(
+            pycolmap.Image(
+                name=image_name,
+                camera_id=idx,
+                qvec=qvec,
+                tvec=tvec
+            ),
+            image_id=idx
+        )
     # Export the reconstruction to a COLMAP format
     output_path = Path("sparse") / "0"
     output_path.mkdir(parents=True, exist_ok=True)
 
-    cloud = trainer.dataset.points
+    cloud = Trainer.get_initial_points(trainer.config, trainer.dataset)
+
+    positions = cloud.position.cpu().numpy()
+    colors = (cloud.color.cpu().numpy() * 255).astype(np.uint8)
+
+    # Add points to the reconstruction
+    for i, (position, color) in enumerate(zip(positions, colors)):
+        reconstruction.add_point3D(
+            xyz=position,
+            color=color,
+            track=pycolmap.Track()
+        )
+
+    print(f"Added {len(cloud.position)} points to the reconstruction")
 
     reconstruction.write_text(output_path)
     print(f"Cameras exported to COLMAP format in {output_path}")
