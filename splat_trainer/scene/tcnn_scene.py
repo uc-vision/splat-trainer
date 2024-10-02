@@ -44,6 +44,11 @@ class TCNNConfig(GaussianSceneConfig):
   depth_ema:float = 0.95
   use_depth_lr:bool = True
 
+  beta1:float = 0.9
+  beta2:float = 0.999
+
+
+
 
   def from_color_gaussians(self, gaussians:Gaussians3D, 
                            camera_table:CameraTable, device:torch.device):
@@ -52,18 +57,20 @@ class TCNNConfig(GaussianSceneConfig):
     feature = torch.randn(gaussians.batch_size[0], self.point_features)
     gaussians = gaussians.replace(feature=feature).to(device)
     
-    points = parameters_from_gaussians(gaussians, OmegaConf.to_container(self.learning_rates))
+    points = parameters_from_gaussians(gaussians, OmegaConf.to_container(self.learning_rates), betas=(self.beta1, self.beta2))
     return TCNNScene(points, self, camera_table)
 
   
   def from_state_dict(self, state:dict, camera_table:CameraTable):
     points = ParameterClass.from_state_dict(state['points'], 
-          optimizer=SparseAdam, betas=(0.9, 0.999))
+          optimizer=SparseAdam, betas=(self.beta1, self.beta2))
     
     scene = TCNNScene(points, self, camera_table)
 
     scene.color_model.load_state_dict(state['color_model'])
     scene.color_opt.load_state_dict(state['color_opt'])
+
+    
 
     return scene
 
@@ -89,6 +96,8 @@ class TCNNScene(GaussianScene):
     
     self.color_opt = self.color_model.optimizer(
       config.lr_nn, config.lr_image_feature)
+    
+
 
 
   @property
@@ -124,6 +133,7 @@ class TCNNScene(GaussianScene):
     self.color_opt.step()
     self.points.rotation = torch.nn.Parameter(
       F.normalize(self.points.rotation.detach(), dim=1), requires_grad=True)
+    
     
 
     self.points.zero_grad()

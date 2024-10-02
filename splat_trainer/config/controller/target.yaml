@@ -6,10 +6,8 @@ trainer:
     
     target_count: 1000000
 
-    # rate of splitting proportional to current size (per 100 steps)
-    prune_rate: 0.075
-
-    densify_interval: ${..densify_interval} # take from trainer config
+    # rate of splitting proportional to current size
+    prune_rate: 0.05
 
     # min visbility to be considered for splitting/pruning
     ema_half_life: 50 

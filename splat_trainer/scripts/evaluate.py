@@ -13,7 +13,7 @@ import torch
 
 import taichi as ti
 
-from splat_trainer.util.config import add_resolvers, setup_project
+from splat_trainer.config import add_resolvers, setup_project
 
 
 def find_checkpoint(path:Path, checkpoint:Optional[int]=None):
@@ -84,6 +84,8 @@ def with_trainer(f, args):
   ti.init(arch=ti.cuda, debug=args.debug)
 
   add_resolvers()
+
+  args.splat_path = args.splat_path.absolute()
   config = OmegaConf.load(args.splat_path / "config.yaml")
 
   run_path, args.run = setup_project(config.project, args.run or config.run_name, config.base_path)

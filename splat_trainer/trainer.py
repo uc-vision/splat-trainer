@@ -1,37 +1,30 @@
-from collections import abc
 from dataclasses import dataclass, replace
 from functools import partial
-import gc
 import heapq
 import json
 import math
 from numbers import Number
-import os
 from pathlib import Path
-from typing import Generic, Protocol
+from typing import TypeVar
+
+from tqdm import tqdm 
+from termcolor import colored
 
 from beartype import beartype
 from beartype.typing import Optional
 import numpy as np
-from omegaconf import OmegaConf
-from pyparsing import TypeVar, abstractmethod
 import torch
 
+from fused_ssim import fused_ssim
 import torch.nn.functional as F
-from torchmetrics.image  import MultiScaleStructuralSimilarityIndexMeasure
-from torchmetrics.image import StructuralSimilarityIndexMeasure
-
-
-from termcolor import colored
-
+# import torchmetrics.image as torchmetrics
  
-from splat_trainer.camera_table.camera_table import CameraInfo
 from splat_trainer.controller.controller import Controller
 from splat_trainer.scene.scene import GaussianScene
-from splat_trainer.util.config import Varying
-from splat_trainer.util.visibility import crop_cloud, random_cloud, random_points
-from taichi_splatting import Gaussians3D, RasterConfig, Rendering, perspective
-from tqdm import tqdm 
+from splat_trainer.config import Varying
+from splat_trainer.util.visibility import crop_cloud, random_cloud
+from taichi_splatting import Gaussians3D, RasterConfig, Rendering
+from taichi_splatting.perspective import CameraParams
 
 from splat_trainer.dataset import Dataset
 from splat_trainer.gaussians.loading import from_pointcloud
@@ -40,14 +33,15 @@ from splat_trainer.logger import Logger
 from splat_trainer.logger.histogram import Histogram
 
 from splat_trainer.scene.sh_scene import  GaussianSceneConfig
-from splat_trainer.scheduler import Scheduler, Uniform
 from splat_trainer.util.colorize import colorize, get_cv_colormap
 from splat_trainer.util.containers import transpose_rows
 from splat_trainer.util.misc import CudaTimer, next_multiple, strided_indexes
 
 from splat_trainer.controller import ControllerConfig
 
-  
+
+T = TypeVar("T")
+
 
 @beartype
 @dataclass(kw_only=True)
@@ -64,6 +58,7 @@ class TrainConfig:
   initial_point_scale:float 
   initial_alpha:float 
 
+  limit_points: Optional[int] = None
 
   initial_points : int 
   add_initial_points: bool = False
@@ -75,13 +70,15 @@ class TrainConfig:
   num_logged_images: int = 8
   log_worst_images: int  = 2
 
-  densify_interval: int
+  densify_interval: Varying[int]
 
   ssim_weight: float
-  ssim_scale: float 
+  l1_weight: float
+  ssim_levels: int = 3
 
-  scale_reg:  float
-  opacity_reg: float
+  scale_reg: Varying[float]
+  opacity_reg: Varying[float]
+  area_reg: Varying[float]
 
   blur_cov: float
   antialias: bool = True
@@ -115,14 +112,15 @@ class Trainer:
     self.step = step
 
     self.last_checkpoint = None
-    
-    self.ssim = MultiScaleStructuralSimilarityIndexMeasure(
-        data_range=1.0, kernel_size=11, betas=(0.3, 0.3, 0.3)).to(self.device)
-    
+      
     self.render_timers = [CudaTimer() for _ in range(self.config.log_interval)]
 
     self.color_map = get_cv_colormap().to(self.device)
     self.pbar = None
+
+    self.ssim = partial(fused_ssim, padding="valid")
+    # self.ssim = torch.compile(torchmetrics.StructuralSimilarityIndexMeasure(data_range=1.0, sigma=1.5).to(self.device))
+    # self.ssim = torchmetrics.MultiScaleStructuralSimilarityIndexMeasure(data_range=1.0, kernel_size=11, sigma=1.5).to(self.device)
 
 
   @staticmethod
@@ -134,6 +132,8 @@ class Trainer:
     print(f"Initializing model from {dataset}")
     dataset_cloud = dataset.pointcloud() if config.load_dataset_cloud else None
     initial_gaussians = None
+
+
 
     if dataset_cloud is not None:
       points = dataset_cloud.to(device)
@@ -148,6 +148,13 @@ class Trainer:
                                           initial_scale=config.initial_point_scale,
                                           initial_alpha=config.initial_alpha,
                                           num_neighbors=config.num_neighbors)
+      
+      if config.limit_points is not None:
+        print(f"Limiting {points.batch_size[0]} points to {config.limit_points}")
+        # random sample
+        random_indices = torch.randperm(points.batch_size[0])[:config.limit_points]
+        points = points[random_indices]
+        initial_gaussians = initial_gaussians[random_indices]
       
     if config.add_initial_points or dataset_cloud is None:
       near, _ = camera_info.depth_range
@@ -225,7 +232,7 @@ class Trainer:
         near, far = self.dataset.depth_range()
         camera_t_world, projection = self.camera_table.lookup(cam_idx)
 
-        return perspective.CameraParams(
+        return CameraParams(
             T_camera_world=camera_t_world,
             projection=projection,
             image_size=(image.shape[1], image.shape[0]),
@@ -354,35 +361,53 @@ class Trainer:
 
 
 
-  @torch.compile
-  def compute_ssim(self, image:torch.Tensor, ref:torch.Tensor, scale:float=1.0):
-      image1 = ref.unsqueeze(0).permute(0, 3, 1, 2).to(memory_format=torch.channels_last)
-      image2 = image.unsqueeze(0).permute(0, 3, 1, 2).to(memory_format=torch.channels_last)
 
-      if scale == 1.0:
-        return 1.0 - self.ssim(image1, image2)
-      else:
-        return 1.0 - self.ssim(F.interpolate(image1, scale_factor=scale), F.interpolate(image2, scale_factor=scale))
-      
+  def compute_ssim(self, pred:torch.Tensor, ref:torch.Tensor, levels:int=4):
+      ref = ref.unsqueeze(0).permute(0, 3, 1, 2).to(memory_format=torch.channels_last)
+      pred = pred.unsqueeze(0).permute(0, 3, 1, 2).to(memory_format=torch.channels_last)
+
+      loss = 1.0 - self.ssim(pred, ref)
+
+      for i in range(1, levels):
+        pred = F.avg_pool2d(pred, kernel_size=2, stride=2)
+        ref = F.avg_pool2d(ref, kernel_size=2, stride=2)
+
+        loss += (1.0 - self.ssim(pred, ref)) 
+
+      return loss / levels
+  
+  def eval_var(self, var:Varying[T] | Number):
+    if isinstance(var, Varying):
+      return var(self.t)
+    else:
+      return var
 
   def losses(self, rendering:Rendering, image):
-    l1 = torch.nn.functional.l1_loss(rendering.image, image)
-    
-    losses = dict(l1=l1.item())
-    loss = l1
+    losses = {}
+    loss = 0.0
+
+    if self.config.l1_weight > 0:
+      l1 = torch.nn.functional.l1_loss(rendering.image, image)
+      losses["l1"] = l1.item()
+      loss = l1 * self.config.l1_weight
+
 
     if self.config.ssim_weight > 0:  
-      ssim = self.compute_ssim(rendering.image, image, scale=self.config.ssim_scale)
+      ssim = self.compute_ssim(rendering.image, image, self.config.ssim_levels)
       loss += ssim * self.config.ssim_weight 
       losses["ssim"] = ssim.item()
 
+    area = rendering.area / (rendering.camera.focal_length[0]**2)
+    area_term = (area / rendering.point_depth.squeeze(1)).mean()
 
-    # area = rendering.area / (rendering.camera.focal_length[0]**2)
-    # + (area / rendering.point_depth.squeeze(1)).mean() * self.config.scale_reg)
 
-    scale = rendering.scale / rendering.camera.focal_length[0]
-    reg_loss = (  self.scene.opacity.mean() * self.config.opacity_reg
-                 + (scale).mean() * self.config.scale_reg)
+    aspect = rendering.scale.max(-1).values / rendering.scale.min(-1).values
+    
+    scale_term = rendering.scale / rendering.camera.focal_length[0]
+    reg_loss = (  self.scene.opacity.mean() * self.config.opacity_reg(self.t)
+                 + scale_term.mean() * self.config.scale_reg(self.t)
+                 + area_term * self.config.area_reg(self.t)
+                 + 0.01 * aspect.mean())
                   
     
     losses["reg"] = reg_loss.item()
@@ -421,7 +446,10 @@ class Trainer:
 
     self.pbar = tqdm(total=self.config.steps - self.step, desc="training")
     densify_metrics = dict(n = self.scene.num_points)
-    next_densify = next_multiple(self.step, self.config.densify_interval)
+    next_densify = next_multiple(self.step, self.config.densify_interval(self.t))
+
+    metrics = {}
+    eval_metrics = {}
     
     iter_train = self.iter_train()
     step_timer = CudaTimer()
@@ -442,7 +470,7 @@ class Trainer:
         densify_metrics = self.controller.densify_and_prune(self.step, self.config.steps)
 
         self.log_values("densify", densify_metrics)
-        next_densify += self.config.densify_interval
+        next_densify += self.config.densify_interval(self.t)
       
 
       with torch.enable_grad():

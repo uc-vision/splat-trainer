@@ -74,6 +74,10 @@ class PoseTable(nn.Module):
     pose = join_rt(roma.unitquat_to_rotmat(q), t)
     return pose
   
+  def __getitem__(self, idx:int):
+    return self.forward(torch.tensor([idx], device=self.t.device)).squeeze(0)
+  
+
   def normalize(self):
     self.q.data = F.normalize(self.q.data, dim=-1)
     return self

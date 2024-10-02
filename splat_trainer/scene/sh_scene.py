@@ -15,8 +15,8 @@ from splat_trainer.logger.logger import Logger
 from splat_trainer.scene.io import write_gaussians
 from splat_trainer.scene.scene import GaussianSceneConfig, GaussianScene
 from splat_trainer.gaussians.split import  split_gaussians_uniform
-from splat_trainer.scene.util import update_depth
-from splat_trainer.util.misc import  lerp, rgb_to_sh
+from splat_trainer.scene.util import parameters_from_gaussians, update_depth
+from splat_trainer.util.misc import   rgb_to_sh
 
 from taichi_splatting.optim.parameter_class import ParameterClass
 from taichi_splatting import Gaussians3D, RasterConfig, render_gaussians, Rendering
@@ -29,54 +29,59 @@ from taichi_splatting.optim.sparse_adam import SparseAdam
 class SHConfig(GaussianSceneConfig):  
   learning_rates : DictConfig
   sh_ratio:float      = 20.0
-  sh_degree:int       = 2
+  sh_degree:int       = 3
   degree_steps: int = 2000
 
   depth_ema:float = 0.95
   use_depth_lr:bool = True
 
-  scene_extents:Optional[float] = None
+  beta1:float = 0.9
+  beta2:float = 0.999
+
 
 
   def from_color_gaussians(self, gaussians:Gaussians3D, camera_table:CameraTable, device:torch.device):
     sh_feature = torch.zeros(gaussians.batch_size[0], 3, (self.sh_degree + 1)**2)
     sh_feature[:, :, 0] = rgb_to_sh(gaussians.feature)
 
-    centre, extents = camera_extents(camera_table)
-    if self.scene_extents is None:
-      config = replace(self, scene_extents=extents)
+    gaussians = gaussians.replace(feature=sh_feature).to(device)
 
-    return SHScene(gaussians.replace(feature=sh_feature), camera_table, device, config)
+    points = parameters_from_gaussians(gaussians, OmegaConf.to_container(self.learning_rates), betas=(self.beta1, self.beta2))
+    return SHScene(points, self, camera_table)
+
+  
+  def from_state_dict(self, state:dict, camera_table:CameraTable):
+    points = ParameterClass.from_state_dict(state['points'], 
+          optimizer=SparseAdam, betas=(self.beta1, self.beta2))
+    
+    return SHScene(points, self, camera_table)
 
 
 class SHScene(GaussianScene):
-  def __init__(self, points: Gaussians3D, camera_table:CameraTable, device:torch.device, config: SHConfig):
+  def __init__(self, 
+        points: ParameterClass, 
+        config: SHConfig,       
+        camera_table:CameraTable,     
+  ):
+    
     self.config = config
+    self.points = points
+
     self.camera_table = camera_table
-
     self.learning_rates = OmegaConf.to_container(config.learning_rates)
-    # self.learning_rates ['position'] *= self.config.scene_extent
-
-    parameter_groups = {k:dict(lr=lr) for k, lr in self.learning_rates.items()}
-
-    d:TensorDict = points.to_tensordict().update(dict(
-      running_depth = torch.zeros(points.batch_size[0], device=device)))
-
-    create_optimizer = partial(SparseAdam, betas=(0.7, 0.999))
-    self.points = ParameterClass.create(d.to(device), 
-          parameter_groups = parameter_groups, optimizer=create_optimizer)   
         
-  
-  @property 
+    
+  @property
   def device(self):
     return self.points.position.device
-  
+
   @property
   def num_points(self):
     return self.points.position.shape[0]
-  
+
   def __repr__(self):
     return f"SHScene({self.num_points} points)"
+
 
   @beartype
   def update_learning_rate(self, lr_scale:float):

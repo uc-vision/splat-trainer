@@ -5,7 +5,7 @@ import numpy as np
 from omegaconf import OmegaConf
 from termcolor import colored
 from splat_trainer.logger.logger import Logger
-from splat_trainer.util import config
+from splat_trainer import config
 
 import torch
 import os
@@ -20,20 +20,24 @@ def cfg_from_args():
   # General arguments
   parser.add_argument("overrides", nargs="*", help="hydra overrides var=value")
   parser.add_argument("--debug", action="store_true", help="Enable taichi debugging")
+  parser.add_argument("--show_config", action="store_true", help="Show config")
 
   # Dataset group
   dataset_group = parser.add_argument_group("Dataset")
   dataset_group.add_argument("--scan", type=str, default=None, help="Scan json scene file to load")
   dataset_group.add_argument("--colmap", type=str, default=None, help="Colmap scene to load")
   dataset_group.add_argument("--image_scale", type=float, default=None, help="Image scale")
-  dataset_group.add_argument("--resize_longest", type=float, default=None, help="Resize longest side")
+  dataset_group.add_argument("--resize_longest", type=int, default=None, help="Resize longest side")
 
   # Training group
   training_group = parser.add_argument_group("Training")
   training_group.add_argument("--target", type=int, default=None, help="Target point count")
   training_group.add_argument("--no_alpha", action="store_true", help="Fix point alpha=1.0 in training")
   training_group.add_argument("--steps", type=int, default=None, help="Number of training steps")
-  training_group.add_argument("--background_points", type=int, default=None, help="Add random background points")
+
+  
+  training_group.add_argument("--add_points", type=int, default=None, help="Add random background points")
+  training_group.add_argument("--limit_points", type=int, default=None, help="Limit the number of points from the dataset to N")
   training_group.add_argument("--random_points", type=int, default=None, help="Initialise with N random points only")
 
   # Output group
@@ -54,12 +58,13 @@ def cfg_from_args():
 
   # Dataset group
   if args.scan is not None:
+    
     overrides.append("dataset=scan")
-    overrides.append(f"dataset.scan_file={args.scan}")
+    overrides.append(f"dataset.scan_file={os.path.abspath(args.scan)}")
 
   if args.colmap is not None:
     overrides.append("dataset=colmap")
-    overrides.append(f"dataset.base_path={args.colmap}")
+    overrides.append(f"dataset.base_path={os.path.abspath(args.colmap)}")
 
   if args.image_scale is not None:
     overrides.append(f"dataset.image_scale={args.image_scale}")
@@ -81,13 +86,22 @@ def cfg_from_args():
   if args.steps is not None:
     overrides.append(f"trainer.steps={args.steps}")
 
-  if args.background_points is not None:
-    overrides.append(f"trainer.initial_points={args.background_points}")
+  assert args.add_points is None or args.random_points is None, "Cannot specify both background and random points"
+  assert args.limit_points is None or args.random_points is None, "Cannot specify both limit and random points"
+
+  if args.add_points is not None:
+    overrides.append(f"trainer.initial_points={args.add_points}")
     overrides.append("trainer.add_initial_points=true")
+
+  if args.limit_points is not None:
+    overrides.append(f"trainer.limit_points={args.limit_points}")
+
 
   if args.random_points is not None:
     overrides.append(f"trainer.initial_points={args.random_points}")
     overrides.append("trainer.load_dataset_cloud=false")
+
+
 
   # Output group
   if args.wandb is not None:
@@ -102,9 +116,12 @@ def cfg_from_args():
   overrides += [f"run_name={args.run}", f"project={args.project}", f"base_path={args.base_path}"]
 
   hydra.initialize(config_path="../config", version_base="1.2")
-  return hydra.compose(config_name="config", overrides=overrides)
+  cfg = hydra.compose(config_name="config", overrides=overrides)
 
+  if args.show_config:
+    print(config.pretty(cfg))
 
+  return cfg
 
 def train_with_config(cfg) -> dict | str:
   import taichi as ti
@@ -135,6 +152,7 @@ def train_with_config(cfg) -> dict | str:
     
     train_config = hydra.utils.instantiate(cfg.trainer)
     dataset = hydra.utils.instantiate(cfg.dataset)
+    
 
     trainer = Trainer.initialize(train_config, dataset, logger)
 
