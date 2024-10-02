@@ -1,5 +1,10 @@
+import math
+from typing import Tuple
 import torch
 import torch.nn.functional as F
+import torch.nn as nn
+from taichi_splatting.perspective import (CameraParams)
+
 
 def positional_model(hidden:int, layers:int, num_features:int):
   import tinycudann as tcnn
@@ -29,6 +34,36 @@ def positional_model(hidden:int, layers:int, num_features:int):
   )
 
 
+
+
+class EnvironmentModel(torch.nn.Module):
+  def __init__(self, 
+               num_cameras:int,
+               
+               image_features:int = 8, 
+               hidden:int             = 32,
+               layers:int             = 2):
+    super().__init__()
+
+    self.color_model = positional_model(hidden, layers, image_features)
+    self.image_features = nn.Embedding(num_cameras, image_features)
+
+    # Initialize image features with small standard deviation
+    nn.init.normal_(self.image_features.weight, std=0.02)
+
+  def forward(self, feature:torch.Tensor):
+    return self.model(feature).to(torch.float32).sigmoid()
+  
+
+  def forward(self, dir:torch.Tensor, cam_idx:int):
+    cam_feature = self.image_features[cam_idx]  
+    cam_feature = cam_feature.unsqueeze(0).expand(dir.shape[0], -1)
+
+    feature = torch.cat([dir, cam_feature], dim=1)
+    return self.color_model(feature).to(torch.float32).sigmoid()
+
+
+
 class ColorModel(torch.nn.Module):
   def __init__(self, 
                num_cameras:int,
@@ -41,9 +76,10 @@ class ColorModel(torch.nn.Module):
     super().__init__()
 
     self.color_model = positional_model(hidden, layers, image_features + point_features)
+    self.image_features = nn.Embedding(num_cameras, image_features)
 
-    image_features = torch.zeros(num_cameras,  image_features, dtype=torch.float32)
-    self.image_features = torch.nn.Parameter(image_features, requires_grad=True)
+    # Initialize image features with small standard deviation
+    nn.init.normal_(self.image_features.weight, std=0.02)
 
 
   def forward(self, point_features:torch.Tensor, positions:torch.Tensor, cam_pos:torch.Tensor, cam_idx:int):

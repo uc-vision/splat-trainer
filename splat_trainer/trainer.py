@@ -22,6 +22,7 @@ import torch.nn.functional as F
 from splat_trainer.controller.controller import Controller
 from splat_trainer.scene.scene import GaussianScene
 from splat_trainer.config import Varying
+from splat_trainer.util.pointcloud import PointCloud
 from splat_trainer.util.visibility import crop_cloud, random_cloud
 from taichi_splatting import Gaussians3D, RasterConfig, Rendering
 from taichi_splatting.perspective import CameraParams
@@ -38,6 +39,7 @@ from splat_trainer.util.containers import transpose_rows
 from splat_trainer.util.misc import CudaTimer, next_multiple, strided_indexes
 
 from splat_trainer.controller import ControllerConfig
+
 
 from splat_trainer.util.lib_bilagrid import (
     BilateralGrid,
@@ -95,7 +97,7 @@ class TrainConfig:
   use_bilateral_grid: bool = False
   bilateral_grid_shape: Tuple[int, int, int] = (16, 16, 8)
 
-  lr_scheduler: Scheduler = Uniform()
+  # lr_scheduler: Scheduler = Uniform()
   lr: Varying[float]
 
   raster_config: RasterConfig = RasterConfig()
@@ -123,53 +125,51 @@ class Trainer:
     self.step = step
 
     self.last_checkpoint = None
-      
     self.render_timers = [CudaTimer() for _ in range(self.config.log_interval)]
 
     self.color_map = get_cv_colormap().to(self.device)
     self.pbar = None
 
-    if config.use_bilateral_grid:
-      self.bil_grids = BilateralGrid(
-        len(self.dataset.train_cameras),
-        grid_X=config.bilateral_grid_shape[0],
-        grid_Y=config.bilateral_grid_shape[1],
-        grid_W=config.bilateral_grid_shape[2],
-      ).to(self.device)
-      self.bil_grid_optimizer = torch.optim.Adam(
-        self.bil_grids.parameters(),
-        lr=2e-3,
-        eps=1e-15,
-      )
-      self.bil_grid_scheduler = torch.optim.lr_scheduler.ChainedScheduler(
-        [
-          torch.optim.lr_scheduler.LinearLR(
-              self.bil_grid_optimizer,
-              start_factor=0.01,
-              total_iters=1000,
-          ),
-          torch.optim.lr_scheduler.ExponentialLR(
-              self.bil_grid_optimizer, gamma=0.01 ** (1.0 / config.steps)
-          ),
-        ]
-      )
-
     self.ssim = partial(fused_ssim, padding="valid")
+
+
+    # if config.use_bilateral_grid:
+    #   self.bil_grids = BilateralGrid(
+    #     len(self.dataset.train_cameras),
+    #     grid_X=config.bilateral_grid_shape[0],
+    #     grid_Y=config.bilateral_grid_shape[1],
+    #     grid_W=config.bilateral_grid_shape[2],
+    #   ).to(self.device)
+    #   self.bil_grid_optimizer = torch.optim.Adam(
+    #     self.bil_grids.parameters(),
+    #     lr=2e-3,
+    #     eps=1e-15,
+    #   )
+    #   self.bil_grid_scheduler = torch.optim.lr_scheduler.ChainedScheduler(
+    #     [
+    #       torch.optim.lr_scheduler.LinearLR(
+    #           self.bil_grid_optimizer,
+    #           start_factor=0.01,
+    #           total_iters=1000,
+    #       ),
+    #       torch.optim.lr_scheduler.ExponentialLR(
+    #           self.bil_grid_optimizer, gamma=0.01 ** (1.0 / config.steps)
+    #       ),
+    #     ]
+    #   )
+
     # self.ssim = torch.compile(torchmetrics.StructuralSimilarityIndexMeasure(data_range=1.0, sigma=1.5).to(self.device))
     # self.ssim = torchmetrics.MultiScaleStructuralSimilarityIndexMeasure(data_range=1.0, kernel_size=11, sigma=1.5).to(self.device)
 
 
-  @staticmethod
-  def initialize(config:TrainConfig, dataset:Dataset, logger:Logger):
 
+  @staticmethod
+  def get_initial_points(config:TrainConfig, dataset:Dataset) -> PointCloud:
     device = torch.device(config.device)
     camera_info = dataset.camera_info().to(device)
 
-    print(f"Initializing model from {dataset}")
     dataset_cloud = dataset.pointcloud() if config.load_dataset_cloud else None
-    initial_gaussians = None
-
-
+    points = None
 
     if dataset_cloud is not None:
       points = dataset_cloud.to(device)
@@ -180,33 +180,38 @@ class Trainer:
 
       print(colored(f"Using {points.batch_size[0]} points from original {dataset_cloud.batch_size[0]}", 'yellow'))
     
-      initial_gaussians:Gaussians3D = from_pointcloud(points, 
-                                          initial_scale=config.initial_point_scale,
-                                          initial_alpha=config.initial_alpha,
-                                          num_neighbors=config.num_neighbors)
-      
       if config.limit_points is not None:
         print(f"Limiting {points.batch_size[0]} points to {config.limit_points}")
-        # random sample
         random_indices = torch.randperm(points.batch_size[0])[:config.limit_points]
         points = points[random_indices]
-        initial_gaussians = initial_gaussians[random_indices]
       
     if config.add_initial_points or dataset_cloud is None:
       near, _ = camera_info.depth_range
-      points = random_cloud(camera_info, config.initial_points)
+      random_points = random_cloud(camera_info, config.initial_points)
     
-      gaussians = from_pointcloud(points, 
-                                        initial_scale=config.initial_point_scale,
-                                        initial_alpha=config.initial_alpha,
-                                        num_neighbors=config.num_neighbors)
-      if initial_gaussians is not None:
-        print(f"Adding {gaussians.batch_size[0]} random points")
-        initial_gaussians = initial_gaussians.concat(gaussians)
+      if points is not None:
+        print(f"Adding {random_points.batch_size[0]} random points")
+        points = points.concat(random_points)
       else:
-        print(f"Using {gaussians.batch_size[0]} random points")
-        initial_gaussians = gaussians
-      
+        print(f"Using {random_points.batch_size[0]} random points")
+        points = random_points
+
+    return points
+
+
+  @staticmethod
+  def initialize(config:TrainConfig, dataset:Dataset, logger:Logger):
+
+    device = torch.device(config.device)
+    camera_info = dataset.camera_info().to(device)
+
+    print(f"Initializing points from {dataset}")
+
+    initial_points = Trainer.get_initial_points(config, dataset)
+    initial_gaussians:Gaussians3D = from_pointcloud(initial_points, 
+                                          initial_scale=config.initial_point_scale,
+                                          initial_alpha=config.initial_alpha,
+                                          num_neighbors=config.num_neighbors)
 
     scene = config.scene.from_color_gaussians(initial_gaussians, camera_info.camera_table, device)
     controller = config.controller.make_controller(scene)
@@ -214,7 +219,7 @@ class Trainer:
     if config.save_output:
       output_path = Path.cwd()
 
-      points.save_ply(output_path / "input.ply")
+      initial_points.save_ply(output_path / "input.ply")
       with open(output_path / "cameras.json", "w") as f:
         json.dump(dataset.camera_json(camera_info.camera_table), f)
 
@@ -421,11 +426,6 @@ class Trainer:
 
       return loss / levels
   
-  def eval_var(self, var:Varying[T] | Number):
-    if isinstance(var, Varying):
-      return var(self.t)
-    else:
-      return var
 
   def losses(self, rendering:Rendering, image):
     losses = {}
@@ -458,7 +458,6 @@ class Trainer:
 
 
     return loss, losses
-
 
 
   def training_step(self, filename, camera_params, image_idx, image, timer):
