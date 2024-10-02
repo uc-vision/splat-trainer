@@ -18,6 +18,9 @@ def split_stride(images, stride=0):
   return train_cameras, val_cameras
 
 
+def next_multiple(x, multiple):
+  return x + multiple - x % multiple
+
 
 def sigmoid(x):
   return 1 / (1 + np.exp(-x))

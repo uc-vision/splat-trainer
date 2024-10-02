@@ -19,7 +19,7 @@ from .logger import Logger
 
 
 class TensorboardLogger(Logger):
-  def __init__(self, log_config:dict, 
+  def __init__(self, 
                flush_secs:int = 30,
                start_server:bool = False):
     
@@ -32,15 +32,15 @@ class TensorboardLogger(Logger):
     self.log_thread = Thread(target=self.worker)
     self.log_thread.start()
 
-
     if start_server:
       self.process = subprocess.Popen(["tensorboard", "--logdir", self.writer.log_dir]) 
     else:
       self.process = None
 
-    config_str = pformat(log_config)
-    self.enqueue(self.writer.add_text, "config", config_str, global_step=0)
 
+  def log_config(self, config: Dict):
+    config_str = pformat(config)
+    self.enqueue(self.writer.add_text, "config", config_str, global_step=0)
 
 
   def worker(self):
