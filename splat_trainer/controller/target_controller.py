@@ -10,7 +10,6 @@ from tensordict import tensorclass
 import torch
 
 from splat_trainer.logger.logger import Logger
-from splat_trainer.util.misc import lerp, log_lerp
 from .controller import Controller, ControllerConfig
 from splat_trainer.scene import GaussianScene
 

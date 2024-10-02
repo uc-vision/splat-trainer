@@ -20,6 +20,7 @@ dependencies = [
   'roma>=1.4',
   'tabulate',
   'torchmetrics',
+  'fused-ssim',
   'opencv-python',
   'pycolmap',
   'scipy',

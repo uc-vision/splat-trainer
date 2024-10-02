@@ -78,7 +78,7 @@ class TrainConfig:
 
   scale_reg: Varying[float]
   opacity_reg: Varying[float]
-  area_reg: Varying[float]
+  aspect_reg: Varying[float]
 
   blur_cov: float
   antialias: bool = True
@@ -397,8 +397,7 @@ class Trainer:
       loss += ssim * self.config.ssim_weight 
       losses["ssim"] = ssim.item()
 
-    area = rendering.area / (rendering.camera.focal_length[0]**2)
-    area_term = (area / rendering.point_depth.squeeze(1)).mean()
+
 
 
     aspect = rendering.scale.max(-1).values / rendering.scale.min(-1).values
@@ -406,8 +405,7 @@ class Trainer:
     scale_term = rendering.scale / rendering.camera.focal_length[0]
     reg_loss = (  self.scene.opacity.mean() * self.config.opacity_reg(self.t)
                  + scale_term.mean() * self.config.scale_reg(self.t)
-                 + area_term * self.config.area_reg(self.t)
-                 + 0.01 * aspect.mean())
+                 + self.config.aspect_reg(self.t) * aspect.mean())
                   
     
     losses["reg"] = reg_loss.item()

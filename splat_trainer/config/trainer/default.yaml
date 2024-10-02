@@ -32,7 +32,7 @@ trainer:
   scale_reg: ${constant:0.1}
   opacity_reg: ${log_linear:1.0,0.01}
 
-  area_reg: ${constant:0.0}
+  aspect_reg: ${constant:0.01}
 
   blur_cov: 0.3 # only used if antialias is false
   antialias: False
