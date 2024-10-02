@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 from typing import List, Optional
 from beartype.typing import Iterator, Tuple
@@ -62,6 +63,7 @@ class ScanDataset(Dataset):
       args += [f"resize_longest={self.resize_longest}"]
 
     args += [f"near={self.camera_depth_range[0]:.3f}", f"far={self.camera_depth_range[1]:.3f}"]
+    args += [f"pointcloud={self.pointcloud_file()}"]
 
     return f"ScanDataset({self.scan_file} {', '.join(args)})"
 
@@ -101,13 +103,14 @@ class ScanDataset(Dataset):
   def camera_shape(self) -> torch.Size:
     return torch.Size([self.scan.num_frames, len(self.scan.cameras)])
   
-
-  def pointcloud(self) -> PointCloud:
-    pcd_filename = find_cloud(self.scan)    
-    return PointCloud.load(pcd_filename)
+  def pointcloud_file(self) -> Optional[str]:
+    return find_cloud(self.scan)    
 
 
-  
+  def pointcloud(self) -> Optional[PointCloud]:
+    pcd_filename = self.pointcloud_file()  
+    return PointCloud.load(pcd_filename) if pcd_filename is not None else None
+
   
   def camera_json(self, camera_table:CameraTable):
 
@@ -129,5 +132,7 @@ class ScanDataset(Dataset):
 
 
 def find_cloud(scan:FrameSet) -> Tuple[np.ndarray, np.ndarray]:
-  assert 'sparse' in scan.models, "No sparse model found in scene.json"
+  if 'sparse' not in scan.models:
+    return None
+  
   return Path(scan.find_file(scan.models.sparse.filename))

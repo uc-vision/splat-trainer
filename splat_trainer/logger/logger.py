@@ -13,6 +13,9 @@ class Logger(metaclass=ABCMeta):
   def log_evaluations(self, name:str, data:List[dict], step:int):
     raise NotImplementedError
 
+  @abstractmethod
+  def log_config(self, config:dict):
+    raise NotImplementedError
   
   @abstractmethod
   def log_image(self, name:str, image:torch.Tensor, step:int, caption:str | None = None):
@@ -41,7 +44,10 @@ class Logger(metaclass=ABCMeta):
   
 
 class NullLogger(Logger):
-  def __init__(self, log_config:dict):
+  def __init__(self):
+    pass
+
+  def log_config(self, config:dict):
     pass
   
   def log_evaluations(self, name:str,  data:List[dict], step:int):

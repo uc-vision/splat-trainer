@@ -62,8 +62,8 @@ class PoseTable(nn.Module):
     R, t = split_rt(m)
     q = roma.rotmat_to_unitquat(R)
 
-    self.t = nn.Parameter(t.to(torch.float32))
-    self.q = nn.Parameter(q.to(torch.float32))
+    self.t = nn.Parameter(t.to(torch.float32), requires_grad=False)
+    self.q = nn.Parameter(q.to(torch.float32), requires_grad=False)
 
 
   def forward(self, indices):
@@ -74,6 +74,10 @@ class PoseTable(nn.Module):
     pose = join_rt(roma.unitquat_to_rotmat(q), t)
     return pose
   
+  def __getitem__(self, idx:int):
+    return self.forward(torch.tensor([idx], device=self.t.device)).squeeze(0)
+  
+
   def normalize(self):
     self.q.data = F.normalize(self.q.data, dim=-1)
     return self

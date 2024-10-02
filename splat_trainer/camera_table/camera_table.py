@@ -108,7 +108,7 @@ class CameraRigTable(CameraTable):
     assert projection.shape[0] == camera_t_rig.shape[0], f"Expected equal number of cameras and projections, got: {projection.shape[0]} != {camera_t_rig.shape[0]}"
 
     self.camera_projection = torch.nn.Parameter(
-        projection.to(torch.float32))
+        projection.to(torch.float32), requires_grad=False)
     self.camera_poses = RigPoseTable(
       rig_t_world=rig_t_world, camera_t_rig=camera_t_rig)
     
@@ -175,7 +175,7 @@ class MultiCameraTable(CameraTable):
     assert camera_t_world.shape[0] == camera_idx.shape[0], f"Expected equal number of cameras and indices, got: {camera_t_world.shape[0]} != {camera_idx.shape[0]}"
 
     self.camera_projection = torch.nn.Parameter(
-      projection.to(torch.float32))
+      projection.to(torch.float32), requires_grad=False)
     self.register_buffer("camera_idx", camera_idx)
     self.camera_t_world = PoseTable(camera_t_world)
 

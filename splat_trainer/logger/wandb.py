@@ -18,25 +18,24 @@ class WandbLogger(Logger):
   @beartype
   def __init__(self, project:str | None, 
                entity:str | None, 
-               log_config:dict, 
                name:str | None=None):
     
-    dir = Path.cwd() / "wandb"
-    dir.mkdir(parents=True, exist_ok=True)  
-
+    dir = Path.cwd()
     wandb.require("core")
 
     self.run = wandb.init(project=project, 
                           name=name, 
-                          config=log_config, 
                           dir=dir, 
                           entity=entity,
                           settings=wandb.Settings(start_method='thread'))
+    
+  
 
     self.queue = Queue()
     self.log_thread = Thread(target=self.worker)
     self.log_thread.start()
 
+  
 
 
   def worker(self):
@@ -53,6 +52,9 @@ class WandbLogger(Logger):
     self.run.finish(quiet=True)
     
 
+  @beartype
+  def log_config(self, config:Dict):
+    self.run.config.update(config)
     
   @beartype
   def log_evaluations(self, name, rows:List[Dict], step):

@@ -34,7 +34,6 @@ class PointStatistics:
 @dataclass
 class ThresholdConfig(ControllerConfig):
 
-  enabled:bool = True
   grad_threshold:float = 0.0002
   min_split_size:float = 0.001
 
@@ -92,12 +91,11 @@ class ThresholdController(Controller):
 
     keep_mask, split_idx, counts = self.find_split_prune_indexes()
 
-    if self.config.enabled:
-      self.scene.split_and_prune(keep_mask, split_idx)
-      self.points = self.points[keep_mask]
+    self.scene.split_and_prune(keep_mask, split_idx)
+    self.points = self.points[keep_mask]
 
-      new_points = PointStatistics.zeros(split_idx.shape[0] * 2, device=self.scene.device)
-      self.points = torch.cat([self.points, new_points], dim=0)
+    new_points = PointStatistics.zeros(split_idx.shape[0] * 2, device=self.scene.device)
+    self.points = torch.cat([self.points, new_points], dim=0)
 
     return counts    
 

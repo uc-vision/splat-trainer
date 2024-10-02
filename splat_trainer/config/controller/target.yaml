@@ -7,9 +7,8 @@ trainer:
     target_count: 1000000
 
     # rate of splitting proportional to current size
-    prune_rate: 0.075
+    prune_rate: 0.05
 
     # min visbility to be considered for splitting/pruning
     ema_half_life: 50 
   
-  densify_interval: 200

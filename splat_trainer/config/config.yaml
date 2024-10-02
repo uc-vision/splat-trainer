@@ -13,7 +13,10 @@ hydra:
   job: 
     chdir: True
 
+# filled in by command line overrides
 project: ???
+run_name: ???
+base_path: ???
 
 wait_exit: False
 debug: False
