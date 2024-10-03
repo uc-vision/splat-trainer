@@ -5,8 +5,8 @@ defaults:
   - dataset: scan
   - logger: tensorboard
   - controller: target
-  - scene: tcnn
-
+  - scene: sh
+  - color_corrector: bilateral
   - trainer: default
 
 hydra:

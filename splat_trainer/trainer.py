@@ -39,6 +39,7 @@ from splat_trainer.util.misc import CudaTimer, next_multiple, strided_indexes
 
 from splat_trainer.controller import ControllerConfig
 from splat_trainer.scheduler import Scheduler, Uniform
+from splat_trainer.color_corrector import CorrectorConfig, Corrector
 
 from splat_trainer.util.lib_bilagrid import (
     BilateralGrid,
@@ -56,6 +57,7 @@ class TrainConfig:
 
   steps: int 
   scene: GaussianSceneConfig
+  color_corrector: CorrectorConfig
   controller: ControllerConfig
 
   load_model: Optional[str] = None
@@ -92,9 +94,6 @@ class TrainConfig:
   save_checkpoints: bool = False
   save_output: bool = True
 
-  use_bilateral_grid: bool = False
-  bilateral_grid_shape: Tuple[int, int, int] = (16, 16, 8)
-
   lr_scheduler: Scheduler = Uniform()
   lr: Varying[float]
 
@@ -104,6 +103,7 @@ class TrainConfig:
 class Trainer:
   def __init__(self, config:TrainConfig,
                 scene:GaussianScene, 
+                color_corrector: Corrector,
                 controller:Controller,
                 dataset:Dataset,  
               
@@ -114,6 +114,7 @@ class Trainer:
     self.device = torch.device(config.device)
     self.controller = controller
     self.scene = scene
+    self.color_corrector = color_corrector
     self.dataset = dataset
 
     self.camera_info = dataset.camera_info().to(self.device)
@@ -128,31 +129,6 @@ class Trainer:
 
     self.color_map = get_cv_colormap().to(self.device)
     self.pbar = None
-
-    if config.use_bilateral_grid:
-      self.bil_grids = BilateralGrid(
-        len(self.dataset.train_cameras),
-        grid_X=config.bilateral_grid_shape[0],
-        grid_Y=config.bilateral_grid_shape[1],
-        grid_W=config.bilateral_grid_shape[2],
-      ).to(self.device)
-      self.bil_grid_optimizer = torch.optim.Adam(
-        self.bil_grids.parameters(),
-        lr=2e-3,
-        eps=1e-15,
-      )
-      self.bil_grid_scheduler = torch.optim.lr_scheduler.ChainedScheduler(
-        [
-          torch.optim.lr_scheduler.LinearLR(
-              self.bil_grid_optimizer,
-              start_factor=0.01,
-              total_iters=1000,
-          ),
-          torch.optim.lr_scheduler.ExponentialLR(
-              self.bil_grid_optimizer, gamma=0.01 ** (1.0 / config.steps)
-          ),
-        ]
-      )
 
     self.ssim = partial(fused_ssim, padding="valid")
     # self.ssim = torch.compile(torchmetrics.StructuralSimilarityIndexMeasure(data_range=1.0, sigma=1.5).to(self.device))
@@ -211,6 +187,9 @@ class Trainer:
     scene = config.scene.from_color_gaussians(initial_gaussians, camera_info.camera_table, device)
     controller = config.controller.make_controller(scene)
 
+    num_images = len(dataset.all_cameras)
+    color_corrector = config.color_corrector.make_corrector(num_images)
+
     if config.save_output:
       output_path = Path.cwd()
 
@@ -218,7 +197,7 @@ class Trainer:
       with open(output_path / "cameras.json", "w") as f:
         json.dump(dataset.camera_json(camera_info.camera_table), f)
 
-    return Trainer(config, scene, controller, dataset, logger)
+    return Trainer(config, scene, color_corrector, controller, dataset, logger)
       
 
   def state_dict(self):
@@ -319,6 +298,7 @@ class Trainer:
                         antialias=self.config.antialias,
                        blur_cov=self.blur_cov)
       rendering = self.scene.render(camera_params, config, cam_idx, render_depth=True)
+      rendering = self.color_corrector.correct('eval', rendering, image)
       
       psnr = compute_psnr(rendering.image, image)
 
@@ -327,16 +307,8 @@ class Trainer:
       radius_hist = radius_hist.append(rendering.radii.log() / math.log(10.0), trim=False)
       image_id = filename.replace("/", "_")
 
-      if i in log_indexes:
-        if self.config.use_bilateral_grid:
-          cc_image = color_correct(rendering.image.unsqueeze(0), image.unsqueeze(0)).squeeze(0)
-          rendering = replace(rendering, image=cc_image)
-          cc_psnr = compute_psnr(cc_image, image)
-          self.log_rendering(f"{name}_images/{image_id}", filename, rendering, image, 
-                            cc_psnr.item(), l1.item(), log_image=self.step == 0)
-          
-        else:
-          self.log_rendering(f"{name}_images/{image_id}", filename, rendering, image, 
+      
+      self.log_rendering(f"{name}_images/{image_id}", filename, rendering, image, 
                            psnr.item(), l1.item(), log_image=self.step == 0)
 
       add_worst = heapq.heappush if len(worst) < worst_count else heapq.heappushpop
@@ -456,6 +428,9 @@ class Trainer:
     losses["reg"] = reg_loss.item()
     loss += reg_loss 
 
+    tvloss = self.color_corrector.loss()
+    loss += tvloss
+    self.log_value("tvloss", tvloss)
 
     return loss, losses
 
@@ -469,34 +444,16 @@ class Trainer:
                        blur_cov=self.blur_cov)  
       
       rendering = self.scene.render(camera_params, config, image_idx)
-
-      if self.config.use_bilateral_grid:
-        grid_y, grid_x = torch.meshgrid(
-            (torch.arange(image.shape[0], device=self.device) + 0.5) / image.shape[0],
-            (torch.arange(image.shape[1], device=self.device) + 0.5) / image.shape[1],
-            indexing="ij",
-        )
-        grid_xy = torch.stack([grid_x, grid_y], dim=-1).unsqueeze(0)
-        corrected_image = slice(self.bil_grids, grid_xy, rendering.image.unsqueeze(0), torch.tensor([image_idx]))["rgb"].squeeze(0)
-        rendering = replace(rendering, image=corrected_image)
+      rendering = self.color_corrector.correct('train', rendering, image_idx)
 
       loss, losses = self.losses(rendering, image)
-      
-      if self.config.use_bilateral_grid:
-        tvloss = 10 * total_variation_loss(self.bil_grids.grids)
-        loss += tvloss
-        self.log_value("train/tvloss", tvloss.item())
 
       loss.backward()
 
     with torch.no_grad():
       metrics =  self.controller.step(rendering, self.step)
       self.scene.step(rendering, self.step)
-
-      if self.config.use_bilateral_grid:
-        self.bil_grid_optimizer.step()
-        self.bil_grid_optimizer.zero_grad(set_to_none=True)
-        self.bil_grid_scheduler.step()
+      self.color_corrector.step()
 
       
     del loss
