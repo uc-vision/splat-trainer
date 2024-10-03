@@ -41,12 +41,6 @@ from splat_trainer.util.misc import CudaTimer, next_multiple, strided_indexes
 from splat_trainer.controller import ControllerConfig
 
 
-from splat_trainer.util.lib_bilagrid import (
-    BilateralGrid,
-    slice,
-    color_correct,
-    total_variation_loss,
-)
 
 T = TypeVar("T")
 
@@ -94,10 +88,6 @@ class TrainConfig:
   save_checkpoints: bool = False
   save_output: bool = True
 
-  use_bilateral_grid: bool = False
-  bilateral_grid_shape: Tuple[int, int, int] = (16, 16, 8)
-
-  # lr_scheduler: Scheduler = Uniform()
   lr: Varying[float]
 
   raster_config: RasterConfig = RasterConfig()
@@ -118,7 +108,7 @@ class Trainer:
     self.scene = scene
     self.dataset = dataset
 
-    self.camera_info = dataset.camera_info().to(self.device)
+    self.camera_info = dataset.view_info().to(self.device)
 
     self.config = config
     self.logger = logger
@@ -133,40 +123,11 @@ class Trainer:
     self.ssim = partial(fused_ssim, padding="valid")
 
 
-    # if config.use_bilateral_grid:
-    #   self.bil_grids = BilateralGrid(
-    #     len(self.dataset.train_cameras),
-    #     grid_X=config.bilateral_grid_shape[0],
-    #     grid_Y=config.bilateral_grid_shape[1],
-    #     grid_W=config.bilateral_grid_shape[2],
-    #   ).to(self.device)
-    #   self.bil_grid_optimizer = torch.optim.Adam(
-    #     self.bil_grids.parameters(),
-    #     lr=2e-3,
-    #     eps=1e-15,
-    #   )
-    #   self.bil_grid_scheduler = torch.optim.lr_scheduler.ChainedScheduler(
-    #     [
-    #       torch.optim.lr_scheduler.LinearLR(
-    #           self.bil_grid_optimizer,
-    #           start_factor=0.01,
-    #           total_iters=1000,
-    #       ),
-    #       torch.optim.lr_scheduler.ExponentialLR(
-    #           self.bil_grid_optimizer, gamma=0.01 ** (1.0 / config.steps)
-    #       ),
-    #     ]
-    #   )
-
-    # self.ssim = torch.compile(torchmetrics.StructuralSimilarityIndexMeasure(data_range=1.0, sigma=1.5).to(self.device))
-    # self.ssim = torchmetrics.MultiScaleStructuralSimilarityIndexMeasure(data_range=1.0, kernel_size=11, sigma=1.5).to(self.device)
-
-
 
   @staticmethod
   def get_initial_points(config:TrainConfig, dataset:Dataset) -> PointCloud:
     device = torch.device(config.device)
-    camera_info = dataset.camera_info().to(device)
+    camera_info = dataset.view_info().to(device)
 
     dataset_cloud = dataset.pointcloud() if config.load_dataset_cloud else None
     points = None
@@ -203,7 +164,7 @@ class Trainer:
   def initialize(config:TrainConfig, dataset:Dataset, logger:Logger):
 
     device = torch.device(config.device)
-    camera_info = dataset.camera_info().to(device)
+    camera_info = dataset.view_info().to(device)
 
     print(f"Initializing points from {dataset}")
 
@@ -246,7 +207,7 @@ class Trainer:
   @staticmethod
   def from_state_dict(config:TrainConfig, dataset:Dataset, logger:Logger, state_dict:dict):
 
-    scene = config.scene.from_state_dict(state_dict['scene'], dataset.camera_info().camera_table)
+    scene = config.scene.from_state_dict(state_dict['scene'], dataset.view_info().camera_table)
     controller = config.controller.from_state_dict(state_dict['controller'], scene)
 
     return Trainer(config, scene, controller, dataset, logger, step=state_dict['step'])
@@ -333,14 +294,6 @@ class Trainer:
       image_id = filename.replace("/", "_")
 
       if i in log_indexes:
-        if self.config.use_bilateral_grid:
-          cc_image = color_correct(rendering.image.unsqueeze(0), image.unsqueeze(0)).squeeze(0)
-          rendering = replace(rendering, image=cc_image)
-          cc_psnr = compute_psnr(cc_image, image)
-          self.log_rendering(f"{name}_images/{image_id}", filename, rendering, image, 
-                            cc_psnr.item(), l1.item(), log_image=self.step == 0)
-          
-        else:
           self.log_rendering(f"{name}_images/{image_id}", filename, rendering, image, 
                            psnr.item(), l1.item(), log_image=self.step == 0)
 
@@ -469,34 +422,12 @@ class Trainer:
       
       rendering = self.scene.render(camera_params, config, image_idx)
 
-      if self.config.use_bilateral_grid:
-        grid_y, grid_x = torch.meshgrid(
-            (torch.arange(image.shape[0], device=self.device) + 0.5) / image.shape[0],
-            (torch.arange(image.shape[1], device=self.device) + 0.5) / image.shape[1],
-            indexing="ij",
-        )
-        grid_xy = torch.stack([grid_x, grid_y], dim=-1).unsqueeze(0)
-        corrected_image = slice(self.bil_grids, grid_xy, rendering.image.unsqueeze(0), torch.tensor([image_idx]))["rgb"].squeeze(0)
-        rendering = replace(rendering, image=corrected_image)
-
       loss, losses = self.losses(rendering, image)
-      
-      if self.config.use_bilateral_grid:
-        tvloss = 10 * total_variation_loss(self.bil_grids.grids)
-        loss += tvloss
-        self.log_value("train/tvloss", tvloss.item())
-
       loss.backward()
 
     with torch.no_grad():
       metrics =  self.controller.step(rendering, self.step)
       self.scene.step(rendering, self.step)
-
-      if self.config.use_bilateral_grid:
-        self.bil_grid_optimizer.step()
-        self.bil_grid_optimizer.zero_grad(set_to_none=True)
-        self.bil_grid_scheduler.step()
-
       
     del loss
 

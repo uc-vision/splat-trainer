@@ -7,7 +7,7 @@ from omegaconf import DictConfig, OmegaConf
 import torch
 import torch.nn.functional as F
 
-from splat_trainer.camera_table.camera_table import CameraTable, camera_extents
+from splat_trainer.camera_table.camera_table import ViewTable, camera_scene_extents
 from splat_trainer.logger.logger import Logger
 from splat_trainer.scene.color_model import ColorModel
 from splat_trainer.scene.io import write_gaussians
@@ -51,7 +51,7 @@ class TCNNConfig(GaussianSceneConfig):
 
 
   def from_color_gaussians(self, gaussians:Gaussians3D, 
-                           camera_table:CameraTable, device:torch.device):
+                           camera_table:ViewTable, device:torch.device):
     
     
     feature = torch.randn(gaussians.batch_size[0], self.point_features)
@@ -61,7 +61,7 @@ class TCNNConfig(GaussianSceneConfig):
     return TCNNScene(points, self, camera_table)
 
   
-  def from_state_dict(self, state:dict, camera_table:CameraTable):
+  def from_state_dict(self, state:dict, camera_table:ViewTable):
     points = ParameterClass.from_state_dict(state['points'], 
           optimizer=SparseAdam, betas=(self.beta1, self.beta2))
     
@@ -80,7 +80,7 @@ class TCNNScene(GaussianScene):
   def __init__(self, 
           points: ParameterClass, 
           config: TCNNConfig,       
-          camera_table:CameraTable,     
+          camera_table:ViewTable,     
     ):
     self.config = config
     self.points = points
@@ -116,7 +116,7 @@ class TCNNScene(GaussianScene):
     # scaled_lr = {k: v * lr_scale for k, v in self.learning_rates.items()}
     # self.points.set_learning_rate(**scaled_lr)
     if not self.config.use_depth_lr:
-      lr_scale *= camera_extents(self.camera_table)
+      lr_scale *= camera_scene_extents(self.camera_table)
     
     self.points.set_learning_rate(position = 
               self.learning_rates['position'] * lr_scale)

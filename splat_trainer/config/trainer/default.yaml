@@ -40,7 +40,7 @@ trainer:
   # Enable bilateral grid. (experimental)
   use_bilateral_grid: True
   # Shape of the bilateral grid (X, Y, W)
-  bilateral_grid_shape: [16, 16, 8]
+  # bilateral_grid_shape: [16, 16, 8]
 
   densify_interval: 
     _target_: splat_trainer.config.Piecewise

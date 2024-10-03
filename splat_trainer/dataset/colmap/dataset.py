@@ -7,9 +7,9 @@ from beartype.typing import Iterator, Tuple, List
 import torch
 
 import numpy as np
-from splat_trainer.camera_table.camera_table import CameraTable, MultiCameraTable, camera_json
+from splat_trainer.camera_table.camera_table import ViewTable, MultiCameraTable, camera_json
 from splat_trainer.dataset.colmap.loading import load_images
-from splat_trainer.dataset.dataset import CameraView, Dataset
+from splat_trainer.dataset.dataset import CameraProjection, CameraView, Dataset
 
 from splat_trainer.util.misc import split_stride
 from splat_trainer.util.pointcloud import PointCloud
@@ -37,7 +37,7 @@ class COLMAPDataset(Dataset):
     model_path = Path(base_path) / model_dir
 
     self.reconstruction = pycolmap.Reconstruction(str(model_path))
-    self.projections = []
+    self.projections:List[CameraProjection] = []
     camera_idx = {}
 
     assert resize_longest is None or image_scale is None, "Specify either resize_longest or image_scale"
@@ -59,7 +59,8 @@ class COLMAPDataset(Dataset):
 
       proj = np.array([fx, fy, cx, cy])  
       
-      self.projections.append(proj)
+      self.projections.append(CameraProjection(torch.tensor(proj, dtype=torch.float32), (w, h)))
+
       camera_idx[k] = i
       print(f"Camera {k}@{camera.width}x{camera.height} fx={fx:.2f} fy={fy:.2f} cx={cx:.2f} cy={cy:.2f}")
 
@@ -102,11 +103,16 @@ class COLMAPDataset(Dataset):
     return Images(self.val_cameras)
 
 
-  def camera_table(self) -> MultiCameraTable:
+  def view_table(self) -> MultiCameraTable:
+    projections = [p.projection for p in self.projections]
     return MultiCameraTable(
       camera_t_world = torch.tensor(np.array(self.camera_t_world), dtype=torch.float32),
-      projection = torch.tensor(np.array(self.projections), dtype=torch.float32),
+      projection = torch.tensor(np.array(projections), dtype=torch.float32),
       camera_idx = torch.tensor(self.camera_idx, dtype=torch.long))
+  
+
+  def unique_projections(self) -> List[CameraProjection]:
+    return list(set(self.projections))
   
   def depth_range(self) -> Tuple[float, float]:
     return tuple(self.camera_depth_range)
@@ -124,7 +130,7 @@ class COLMAPDataset(Dataset):
     
 
 
-  def camera_json(self, camera_table:CameraTable):
+  def camera_json(self, camera_table:ViewTable):
 
     def export_camera(i, info):
       image:CameraImage = self.all_cameras[i]

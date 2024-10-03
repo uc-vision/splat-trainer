@@ -9,20 +9,42 @@ import torch
 
 
 import numpy as np
-from splat_trainer.camera_table.camera_table import CameraRigTable, CameraTable, camera_json
-from splat_trainer.dataset.dataset import CameraView, Dataset
+from splat_trainer.camera_table.camera_table import CameraRigTable, ViewTable, camera_json
+from splat_trainer.dataset.dataset import CameraProjection, CameraView, Dataset
 from splat_trainer.util.misc import split_stride
 
 
-from .loading import  CameraImage, PreloadedImages, preload_images
+from .loading import  CameraImage, PreloadedImages, camera_rig_table, preload_images
 from splat_trainer.util.pointcloud import PointCloud
+
+def load_scan(scan_file:str, image_scale:Optional[float]=None, resize_longest:Optional[int]=None) -> Tuple[FrameSet, List[CameraImage]]:
+    scan = FrameSet.load_file(Path(scan_file))
+
+    cameras = {k: optimal_undistorted(camera, alpha=0)
+                 for k, camera in scan.cameras.items()}
+
+    assert resize_longest is None or image_scale is None, "Specify either resize_longest or image_scale"
+
+    if resize_longest is not None:
+      cameras = {k: camera.resize_longest(longest=resize_longest) for k, camera in cameras.items()}
+    elif image_scale is not None:
+      cameras = {k: camera.scale_image(image_scale) for k, camera in cameras.items()}
+
+
+    print("Undistorted cameras:")
+    for k, camera in cameras.items():
+        print(k, camera)
+
+    print("Loading images...")
+    all_cameras = preload_images(scan, cameras)
+    return scan.copy(cameras=cameras), all_cameras
 
 
 class ScanDataset(Dataset):
   def __init__(self, scan_file:str,                
         image_scale:Optional[float]=None,
         resize_longest:Optional[int]=None,
-        val_stride:int=10,
+        val_stride:int=0,
         depth_range:Tuple[float, float] = (0.1, 100.0)):
 
     self.scan_file = scan_file
@@ -85,20 +107,18 @@ class ScanDataset(Dataset):
   def image_sizes(self) -> torch.Tensor:
     return torch.Tensor([(cam.camera.image_size) for cam in self.all_cameras]).to(torch.int32)
 
+  def unique_projections(self) -> List[CameraProjection]:
+    from camera_geometry import Camera
+
+    def to_projection(camera:Camera):
+      projection = np.array([*camera.focal_length, *camera.principal_point])
+      return CameraProjection(projection, camera.image_size)
+
+    return [to_projection(camera) for camera in self.scan.cameras.values()]
   
 
-  def camera_table(self) -> CameraRigTable:
-    camera_t_rig = np.array(
-       [camera.camera_t_parent for camera in self.scan.cameras.values()])
-    
-    world_t_rig = torch.from_numpy(np.array(self.scan.rig_poses)).to(torch.float32)
-    projections = np.array([[*camera.focal_length, *camera.principal_point] for camera in self.scan.cameras.values()])
-
-    
-    return CameraRigTable(
-      rig_t_world=torch.linalg.inv(world_t_rig),
-      camera_t_rig=torch.from_numpy(camera_t_rig).to(torch.float32),
-      projection=torch.from_numpy(projections).to(torch.float32))
+  def view_table(self) -> CameraRigTable:
+    return camera_rig_table(self.scan)
   
   def camera_shape(self) -> torch.Size:
     return torch.Size([self.scan.num_frames, len(self.scan.cameras)])
@@ -112,7 +132,7 @@ class ScanDataset(Dataset):
     return PointCloud.load(pcd_filename) if pcd_filename is not None else None
 
   
-  def camera_json(self, camera_table:CameraTable):
+  def camera_json(self, camera_table:ViewTable):
 
     def export_camera(i, info):
       image:CameraImage = self.all_cameras[i]
