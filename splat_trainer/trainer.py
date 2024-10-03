@@ -38,6 +38,7 @@ from splat_trainer.util.containers import transpose_rows
 from splat_trainer.util.misc import CudaTimer, next_multiple, strided_indexes
 
 from splat_trainer.controller import ControllerConfig
+from splat_trainer.scheduler import Scheduler, Uniform
 
 from splat_trainer.util.lib_bilagrid import (
     BilateralGrid,
@@ -49,7 +50,6 @@ from splat_trainer.util.lib_bilagrid import (
 T = TypeVar("T")
 
 
-@beartype
 @dataclass(kw_only=True)
 class TrainConfig:
   device: str
