@@ -1,5 +1,4 @@
 from abc import ABCMeta, abstractmethod
-from typing import Union
 
 import torch
 from taichi_splatting import Rendering
@@ -14,7 +13,7 @@ class CorrectorConfig(metaclass=ABCMeta):
 
 class Corrector(metaclass=ABCMeta):
   @abstractmethod
-  def correct(self, name:str, rendering:Rendering, image:Union[int, torch.Tensor]) -> Rendering: 
+  def correct(self, name:str, rendering:Rendering, image:torch.Tensor, image_idx:int) -> Rendering: 
     raise NotImplementedError
 
   @abstractmethod
@@ -23,4 +22,8 @@ class Corrector(metaclass=ABCMeta):
   
   @abstractmethod
   def loss(self) -> float:
+    raise NotImplementedError
+
+  @abstractmethod
+  def __bool__(self) -> bool:
     raise NotImplementedError

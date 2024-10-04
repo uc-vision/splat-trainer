@@ -6,7 +6,7 @@ defaults:
   - logger: tensorboard
   - controller: target
   - scene: sh
-  - color_corrector: bilateral
+  - color_corrector: nil
   - trainer: default
 
 hydra:

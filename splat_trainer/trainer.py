@@ -41,12 +41,6 @@ from splat_trainer.controller import ControllerConfig
 from splat_trainer.scheduler import Scheduler, Uniform
 from splat_trainer.color_corrector import CorrectorConfig, Corrector
 
-from splat_trainer.util.lib_bilagrid import (
-    BilateralGrid,
-    slice,
-    color_correct,
-    total_variation_loss,
-)
 
 T = TypeVar("T")
 
@@ -298,7 +292,7 @@ class Trainer:
                         antialias=self.config.antialias,
                        blur_cov=self.blur_cov)
       rendering = self.scene.render(camera_params, config, cam_idx, render_depth=True)
-      rendering = self.color_corrector.correct('eval', rendering, image)
+      rendering = self.color_corrector.correct(name, rendering, image, cam_idx)
       
       psnr = compute_psnr(rendering.image, image)
 
@@ -307,8 +301,8 @@ class Trainer:
       radius_hist = radius_hist.append(rendering.radii.log() / math.log(10.0), trim=False)
       image_id = filename.replace("/", "_")
 
-      
-      self.log_rendering(f"{name}_images/{image_id}", filename, rendering, image, 
+      if i in log_indexes:
+        self.log_rendering(f"{name}_images/{image_id}", filename, rendering, image, 
                            psnr.item(), l1.item(), log_image=self.step == 0)
 
       add_worst = heapq.heappush if len(worst) < worst_count else heapq.heappushpop
@@ -399,7 +393,7 @@ class Trainer:
     else:
       return var
 
-  def losses(self, rendering:Rendering, image):
+  def losses(self, rendering:Rendering, image:torch.Tensor):
     losses = {}
     loss = 0.0
 
@@ -430,13 +424,15 @@ class Trainer:
 
     tvloss = self.color_corrector.loss()
     loss += tvloss
-    self.log_value("tvloss", tvloss)
+
+    if self.color_corrector:
+      self.log_value("train/tvloss", tvloss)
 
     return loss, losses
 
 
 
-  def training_step(self, filename, camera_params, image_idx, image, timer):
+  def training_step(self, filename:str, camera_params:CameraParams, image_idx:int, image:torch.Tensor, timer:CudaTimer) -> dict:
 
     with timer:
       config = replace(self.config.raster_config, compute_split_heuristics=True, 
@@ -444,7 +440,7 @@ class Trainer:
                        blur_cov=self.blur_cov)  
       
       rendering = self.scene.render(camera_params, config, image_idx)
-      rendering = self.color_corrector.correct('train', rendering, image_idx)
+      rendering = self.color_corrector.correct('train', rendering, image, image_idx)
 
       loss, losses = self.losses(rendering, image)
 
