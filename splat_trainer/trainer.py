@@ -38,6 +38,8 @@ from splat_trainer.util.containers import transpose_rows
 from splat_trainer.util.misc import CudaTimer, next_multiple, strided_indexes
 
 from splat_trainer.controller import ControllerConfig
+from splat_trainer.scheduler import Scheduler, Uniform
+from splat_trainer.color_corrector import CorrectorConfig, Corrector
 
 from splat_trainer.util.lib_bilagrid import (
     BilateralGrid,
@@ -49,13 +51,13 @@ from splat_trainer.util.lib_bilagrid import (
 T = TypeVar("T")
 
 
-@beartype
 @dataclass(kw_only=True)
 class TrainConfig:
   device: str
 
   steps: int 
   scene: GaussianSceneConfig
+  color_corrector: CorrectorConfig
   controller: ControllerConfig
 
   load_model: Optional[str] = None
@@ -92,9 +94,6 @@ class TrainConfig:
   save_checkpoints: bool = False
   save_output: bool = True
 
-  use_bilateral_grid: bool = False
-  bilateral_grid_shape: Tuple[int, int, int] = (16, 16, 8)
-
   lr_scheduler: Scheduler = Uniform()
   lr: Varying[float]
 
@@ -104,6 +103,7 @@ class TrainConfig:
 class Trainer:
   def __init__(self, config:TrainConfig,
                 scene:GaussianScene, 
+                color_corrector: Corrector,
                 controller:Controller,
                 dataset:Dataset,  
               
@@ -114,6 +114,7 @@ class Trainer:
     self.device = torch.device(config.device)
     self.controller = controller
     self.scene = scene
+    self.color_corrector = color_corrector
     self.dataset = dataset
 
     self.camera_info = dataset.camera_info().to(self.device)
@@ -211,6 +212,9 @@ class Trainer:
     scene = config.scene.from_color_gaussians(initial_gaussians, camera_info.camera_table, device)
     controller = config.controller.make_controller(scene)
 
+    num_images = len(dataset.all_cameras)
+    color_corrector = config.color_corrector.make_corrector(num_images)
+
     if config.save_output:
       output_path = Path.cwd()
 
@@ -218,7 +222,7 @@ class Trainer:
       with open(output_path / "cameras.json", "w") as f:
         json.dump(dataset.camera_json(camera_info.camera_table), f)
 
-    return Trainer(config, scene, controller, dataset, logger)
+    return Trainer(config, scene, color_corrector, controller, dataset, logger)
       
 
   def state_dict(self):
@@ -319,6 +323,7 @@ class Trainer:
                         antialias=self.config.antialias,
                        blur_cov=self.blur_cov)
       rendering = self.scene.render(camera_params, config, cam_idx, render_depth=True)
+      rendering = self.color_corrector.correct(name, rendering, image, cam_idx)
       
       psnr = compute_psnr(rendering.image, image)
 
@@ -427,7 +432,7 @@ class Trainer:
     else:
       return var
 
-  def losses(self, rendering:Rendering, image):
+  def losses(self, rendering:Rendering, image:torch.Tensor):
     losses = {}
     loss = 0.0
 
@@ -456,12 +461,17 @@ class Trainer:
     losses["reg"] = reg_loss.item()
     loss += reg_loss 
 
+    tvloss = self.color_corrector.loss()
+    loss += tvloss
+
+    if self.color_corrector:
+      self.log_value("train/tvloss", tvloss)
 
     return loss, losses
 
 
 
-  def training_step(self, filename, camera_params, image_idx, image, timer):
+  def training_step(self, filename:str, camera_params:CameraParams, image_idx:int, image:torch.Tensor, timer:CudaTimer) -> dict:
 
     with timer:
       config = replace(self.config.raster_config, compute_split_heuristics=True, 
@@ -469,6 +479,7 @@ class Trainer:
                        blur_cov=self.blur_cov)  
       
       rendering = self.scene.render(camera_params, config, image_idx)
+      rendering = self.color_corrector.correct('train', rendering, image, image_idx)
 
       if self.config.use_bilateral_grid:
         grid_y, grid_x = torch.meshgrid(
@@ -481,22 +492,13 @@ class Trainer:
         rendering = replace(rendering, image=corrected_image)
 
       loss, losses = self.losses(rendering, image)
-      
-      if self.config.use_bilateral_grid:
-        tvloss = 10 * total_variation_loss(self.bil_grids.grids)
-        loss += tvloss
-        self.log_value("train/tvloss", tvloss.item())
 
       loss.backward()
 
     with torch.no_grad():
       metrics =  self.controller.step(rendering, self.step)
       self.scene.step(rendering, self.step)
-
-      if self.config.use_bilateral_grid:
-        self.bil_grid_optimizer.step()
-        self.bil_grid_optimizer.zero_grad(set_to_none=True)
-        self.bil_grid_scheduler.step()
+      self.color_corrector.step()
 
       
     del loss

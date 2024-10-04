@@ -1,0 +1,5 @@
+# @package _global_
+
+trainer:
+  color_corrector: 
+    _target_: splat_trainer.color_corrector.NilCorrectorConfig
