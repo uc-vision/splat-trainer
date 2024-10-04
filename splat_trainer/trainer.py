@@ -41,6 +41,12 @@ from splat_trainer.controller import ControllerConfig
 from splat_trainer.scheduler import Scheduler, Uniform
 from splat_trainer.color_corrector import CorrectorConfig, Corrector
 
+from splat_trainer.util.lib_bilagrid import (
+    BilateralGrid,
+    slice,
+    color_correct,
+    total_variation_loss,
+)
 
 T = TypeVar("T")
 
@@ -123,6 +129,31 @@ class Trainer:
 
     self.color_map = get_cv_colormap().to(self.device)
     self.pbar = None
+
+    if config.use_bilateral_grid:
+      self.bil_grids = BilateralGrid(
+        len(self.dataset.train_cameras),
+        grid_X=config.bilateral_grid_shape[0],
+        grid_Y=config.bilateral_grid_shape[1],
+        grid_W=config.bilateral_grid_shape[2],
+      ).to(self.device)
+      self.bil_grid_optimizer = torch.optim.Adam(
+        self.bil_grids.parameters(),
+        lr=2e-3,
+        eps=1e-15,
+      )
+      self.bil_grid_scheduler = torch.optim.lr_scheduler.ChainedScheduler(
+        [
+          torch.optim.lr_scheduler.LinearLR(
+              self.bil_grid_optimizer,
+              start_factor=0.01,
+              total_iters=1000,
+          ),
+          torch.optim.lr_scheduler.ExponentialLR(
+              self.bil_grid_optimizer, gamma=0.01 ** (1.0 / config.steps)
+          ),
+        ]
+      )
 
     self.ssim = partial(fused_ssim, padding="valid")
     # self.ssim = torch.compile(torchmetrics.StructuralSimilarityIndexMeasure(data_range=1.0, sigma=1.5).to(self.device))
@@ -302,7 +333,15 @@ class Trainer:
       image_id = filename.replace("/", "_")
 
       if i in log_indexes:
-        self.log_rendering(f"{name}_images/{image_id}", filename, rendering, image, 
+        if self.config.use_bilateral_grid:
+          cc_image = color_correct(rendering.image.unsqueeze(0), image.unsqueeze(0)).squeeze(0)
+          rendering = replace(rendering, image=cc_image)
+          cc_psnr = compute_psnr(cc_image, image)
+          self.log_rendering(f"{name}_images/{image_id}", filename, rendering, image, 
+                            cc_psnr.item(), l1.item(), log_image=self.step == 0)
+          
+        else:
+          self.log_rendering(f"{name}_images/{image_id}", filename, rendering, image, 
                            psnr.item(), l1.item(), log_image=self.step == 0)
 
       add_worst = heapq.heappush if len(worst) < worst_count else heapq.heappushpop
@@ -441,6 +480,16 @@ class Trainer:
       
       rendering = self.scene.render(camera_params, config, image_idx)
       rendering = self.color_corrector.correct('train', rendering, image, image_idx)
+
+      if self.config.use_bilateral_grid:
+        grid_y, grid_x = torch.meshgrid(
+            (torch.arange(image.shape[0], device=self.device) + 0.5) / image.shape[0],
+            (torch.arange(image.shape[1], device=self.device) + 0.5) / image.shape[1],
+            indexing="ij",
+        )
+        grid_xy = torch.stack([grid_x, grid_y], dim=-1).unsqueeze(0)
+        corrected_image = slice(self.bil_grids, grid_xy, rendering.image.unsqueeze(0), torch.tensor([image_idx]))["rgb"].squeeze(0)
+        rendering = replace(rendering, image=corrected_image)
 
       loss, losses = self.losses(rendering, image)
 
