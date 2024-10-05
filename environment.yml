@@ -294,17 +294,17 @@ dependencies:
       - smmap==5.0.1
       - sortedcontainers==2.4.0
       - splat-trainer==0.1.5
-      - splat-viewer==0.15.0
+      - splat-viewer==0.21.0
       - streamlit==1.37.1
       - tabulate==0.9.0
       - taichi-nightly==1.8.0.post20240720
-      - taichi-splatting==0.20.2
+      - taichi-splatting==0.22.0
       - tenacity==8.5.0
       - tensorboard==2.17.0
       - tensorboard-data-server==0.7.2
       - tensordict==0.5.0
       - termcolor==2.4.0
-      - tinycudann==1.7
+        #      - tinycudann==1.7
       - toml==0.10.2
       - torchmetrics==1.4.1
       - tornado==6.4.1

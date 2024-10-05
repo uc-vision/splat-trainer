@@ -54,7 +54,9 @@ class TCNNConfig(GaussianSceneConfig):
                            camera_table:ViewTable, device:torch.device):
     
     
-    feature = torch.randn(gaussians.batch_size[0], self.point_features)
+    feature = torch.zeros(gaussians.batch_size[0], self.point_features)
+    torch.nn.init.normal_(feature, std=1.0)
+
     gaussians = gaussians.replace(feature=feature).to(device)
     
     points = parameters_from_gaussians(gaussians, OmegaConf.to_container(self.learning_rates), betas=(self.beta1, self.beta2))

@@ -5,6 +5,7 @@ from typing import Dict
 from beartype import beartype
 from beartype.typing import Optional
 import numpy as np
+from splat_trainer.util.misc import exp_lerp
 from taichi_splatting import Rendering
 from tensordict import tensorclass
 import torch
@@ -48,7 +49,7 @@ class TargetConfig(ControllerConfig):
   prune_rate:float = 0.2
 
   # ema half life
-  ema_half_life:int = 20
+  alpha:float = 0.1
 
   # maximum screen-space size for a floater point (otherwise pruned)
   max_scale:float = 0.25
@@ -78,8 +79,6 @@ class TargetController(Controller):
 
     self.points = PointStatistics.zeros(scene.num_points, device=scene.device)
 
-    # alpha which gives number of iterations to decay by half
-    self.ema_alpha = 0.5 ** (1.0 / config.ema_half_life)
 
 
   def __repr__(self):
@@ -158,11 +157,11 @@ class TargetController(Controller):
 
     # Some alternative update rules
 
-    # points.prune_cost[idx] = torch.maximum(points.prune_cost[idx], prune_cost) 
-    # points.split_score[idx] = torch.maximum(points.split_score[idx], split_score) 
+    # points.prune_cost[idx] = torch.maximum(points.prune_cost[idx]  * self.ema_alpha, prune_cost) 
+    # points.split_score[idx] = torch.maximum(points.split_score[idx] * self.ema_alpha, split_score)  
 
-    points.prune_cost[idx] = torch.maximum(points.prune_cost[idx]  * self.ema_alpha, prune_cost) 
-    points.split_score[idx] = torch.maximum(points.split_score[idx] * self.ema_alpha, split_score)  
+    points.split_score[idx] = exp_lerp(self.config.alpha, split_score, points.split_score[idx])
+    points.prune_cost[idx] = torch.maximum(points.prune_cost[idx], prune_cost) 
 
 
     image_size = max(rendering.camera.image_size)

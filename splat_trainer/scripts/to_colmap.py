@@ -1,9 +1,9 @@
 import argparse
 from pathlib import Path
+import traceback
 from typing import Dict, List
 import cv2
 import numpy as np
-from pyrender import Camera
 from termcolor import colored
 from tqdm import tqdm
 
@@ -11,9 +11,11 @@ from splat_trainer.camera_table.camera_table import ViewInfo
 from splat_trainer.dataset.scan.dataset import find_cloud
 from splat_trainer.dataset.scan.loading import CameraImage, camera_rig_table, load_scan
 
+import camera_geometry 
+from scipy.spatial.transform import Rotation as R
+
 import torch
 from splat_trainer.util.pointcloud import PointCloud
-from splat_trainer.util.transforms import split_rt
 from splat_trainer.util.visibility import random_cloud
 
 from multiprocessing.pool import ThreadPool
@@ -36,9 +38,11 @@ def parse_args():
 
   return parser.parse_args()
 
+def flatten_path(path:str) -> str:
+   # remove any / in the path with underscore
+   return path.replace("/", "_")
 
-
-def export_colmap(output_path:Path, cameras:Dict[str, Camera], cam_images:List[CameraImage], cloud:PointCloud):
+def export_colmap(output_path:Path, cameras:Dict[str, camera_geometry.Camera], cam_images:List[CameraImage], cloud:PointCloud):
     import pycolmap
 
     # Create a COLMAP reconstruction object
@@ -46,8 +50,8 @@ def export_colmap(output_path:Path, cameras:Dict[str, Camera], cam_images:List[C
 
     camera_ids = {}
     for i, (k, camera) in enumerate(cameras.items()):
-        fx, fy, cx, cy = camera.intrinsics
-        
+        fx, fy = camera.focal_length
+        cx, cy = camera.principal_point
         # Assuming image sizes are available in the trainer's dataset
         width, height = camera.image_size
         camera_ids[k] = i
@@ -56,7 +60,8 @@ def export_colmap(output_path:Path, cameras:Dict[str, Camera], cam_images:List[C
             model="PINHOLE",
             width=width,
             height=height,
-            params=[fx, fy, cx, cy]
+            params=[fx, fy, cx, cy],
+            camera_id=i
         )
         
         reconstruction.add_camera(colmap_camera)
@@ -66,17 +71,21 @@ def export_colmap(output_path:Path, cameras:Dict[str, Camera], cam_images:List[C
         cam = cam_image.camera
 
         # Add image to the reconstruction
-        r, t = split_rt(cam.camera_t_parent)
-        qvec = pycolmap.rotmat_to_qvec(r)
+        r = cam.camera_t_parent[0:3, 0:3]
+        t = cam.camera_t_parent[0:3, 3]
+
+        q = R.from_matrix(r).as_quat(scalar_first=False)
+
+        cam_from_world = pycolmap.Rigid3d(q, t)
         
-        reconstruction.add_image(
-            pycolmap.Image(
-                name=cam_image.filename,
-                camera_id=camera_ids[cam_image.camera_name],
-                qvec=qvec,
-                tvec=t
+        image = pycolmap.Image(
+            image_id=i,
+            name=flatten_path(cam_image.filename),
+            camera_id=camera_ids[cam_image.camera_name],
+            cam_from_world=cam_from_world
             )
-        )
+        reconstruction.add_image(image)
+        reconstruction.register_image(image.image_id)
 
     output_path = Path(output_path)
     output_path.mkdir(parents=True, exist_ok=True)
@@ -86,18 +95,20 @@ def export_colmap(output_path:Path, cameras:Dict[str, Camera], cam_images:List[C
     model_path.mkdir(parents=True, exist_ok=True)
 
 
-    positions = cloud.position.cpu().numpy()
-    colors = (cloud.color.cpu().numpy() * 255).astype(np.uint8)
+    positions = cloud.points.cpu().numpy()
+    colors = (cloud.colors.cpu().numpy() * 255).astype(np.uint8)
 
     # Add points to the reconstruction
     for i, (position, color) in enumerate(zip(positions, colors)):
         reconstruction.add_point3D(
             xyz=position,
             color=color,
-            track=pycolmap.Track()
+            track=pycolmap.Track(),
         )
 
-    print(f"Added {len(cloud.position)} points to the reconstruction")
+
+    reconstruction.check()
+    print(reconstruction.summary())
 
     reconstruction.write_text(model_path)
     print(f"Exported to COLMAP format in {model_path.absolute()}")
@@ -109,11 +120,16 @@ def export_colmap(output_path:Path, cameras:Dict[str, Camera], cam_images:List[C
     print(f"Writing {len(cam_images)} images to {image_path.absolute()}")
 
     def save_image(cam_image):
-        cv2.imwrite(str(image_path / cam_image.filename), cam_image.image.cpu().numpy())
+        try:
+            image_rgb = cam_image.image.cpu().numpy()
+            cv2.imwrite(str(image_path / flatten_path(cam_image.filename)), cv2.cvtColor(image_rgb, cv2.COLOR_RGB2BGR))
+        except Exception as e:
+          traceback.print_exc()
+          print(f"Error saving image {cam_image.filename}: {e}")
 
     with ThreadPool() as pool:
-        list(tqdm(pool.imap(save_image, cam_images), total=len(cam_images), desc="Exporting images"))
-
+        for _ in tqdm(pool.imap_unordered(save_image, cam_images), total=len(cam_images), desc="Exporting images"):
+            pass
 
 
 def main():
@@ -121,6 +137,11 @@ def main():
 
   scan, cam_images = load_scan(args.scan, image_scale=args.image_scale, resize_longest=args.resize_longest)
   print(f"Loaded {len(cam_images)} images from {args.scan}")
+
+  cloud_file = find_cloud(scan)   
+  if cloud_file is None and args.random_points is None:
+      print(f"scan {args.scan} contains no sparse cloud, generating 50000 random points instead (specify number with --random_points)")
+      args.random_points = 50000
 
   if args.random_points is not None:
      camera_table = camera_rig_table(scan)
@@ -136,10 +157,7 @@ def main():
      print(f"Generated {cloud.count} random points")
 
   else:
-    cloud_file = find_cloud(scan)   
-    if cloud_file is None:
-      raise RuntimeError(f"scan {args.scan} contains no sparse cloud, try random cloud?")
-  
+
     cloud = PointCloud.load(cloud_file)
     print(f"Loaded sparse cloud with {cloud.count} points")
 

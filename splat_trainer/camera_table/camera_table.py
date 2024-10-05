@@ -136,6 +136,8 @@ class CameraRigTable(ViewTable):
   def num_cameras(self) -> int:
     return self.camera_poses.num_cameras
   
+  def lookup_projection(self, camera_idx:int):
+    return self.camera_projection[camera_idx]
 
   @property
   def get_projection(self, camera_idx:int) -> torch.Tensor:
@@ -203,6 +205,9 @@ class MultiCameraTable(ViewTable):
   @property
   def num_cameras(self) -> int:
     return self.camera_projection.shape[0]
+  
+  def lookup_projection(self, camera_idx:int):
+    return self.camera_projection[camera_idx]
   
   @property
   def num_frames(self) -> int:
