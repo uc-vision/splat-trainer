@@ -36,7 +36,6 @@ trainer:
 
   blur_cov: 0.3 # only used if antialias is false
   antialias: False
-
   densify_interval: 
     _target_: splat_trainer.config.Piecewise
     start: 100

@@ -18,9 +18,6 @@ class IsDataclass(Protocol):
 
 T = TypeVar('T')
 
-
-
-
 class Varying(Generic[T], metaclass=ABCMeta):
   @abstractmethod
   def __call__(self, t:float) -> T:

@@ -52,9 +52,6 @@ def cfg_from_args():
   output_group.add_argument("--checkpoint", action="store_true", help="Save checkpoints")
   output_group.add_argument("--wandb", action="store_true", help="Use wandb logging")
 
-
-
-
   args = parser.parse_args()
 
   overrides = args.overrides
@@ -107,7 +104,6 @@ def cfg_from_args():
   if args.random_points is not None:
     overrides.append(f"trainer.initial_points={args.random_points}")
     overrides.append("trainer.load_dataset_cloud=false")
-
 
 
   if args.tcnn:

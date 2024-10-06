@@ -47,7 +47,7 @@ from splat_trainer.color_corrector import CorrectorConfig, Corrector
 
 
 
-
+@beartype
 @dataclass(kw_only=True)
 class TrainConfig:
   device: str
@@ -92,7 +92,6 @@ class TrainConfig:
   save_output: bool = True
 
   lr: Varying[float]
-
   raster_config: RasterConfig = RasterConfig()
   
 
@@ -448,7 +447,6 @@ class Trainer:
     return loss, metrics
 
 
-
   def training_step(self, filename:str, camera_params:CameraParams, image_idx:int, image:torch.Tensor, timer:CudaTimer) -> dict:
 
     with timer:
@@ -475,8 +473,6 @@ class Trainer:
     return dict(**losses, **metrics)
 
   
-
-
   def train(self):
 
     self.pbar = tqdm(total=self.config.steps - self.step, desc="training")
