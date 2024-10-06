@@ -1,17 +1,14 @@
 
-from dataclasses import  dataclass, replace
-from functools import partial
+from dataclasses import  dataclass
 import math
 from pathlib import Path
-from typing import Optional
 from beartype import beartype
 from omegaconf import DictConfig, OmegaConf
 
-from tensordict import TensorDict
 import torch
 import torch.nn.functional as F
 
-from splat_trainer.camera_table.camera_table import ViewTable, camera_scene_extents
+from splat_trainer.camera_table.camera_table import ViewTable
 from splat_trainer.logger.logger import Logger
 from splat_trainer.scene.io import write_gaussians
 from splat_trainer.scene.scene import GaussianSceneConfig, GaussianScene
