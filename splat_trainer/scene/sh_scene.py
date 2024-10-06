@@ -1,6 +1,7 @@
 
 from dataclasses import  dataclass, replace
 from functools import partial
+import math
 from pathlib import Path
 from typing import Optional
 from beartype import beartype
@@ -30,7 +31,9 @@ class SHConfig(GaussianSceneConfig):
   learning_rates : DictConfig
   sh_ratio:float      = 20.0
   sh_degree:int       = 3
-  degree_steps: int = 2000
+
+  # proportion of training progress per sh degree
+  degree_progress: float = 0.1 
 
   depth_ema:float = 0.95
   use_depth_lr:bool = True
@@ -91,9 +94,10 @@ class SHScene(GaussianScene):
 
 
 
-  def sh_mask(self, step):
+  def sh_mask(self, t:float):
     """ Learning rate mask for spherical harmonics """
-    d = 1 + min(step // self.config.degree_steps, self.config.sh_degree)
+    d = 1 + min(math.floor(t / self.config.degree_progress), self.config.sh_degree)
+    
     mask = torch.zeros(self.points.feature.shape[1:], dtype=torch.float32, device=self.device)
     mask[:, 0:1] = 1 # Base color has full learning rate
     mask[:, 1:d**2] = 1/self.config.sh_ratio # higher order SH coefficients have reduced learning rate
@@ -101,8 +105,8 @@ class SHScene(GaussianScene):
     return mask
 
   @beartype
-  def step(self, rendering:Rendering, step:int):
-    self.points.update_group('feature', mask_lr=self.sh_mask(step))
+  def step(self, rendering:Rendering, t:float):
+    self.points.update_group('feature', mask_lr=self.sh_mask(t))
     update_depth(self.points, rendering, self.config.depth_ema)
 
 
