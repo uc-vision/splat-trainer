@@ -49,7 +49,6 @@ class TCNNConfig(GaussianSceneConfig):
 
 
 
-
   def from_color_gaussians(self, gaussians:Gaussians3D, 
                            camera_table:CameraTable, device:torch.device):
     
@@ -69,8 +68,6 @@ class TCNNConfig(GaussianSceneConfig):
 
     scene.color_model.load_state_dict(state['color_model'])
     scene.color_opt.load_state_dict(state['color_opt'])
-
-    
 
     return scene
 
@@ -123,7 +120,7 @@ class TCNNScene(GaussianScene):
 
 
   @beartype
-  def step(self, rendering:Rendering, step:int):
+  def step(self, rendering:Rendering, t:float):
 
     if self.config.use_depth_lr:
       update_depth(self.points, rendering, self.config.depth_ema)

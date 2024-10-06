@@ -23,7 +23,7 @@ class Controller(metaclass=ABCMeta):
     raise NotImplementedError
 
   @abstractmethod
-  def step(self, rendering:Rendering, step:int)  -> Dict[str, float]:  
+  def step(self, rendering:Rendering, t:float)  -> Dict[str, float]:  
     """ Step the controller (and gradient step), return dict with metrics for logging"""
     raise NotImplementedError
   
