@@ -1,17 +1,14 @@
 
-from dataclasses import  dataclass, replace
-from functools import partial
+from dataclasses import  dataclass
 import math
 from pathlib import Path
-from typing import Optional
 from beartype import beartype
 from omegaconf import DictConfig, OmegaConf
 
-from tensordict import TensorDict
 import torch
 import torch.nn.functional as F
 
-from splat_trainer.camera_table.camera_table import CameraTable, camera_extents
+from splat_trainer.camera_table.camera_table import ViewTable
 from splat_trainer.logger.logger import Logger
 from splat_trainer.scene.io import write_gaussians
 from splat_trainer.scene.scene import GaussianSceneConfig, GaussianScene
@@ -43,7 +40,7 @@ class SHConfig(GaussianSceneConfig):
 
 
 
-  def from_color_gaussians(self, gaussians:Gaussians3D, camera_table:CameraTable, device:torch.device):
+  def from_color_gaussians(self, gaussians:Gaussians3D, camera_table:ViewTable, device:torch.device):
     sh_feature = torch.zeros(gaussians.batch_size[0], 3, (self.sh_degree + 1)**2)
     sh_feature[:, :, 0] = rgb_to_sh(gaussians.feature)
 
@@ -53,7 +50,7 @@ class SHConfig(GaussianSceneConfig):
     return SHScene(points, self, camera_table)
 
   
-  def from_state_dict(self, state:dict, camera_table:CameraTable):
+  def from_state_dict(self, state:dict, camera_table:ViewTable):
     points = ParameterClass.from_state_dict(state['points'], 
           optimizer=SparseAdam, betas=(self.beta1, self.beta2))
     
@@ -64,7 +61,7 @@ class SHScene(GaussianScene):
   def __init__(self, 
         points: ParameterClass, 
         config: SHConfig,       
-        camera_table:CameraTable,     
+        camera_table:ViewTable,     
   ):
     
     self.config = config

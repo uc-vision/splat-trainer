@@ -16,7 +16,7 @@ from splat_trainer.util.transforms import split_rt
 from beartype import beartype
 
 
-class CameraTable(nn.Module, metaclass=abc.ABCMeta):
+class ViewTable(nn.Module, metaclass=abc.ABCMeta):
 
   @abstractmethod
   def forward(self, image_idx:torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
@@ -33,6 +33,8 @@ class CameraTable(nn.Module, metaclass=abc.ABCMeta):
 
     camera_t_world, proj = self(image_idx) # add batch dimension
     return camera_t_world.squeeze(0), proj.squeeze(0)
+
+    
 
 
   def __len__(self):
@@ -53,12 +55,11 @@ class CameraTable(nn.Module, metaclass=abc.ABCMeta):
   def num_images(self) -> int:
     raise NotImplementedError
   
-
   @property
   @abstractmethod
-  def all_cameras(self) -> torch.Tensor:
-    raise NotImplementedError
-
+  def lookup_projection(self, camera_idx:int) -> torch.Tensor:
+    pass
+  
   @property
   @abstractmethod
   def camera_centers(self) -> torch.Tensor:
@@ -87,7 +88,10 @@ class CameraTable(nn.Module, metaclass=abc.ABCMeta):
     return torch.arange(0, self.num_images, device=self.device)
 
 @beartype
-def camera_extents(cameras:CameraTable):
+def camera_scene_extents(cameras:ViewTable):
+    """ 
+    Compute centroid and diagonal of camera centers.
+    """
 
     cam_centers = cameras.camera_centers.reshape(-1, 3)
     avg_cam_center = torch.mean(cam_centers, dim=0, keepdim=True)
@@ -98,10 +102,11 @@ def camera_extents(cameras:CameraTable):
     return avg_cam_center.reshape(3), (diagonal * 1.1).item()
 
 
-class CameraRigTable(CameraTable):
+
+class CameraRigTable(ViewTable):
   def __init__(self, rig_t_world:torch.Tensor,   # (N, 4, 4) - poses for the whole camera rig
                      camera_t_rig:torch.Tensor,  # (C, 4, 4) - camera poses inside the rig
-                     projection:torch.Tensor   # (C, 4) - camera intrinsics (fx, fy, cx, cy) for each camera in rig
+                     projection:torch.Tensor,   # (C, 4) - camera intrinsics (fx, fy, cx, cy) for each camera in rig
                     ):
     super().__init__()
 
@@ -111,6 +116,7 @@ class CameraRigTable(CameraTable):
         projection.to(torch.float32), requires_grad=False)
     self.camera_poses = RigPoseTable(
       rig_t_world=rig_t_world, camera_t_rig=camera_t_rig)
+    
     
   @beartype
   def forward(self, image_idx:torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:     
@@ -129,6 +135,14 @@ class CameraRigTable(CameraTable):
   @property
   def num_cameras(self) -> int:
     return self.camera_poses.num_cameras
+  
+  def lookup_projection(self, camera_idx:int):
+    return self.camera_projection[camera_idx]
+
+  @property
+  def get_projection(self, camera_idx:int) -> torch.Tensor:
+    assert camera_idx < self.num_cameras, f"Camera index out of range: {camera_idx} >= {self.num_cameras}"
+    return self.camera_projection[camera_idx]
   
   @property
   def num_frames(self) -> int:
@@ -154,14 +168,11 @@ class CameraRigTable(CameraTable):
   def device(self):
     return self.camera_projection.device
   
-  @property
-  def all_cameras(self):
-    dims = [torch.arange(0, n, device=self.device) for n in self.shape]
-    return torch.stack(torch.meshgrid(*dims, indexing='ij'), dim=-1).view(-1, 2)
 
 
 
-class MultiCameraTable(CameraTable):
+
+class MultiCameraTable(ViewTable):
   """
   A table of camera poses and intrinsics - cameras can have different intrinsics which are stored in the projection table.
   """
@@ -195,6 +206,9 @@ class MultiCameraTable(CameraTable):
   def num_cameras(self) -> int:
     return self.camera_projection.shape[0]
   
+  def lookup_projection(self, camera_idx:int):
+    return self.camera_projection[camera_idx]
+  
   @property
   def num_frames(self) -> int:
     return self.num_images
@@ -218,15 +232,12 @@ class MultiCameraTable(CameraTable):
   def device(self):
     return self.camera_projection.device
 
-  @property
-  def all_cameras(self):
-    return torch.arange(0, self.shape[0], device=self.camera_projection.device).unsqueeze(1)
 
 
   
 
 
-def camera_json(camera_table:CameraTable):
+def camera_json(camera_table:ViewTable):
   def export_camera(i):
 
     camera_t_world, proj = camera_table.lookup(i)
@@ -249,13 +260,13 @@ def camera_json(camera_table:CameraTable):
 
 @beartype
 @dataclass 
-class CameraInfo:
-  camera_table:CameraTable
+class ViewInfo:
+  camera_table:ViewTable
   image_sizes:torch.Tensor
   depth_range:Tuple[Number, Number]
 
-  def to(self, device) -> 'CameraInfo':
-    return CameraInfo(
+  def to(self, device) -> 'ViewInfo':
+    return ViewInfo(
       camera_table=self.camera_table.to(device),
       image_sizes=self.image_sizes.to(device),
       depth_range=self.depth_range,

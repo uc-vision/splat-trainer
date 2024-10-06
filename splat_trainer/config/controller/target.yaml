@@ -10,5 +10,5 @@ trainer:
     prune_rate: 0.05
 
     # min visbility to be considered for splitting/pruning
-    ema_half_life: 50 
+    alpha: 0.1
   

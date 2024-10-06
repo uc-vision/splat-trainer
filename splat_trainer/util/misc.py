@@ -49,7 +49,7 @@ def inv_lerp(t, a, b):
 
 @torch.compile
 def exp_lerp(t, a, b):
-    max_ab = torch.max(a, b)
+    max_ab = torch.maximum(a, b)
     return max_ab + torch.log(torch.lerp(torch.exp(a - max_ab), torch.exp(b - max_ab), t))
 
 @torch.compile

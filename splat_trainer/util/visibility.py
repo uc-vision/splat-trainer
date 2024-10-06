@@ -4,7 +4,7 @@ from typing import Tuple
 from beartype import beartype
 import torch
 
-from splat_trainer.camera_table.camera_table import CameraInfo, CameraTable
+from splat_trainer.camera_table.camera_table import ViewInfo, ViewTable
 from splat_trainer.util.pointcloud import PointCloud
 from splat_trainer.util.transforms import expand_proj, transform44
 
@@ -31,13 +31,13 @@ def project_points(transform, xyz):
   return (xy / depth), depth
 
 
-def projection(camera_table:CameraTable):
+def projection(camera_table:ViewTable):
   cam_t_world, image_t_cam = camera_table(torch.arange(len(camera_table), device=camera_table.device))
   return expand_proj(image_t_cam) @ cam_t_world
 
 
 @beartype
-def crop_cloud(info:CameraInfo, pcd:PointCloud) -> PointCloud:
+def crop_cloud(info:ViewInfo, pcd:PointCloud) -> PointCloud:
     counts = point_visibility(info, pcd.points)
     return pcd[counts > 0]
 
@@ -58,7 +58,7 @@ def random_ndc(n, depth_range:Tuple[Number, Number], device=None) -> torch.Tenso
 
 
 @beartype
-def random_points(info:CameraInfo, count:int) -> torch.Tensor:
+def random_points(info:ViewInfo, count:int) -> torch.Tensor:
     
     depth_range = info.depth_range
 
@@ -82,7 +82,7 @@ def random_points(info:CameraInfo, count:int) -> torch.Tensor:
 
 
 @beartype
-def random_cloud(info:CameraInfo, count:int) -> PointCloud:
+def random_cloud(info:ViewInfo, count:int) -> PointCloud:
 
   points = random_points(info, count)
   colors = torch.rand(count, 3, device=points.device)
@@ -92,7 +92,7 @@ def random_cloud(info:CameraInfo, count:int) -> PointCloud:
 
 
 @beartype
-def point_visibility(info:CameraInfo, 
+def point_visibility(info:ViewInfo, 
                      points:torch.Tensor) -> torch.Tensor:
   
   counts = torch.zeros(points.shape[0], dtype=torch.int32, device=info.camera_table.device)

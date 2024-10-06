@@ -22,6 +22,7 @@ import torch.nn.functional as F
 from splat_trainer.controller.controller import Controller
 from splat_trainer.scene.scene import GaussianScene
 from splat_trainer.config import Varying
+from splat_trainer.util.pointcloud import PointCloud
 from splat_trainer.util.lib_bilagrid import fit_affine_colors
 
 
@@ -111,14 +112,13 @@ class Trainer:
     self.color_corrector = color_corrector
     self.dataset = dataset
 
-    self.camera_info = dataset.camera_info().to(self.device)
+    self.camera_info = dataset.view_info().to(self.device)
 
     self.config = config
     self.logger = logger
     self.step = step
 
     self.last_checkpoint = None
-      
     self.render_timers = [CudaTimer() for _ in range(self.config.log_interval)]
 
     self.color_map = get_cv_colormap().to(self.device)
@@ -128,16 +128,12 @@ class Trainer:
 
 
   @staticmethod
-  def initialize(config:TrainConfig, dataset:Dataset, logger:Logger):
-
+  def get_initial_points(config:TrainConfig, dataset:Dataset) -> PointCloud:
     device = torch.device(config.device)
-    camera_info = dataset.camera_info().to(device)
+    camera_info = dataset.view_info().to(device)
 
-    print(f"Initializing model from {dataset}")
     dataset_cloud = dataset.pointcloud() if config.load_dataset_cloud else None
-    initial_gaussians = None
-
-
+    points = None
 
     if dataset_cloud is not None:
       points = dataset_cloud.to(device)
@@ -148,33 +144,38 @@ class Trainer:
 
       print(colored(f"Using {points.batch_size[0]} points from original {dataset_cloud.batch_size[0]}", 'yellow'))
     
-      initial_gaussians:Gaussians3D = from_pointcloud(points, 
-                                          initial_scale=config.initial_point_scale,
-                                          initial_alpha=config.initial_alpha,
-                                          num_neighbors=config.num_neighbors)
-      
       if config.limit_points is not None:
         print(f"Limiting {points.batch_size[0]} points to {config.limit_points}")
-        # random sample
         random_indices = torch.randperm(points.batch_size[0])[:config.limit_points]
         points = points[random_indices]
-        initial_gaussians = initial_gaussians[random_indices]
       
     if config.add_initial_points or dataset_cloud is None:
       near, _ = camera_info.depth_range
-      points = random_cloud(camera_info, config.initial_points)
+      random_points = random_cloud(camera_info, config.initial_points)
     
-      gaussians = from_pointcloud(points, 
-                                        initial_scale=config.initial_point_scale,
-                                        initial_alpha=config.initial_alpha,
-                                        num_neighbors=config.num_neighbors)
-      if initial_gaussians is not None:
-        print(f"Adding {gaussians.batch_size[0]} random points")
-        initial_gaussians = initial_gaussians.concat(gaussians)
+      if points is not None:
+        print(f"Adding {random_points.batch_size[0]} random points")
+        points = points.concat(random_points)
       else:
-        print(f"Using {gaussians.batch_size[0]} random points")
-        initial_gaussians = gaussians
-      
+        print(f"Using {random_points.batch_size[0]} random points")
+        points = random_points
+
+    return points
+
+
+  @staticmethod
+  def initialize(config:TrainConfig, dataset:Dataset, logger:Logger):
+
+    device = torch.device(config.device)
+    camera_info = dataset.view_info().to(device)
+
+    print(f"Initializing points from {dataset}")
+
+    initial_points = Trainer.get_initial_points(config, dataset)
+    initial_gaussians:Gaussians3D = from_pointcloud(initial_points, 
+                                          initial_scale=config.initial_point_scale,
+                                          initial_alpha=config.initial_alpha,
+                                          num_neighbors=config.num_neighbors)
 
     scene = config.scene.from_color_gaussians(initial_gaussians, camera_info.camera_table, device)
     controller = config.controller.make_controller(scene)
@@ -185,7 +186,7 @@ class Trainer:
     if config.save_output:
       output_path = Path.cwd()
 
-      points.save_ply(output_path / "input.ply")
+      initial_points.save_ply(output_path / "input.ply")
       with open(output_path / "cameras.json", "w") as f:
         json.dump(dataset.camera_json(camera_info.camera_table), f)
 
@@ -212,7 +213,7 @@ class Trainer:
   @staticmethod
   def from_state_dict(config:TrainConfig, dataset:Dataset, logger:Logger, state_dict:dict):
 
-    scene = config.scene.from_state_dict(state_dict['scene'], dataset.camera_info().camera_table)
+    scene = config.scene.from_state_dict(state_dict['scene'], dataset.view_info().camera_table)
     controller = config.controller.from_state_dict(state_dict['controller'], scene)
 
     return Trainer(config, scene, controller, dataset, logger, step=state_dict['step'])
