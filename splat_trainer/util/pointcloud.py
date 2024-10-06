@@ -16,6 +16,11 @@ class PointCloud:
   colors : torch.Tensor # (N, 3)
 
 
+  @property
+  def count(self) -> int:
+    return self.points.shape[0]
+
+
   @staticmethod
   def from_numpy(xyz:np.ndarray, rgb:np.ndarray) -> 'PointCloud':
     if rgb.dtype == np.uint8:
@@ -44,7 +49,7 @@ class PointCloud:
   
   
   @staticmethod
-  def load(filename:str | Path):
+  def load(filename:str | Path) -> 'PointCloud':
     filename = Path(filename)
 
     if filename.suffix == ".pcd": 
