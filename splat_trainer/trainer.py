@@ -5,11 +5,7 @@ import json
 import math
 from numbers import Number
 from pathlib import Path
-<<<<<<< HEAD
-from typing import TypeVar
-=======
 from typing import Callable, Tuple, TypeVar
->>>>>>> main
 
 from tqdm import tqdm 
 from termcolor import colored
@@ -26,12 +22,9 @@ import torch.nn.functional as F
 from splat_trainer.controller.controller import Controller
 from splat_trainer.scene.scene import GaussianScene
 from splat_trainer.config import Varying
-<<<<<<< HEAD
-=======
 from splat_trainer.util.lib_bilagrid import fit_affine_colors
 
 
->>>>>>> main
 from splat_trainer.util.visibility import crop_cloud, random_cloud
 from taichi_splatting import Gaussians3D, RasterConfig, Rendering
 from taichi_splatting.perspective import CameraParams
@@ -51,11 +44,6 @@ from splat_trainer.controller import ControllerConfig
 from splat_trainer.scheduler import Scheduler, Uniform
 from splat_trainer.color_corrector import CorrectorConfig, Corrector
 
-
-
-
-
-T = TypeVar("T")
 
 
 @beartype
@@ -102,13 +90,7 @@ class TrainConfig:
   save_checkpoints: bool = False
   save_output: bool = True
 
-<<<<<<< HEAD
   lr: Varying[float]
-=======
-  lr_scheduler: Scheduler = Uniform()
-  lr: Varying[float]
-
->>>>>>> main
   raster_config: RasterConfig = RasterConfig()
   
 
@@ -143,11 +125,6 @@ class Trainer:
     self.pbar = None
 
     self.ssim = partial(fused_ssim, padding="valid")
-<<<<<<< HEAD
-    # self.ssim = torch.compile(torchmetrics.StructuralSimilarityIndexMeasure(data_range=1.0, sigma=1.5).to(self.device))
-    # self.ssim = torchmetrics.MultiScaleStructuralSimilarityIndexMeasure(data_range=1.0, kernel_size=11, sigma=1.5).to(self.device)
-=======
->>>>>>> main
 
 
   @staticmethod
@@ -425,23 +402,6 @@ class Trainer:
 
       return loss / levels
   
-<<<<<<< HEAD
-  def eval_var(self, var:Varying[T] | Number):
-    if isinstance(var, Varying):
-      return var(self.t)
-    else:
-      return var
-
-  def losses(self, rendering:Rendering, image):
-    losses = {}
-    loss = 0.0
-
-    if self.config.l1_weight > 0:
-      l1 = torch.nn.functional.l1_loss(rendering.image, image)
-      losses["l1"] = l1.item()
-      loss = l1 * self.config.l1_weight
-
-=======
 
   def reg_loss(self, rendering:Rendering) -> Tuple[torch.Tensor, dict]:
     # TODO: move this to Scene
@@ -466,7 +426,6 @@ class Trainer:
       metrics["l1"] = l1.item()
       loss = l1 * self.config.l1_weight
 
->>>>>>> main
 
     if self.config.ssim_weight > 0:  
       ssim = self.compute_ssim(rendering.image, image, self.config.ssim_levels)
@@ -474,23 +433,9 @@ class Trainer:
       metrics["ssim"] = ssim.item()
 
 
-<<<<<<< HEAD
-
-
-    aspect = rendering.scale.max(-1).values / rendering.scale.min(-1).values
-    
-    scale_term = rendering.scale / rendering.camera.focal_length[0]
-    reg_loss = (  self.scene.opacity.mean() * self.config.opacity_reg(self.t)
-                 + scale_term.mean() * self.config.scale_reg(self.t)
-                 + self.config.aspect_reg(self.t) * aspect.mean())
-                  
-    
-    losses["reg"] = reg_loss.item()
-=======
     reg_loss, reg_losses = self.reg_loss(rendering)
     metrics.update(reg_losses)
     metrics["reg"] = reg_loss.item()
->>>>>>> main
     loss += reg_loss 
 
     cc_loss, cc_metrics = self.color_corrector.loss()
@@ -499,7 +444,6 @@ class Trainer:
     metrics.update(cc_metrics)
 
     return loss, metrics
-
 
 
   def training_step(self, filename:str, camera_params:CameraParams, image_idx:int, image:torch.Tensor, timer:CudaTimer) -> dict:
@@ -528,8 +472,6 @@ class Trainer:
     return dict(**losses, **metrics)
 
   
-
-
   def train(self):
 
     self.pbar = tqdm(total=self.config.steps - self.step, desc="training")
