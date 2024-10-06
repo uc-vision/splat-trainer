@@ -10,12 +10,13 @@ from pathlib import Path
 from typing import Generic, Protocol, Tuple, TypeVar
 from beartype import beartype
 
+from torch.optim import Optimizer
+
 
 class IsDataclass(Protocol):
     __dataclass_fields__: dict
 
 T = TypeVar('T')
-
 
 class Varying(Generic[T], metaclass=ABCMeta):
   @abstractmethod
@@ -79,6 +80,12 @@ def resolve_varying(cfg:IsDataclass, t:float):
   varying = {field.name: field.value(t) for field in fields(cfg) if isinstance(field.value, Varying)}
   return replace(cfg, **varying)
   
+@beartype
+def schedule_lr(v:Varying[float], t:float,  optimizer:Optimizer):
+  lr = v(t)
+  for param_group in optimizer.param_groups:
+    param_group['lr'] = lr
+
 
 def target(name:str, **kwargs):
   return OmegaConf.create({

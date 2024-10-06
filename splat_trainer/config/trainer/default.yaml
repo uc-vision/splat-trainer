@@ -36,14 +36,12 @@ trainer:
 
   blur_cov: 0.3 # only used if antialias is false
   antialias: False
-  
   densify_interval: 
     _target_: splat_trainer.config.Piecewise
     start: 100
     steps:
       - [0.2, 200]
       - [0.5, 400]
-
 
   raster_config: 
     _target_: taichi_splatting.RasterConfig

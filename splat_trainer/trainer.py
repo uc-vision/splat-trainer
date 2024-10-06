@@ -5,7 +5,11 @@ import json
 import math
 from numbers import Number
 from pathlib import Path
+<<<<<<< HEAD
 from typing import TypeVar
+=======
+from typing import Callable, Tuple, TypeVar
+>>>>>>> main
 
 from tqdm import tqdm 
 from termcolor import colored
@@ -22,6 +26,12 @@ import torch.nn.functional as F
 from splat_trainer.controller.controller import Controller
 from splat_trainer.scene.scene import GaussianScene
 from splat_trainer.config import Varying
+<<<<<<< HEAD
+=======
+from splat_trainer.util.lib_bilagrid import fit_affine_colors
+
+
+>>>>>>> main
 from splat_trainer.util.visibility import crop_cloud, random_cloud
 from taichi_splatting import Gaussians3D, RasterConfig, Rendering
 from taichi_splatting.perspective import CameraParams
@@ -38,6 +48,11 @@ from splat_trainer.util.containers import transpose_rows
 from splat_trainer.util.misc import CudaTimer, next_multiple, strided_indexes
 
 from splat_trainer.controller import ControllerConfig
+from splat_trainer.scheduler import Scheduler, Uniform
+from splat_trainer.color_corrector import CorrectorConfig, Corrector
+
+
+
 
 
 T = TypeVar("T")
@@ -50,6 +65,7 @@ class TrainConfig:
 
   steps: int 
   scene: GaussianSceneConfig
+  color_corrector: CorrectorConfig
   controller: ControllerConfig
 
   load_model: Optional[str] = None
@@ -86,13 +102,20 @@ class TrainConfig:
   save_checkpoints: bool = False
   save_output: bool = True
 
+<<<<<<< HEAD
   lr: Varying[float]
+=======
+  lr_scheduler: Scheduler = Uniform()
+  lr: Varying[float]
+
+>>>>>>> main
   raster_config: RasterConfig = RasterConfig()
   
 
 class Trainer:
   def __init__(self, config:TrainConfig,
                 scene:GaussianScene, 
+                color_corrector: Corrector,
                 controller:Controller,
                 dataset:Dataset,  
               
@@ -103,6 +126,7 @@ class Trainer:
     self.device = torch.device(config.device)
     self.controller = controller
     self.scene = scene
+    self.color_corrector = color_corrector
     self.dataset = dataset
 
     self.camera_info = dataset.camera_info().to(self.device)
@@ -119,8 +143,11 @@ class Trainer:
     self.pbar = None
 
     self.ssim = partial(fused_ssim, padding="valid")
+<<<<<<< HEAD
     # self.ssim = torch.compile(torchmetrics.StructuralSimilarityIndexMeasure(data_range=1.0, sigma=1.5).to(self.device))
     # self.ssim = torchmetrics.MultiScaleStructuralSimilarityIndexMeasure(data_range=1.0, kernel_size=11, sigma=1.5).to(self.device)
+=======
+>>>>>>> main
 
 
   @staticmethod
@@ -175,6 +202,9 @@ class Trainer:
     scene = config.scene.from_color_gaussians(initial_gaussians, camera_info.camera_table, device)
     controller = config.controller.make_controller(scene)
 
+    num_images = len(dataset.all_cameras)
+    color_corrector = config.color_corrector.make_corrector(num_images, config.device)
+
     if config.save_output:
       output_path = Path.cwd()
 
@@ -182,7 +212,7 @@ class Trainer:
       with open(output_path / "cameras.json", "w") as f:
         json.dump(dataset.camera_json(camera_info.camera_table), f)
 
-    return Trainer(config, scene, controller, dataset, logger)
+    return Trainer(config, scene, color_corrector, controller, dataset, logger)
       
 
   def state_dict(self):
@@ -265,7 +295,12 @@ class Trainer:
     if log_image:
       self.log_image(f"{name}/image", image, caption=filename)
 
-  def evaluate_dataset(self, name, data, log_count:int=0, worst_count:int=0):
+  # Rendering, Source Image -> Corrected Image
+  ColorCorrect = Callable[[Rendering, torch.Tensor], torch.Tensor]
+
+  def evaluate_dataset(self, name, data, 
+                       correct_image:Optional[ColorCorrect] = None, 
+                       log_count:int=0, worst_count:int=0):
     if len(data) == 0:
       return {}
 
@@ -277,25 +312,28 @@ class Trainer:
     log_indexes = strided_indexes(log_count, len(data)) 
 
     pbar = tqdm(total=len(data), desc=f"rendering {name}", leave=False)
-    for i, (filename, camera_params, cam_idx, image) in enumerate(self.iter_data(data)):
+    for i, (filename, camera_params, image_idx, source_image) in enumerate(self.iter_data(data)):
 
       config = replace(self.config.raster_config, compute_split_heuristics=True, 
                         antialias=self.config.antialias,
                        blur_cov=self.blur_cov)
-      rendering = self.scene.render(camera_params, config, cam_idx, render_depth=True)
       
-      psnr = compute_psnr(rendering.image, image)
-      l1 = torch.nn.functional.l1_loss(rendering.image, image)
+      rendering = self.scene.render(camera_params, config, image_idx, render_depth=True)
+      image = correct_image(rendering, source_image, image_idx) if correct_image is not None else rendering.image
+
+      psnr = compute_psnr(image, source_image)
+
+      l1 = torch.nn.functional.l1_loss(image, source_image)
 
       radius_hist = radius_hist.append(rendering.radii.log() / math.log(10.0), trim=False)
       image_id = filename.replace("/", "_")
 
       if i in log_indexes:
-        self.log_rendering(f"{name}_images/{image_id}", filename, rendering, image, 
+        self.log_rendering(f"{name}_images/{image_id}", filename, rendering, source_image, 
                            psnr.item(), l1.item(), log_image=self.step == 0)
 
       add_worst = heapq.heappush if len(worst) < worst_count else heapq.heappushpop
-      add_worst(worst, (-psnr.item(), l1.item(), rendering.detach(), image, image_id))
+      add_worst(worst, (-psnr.item(), l1.item(), rendering.detach(), source_image, image_id))
       
       eval = dict(filename=filename, psnr = psnr.item(), l1 = l1.item())
       rows.append(eval)
@@ -303,8 +341,8 @@ class Trainer:
       pbar.update(1)
       pbar.set_postfix(psnr=f"{psnr.item():.2f}", l1=f"{l1.item():.4f}")
 
-    for i, (neg_psnr, l1, rendering, image, filename) in enumerate(worst):
-      self.log_rendering(f"worst_{name}/{i}", filename, rendering, image,
+    for i, (neg_psnr, l1, rendering, source_image, filename) in enumerate(worst):
+      self.log_rendering(f"worst_{name}/{i}", filename, rendering, source_image,
                          -neg_psnr, l1, log_image=True)
 
     self.logger.log_evaluations(f"eval_{name}/evals", rows, step=self.step)
@@ -322,10 +360,21 @@ class Trainer:
 
   def evaluate(self, write_outputs=False):
 
+    evaluate_trained = lambda rendering, _, image_idx: self.color_corrector.correct(rendering, image_idx)
+    evaluate_fit = lambda rendering, source_image: fit_affine_colors(rendering.image, source_image)
+
     train = self.evaluate_dataset("train", self.dataset.train(shuffle=False), 
-      log_count=self.config.num_logged_images, worst_count=self.config.log_worst_images)
+        correct_image=evaluate_trained,
+        log_count=self.config.num_logged_images, 
+        worst_count=self.config.log_worst_images)
+    
     val = self.evaluate_dataset("val", self.dataset.val(), 
       log_count=self.config.num_logged_images, worst_count=self.config.log_worst_images)
+    
+    val = self.evaluate_dataset("val_cc", self.dataset.val(), 
+      correct_image=evaluate_fit,
+      log_count=self.config.num_logged_images, worst_count=self.config.log_worst_images)
+    
 
     if write_outputs:
       iteration_path = self.output_path / f"point_cloud/iteration_{self.step}"
@@ -376,6 +425,7 @@ class Trainer:
 
       return loss / levels
   
+<<<<<<< HEAD
   def eval_var(self, var:Varying[T] | Number):
     if isinstance(var, Varying):
       return var(self.t)
@@ -391,13 +441,40 @@ class Trainer:
       losses["l1"] = l1.item()
       loss = l1 * self.config.l1_weight
 
+=======
+
+  def reg_loss(self, rendering:Rendering) -> Tuple[torch.Tensor, dict]:
+    # TODO: move this to Scene
+    scale_term = rendering.scale / rendering.camera.focal_length[0]
+    aspect = rendering.scale.max(-1).values / rendering.scale.min(-1).values
+
+    regs = dict(
+      opacity_reg = (  self.scene.opacity.mean() * self.config.opacity_reg(self.t) ),
+      scale_reg = ( scale_term.mean() * self.config.scale_reg(self.t) ),
+      aspect_reg = ( self.config.aspect_reg(self.t) * aspect.mean() )
+    )
+
+    return sum(regs.values()), {k:v.item() for k, v in regs.items()}
+
+
+  def losses(self, rendering:Rendering, image:torch.Tensor):
+    metrics = {}
+    loss = 0.0
+
+    if self.config.l1_weight > 0:
+      l1 = torch.nn.functional.l1_loss(rendering.image, image)
+      metrics["l1"] = l1.item()
+      loss = l1 * self.config.l1_weight
+
+>>>>>>> main
 
     if self.config.ssim_weight > 0:  
       ssim = self.compute_ssim(rendering.image, image, self.config.ssim_levels)
       loss += ssim * self.config.ssim_weight 
-      losses["ssim"] = ssim.item()
+      metrics["ssim"] = ssim.item()
 
 
+<<<<<<< HEAD
 
 
     aspect = rendering.scale.max(-1).values / rendering.scale.min(-1).values
@@ -409,14 +486,23 @@ class Trainer:
                   
     
     losses["reg"] = reg_loss.item()
+=======
+    reg_loss, reg_losses = self.reg_loss(rendering)
+    metrics.update(reg_losses)
+    metrics["reg"] = reg_loss.item()
+>>>>>>> main
     loss += reg_loss 
 
+    cc_loss, cc_metrics = self.color_corrector.loss()
 
-    return loss, losses
+    loss += cc_loss
+    metrics.update(cc_metrics)
+
+    return loss, metrics
 
 
 
-  def training_step(self, filename, camera_params, image_idx, image, timer):
+  def training_step(self, filename:str, camera_params:CameraParams, image_idx:int, image:torch.Tensor, timer:CudaTimer) -> dict:
 
     with timer:
       config = replace(self.config.raster_config, compute_split_heuristics=True, 
@@ -424,13 +510,17 @@ class Trainer:
                        blur_cov=self.blur_cov)  
       
       rendering = self.scene.render(camera_params, config, image_idx)
+      rendering = replace(rendering, image=self.color_corrector.correct(rendering, image_idx))
 
       loss, losses = self.losses(rendering, image)
+
       loss.backward()
 
     with torch.no_grad():
-      metrics =  self.controller.step(rendering, self.step)
-      self.scene.step(rendering, self.step)
+      metrics =  self.controller.step(rendering, self.t)
+      self.scene.step(rendering, self.t)
+      self.color_corrector.step(self.t)
+
       
     del loss
 

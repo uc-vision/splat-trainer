@@ -102,7 +102,7 @@ class ThresholdController(Controller):
 
 
 
-  def step(self, rendering:Rendering, step:int) -> Dict[str, float]: 
+  def step(self, rendering:Rendering, t:float) -> Dict[str, float]: 
     idx = rendering.points_in_view
 
     longest_side = max(*rendering.image_size)

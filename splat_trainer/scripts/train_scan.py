@@ -34,11 +34,15 @@ def cfg_from_args():
   training_group.add_argument("--target", type=int, default=None, help="Target point count")
   training_group.add_argument("--no_alpha", action="store_true", help="Fix point alpha=1.0 in training")
   training_group.add_argument("--steps", type=int, default=None, help="Number of training steps")
-
   
   training_group.add_argument("--add_points", type=int, default=None, help="Add random background points")
   training_group.add_argument("--limit_points", type=int, default=None, help="Limit the number of points from the dataset to N")
   training_group.add_argument("--random_points", type=int, default=None, help="Initialise with N random points only")
+
+  training_group.add_argument("--tcnn", action="store_true", help="Use tcnn scene")
+  training_group.add_argument("--sh", action="store_true", help="Use spherical harmonics scene")
+  training_group.add_argument("--bilateral", action="store_true", help="Use bilateral color correction")
+
 
   # Output group
   output_group = parser.add_argument_group("Output")
@@ -102,6 +106,14 @@ def cfg_from_args():
     overrides.append("trainer.load_dataset_cloud=false")
 
 
+  if args.tcnn:
+    overrides.append("scene=tcnn")
+
+  if args.sh:
+    overrides.append("scene=sh")
+
+  if args.bilateral:
+    overrides.append("color_corrector=bilateral")
 
   # Output group
   if args.wandb is not None:
