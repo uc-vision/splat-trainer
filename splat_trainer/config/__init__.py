@@ -18,6 +18,8 @@ class IsDataclass(Protocol):
 
 T = TypeVar('T')
 
+
+
 class Varying(Generic[T], metaclass=ABCMeta):
   @abstractmethod
   def __call__(self, t:float) -> T:
@@ -64,6 +66,20 @@ class Piecewise(Varying[T]):
 def clamp(x:float, min_val:float, max_val:float):
   return max(min_val, min(x, max_val))
 
+VaryingFloat = Varying[float] | float
+VaryingInt = Varying[int] | int
+
+
+def eval_varying(value, t:float) -> T:
+  if isinstance(value, dict):
+    return {k: eval_varying(v, t) for k, v in value.items()}
+  elif isinstance(value, list):
+    return [eval_varying(v, t) for v in value]
+  elif isinstance(value, Varying):
+    return value(t)
+  else:
+    return value
+
 
 class Between(Varying[T]):
   def __init__(self, t_start:float, t_end:float, varying:Varying[T]):
@@ -81,10 +97,20 @@ def resolve_varying(cfg:IsDataclass, t:float):
   return replace(cfg, **varying)
   
 @beartype
-def schedule_lr(v:Varying[float], t:float,  optimizer:Optimizer):
-  lr = v(t)
+def schedule_lr(v:Varying[float] | float, t:float,  optimizer:Optimizer):
+  lr = v(t) if isinstance(v, Varying) else v
+  
   for param_group in optimizer.param_groups:
     param_group['lr'] = lr
+
+@beartype
+def schedule_groups(groups:dict[str, VaryingFloat], t:float, optimizer:Optimizer):
+    for param_group in optimizer.param_groups:
+      if param_group['name'] in groups:
+        param_group['lr'] = groups[param_group['name']](t)
+
+
+
 
 
 def target(name:str, **kwargs):

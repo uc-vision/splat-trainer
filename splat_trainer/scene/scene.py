@@ -1,4 +1,5 @@
 from abc import ABCMeta, abstractmethod
+from typing import Tuple
 import torch
 
 from taichi_splatting import Gaussians3D, RasterConfig, Rendering
@@ -12,7 +13,11 @@ from splat_trainer.logger.logger import Logger
 
 class GaussianScene(metaclass=ABCMeta):  
   @abstractmethod
-  def step(self, visible:torch.Tensor, t:float):
+  def step(self, rendering:Rendering, t:float):
+    raise NotImplementedError
+  
+  @abstractmethod
+  def reg_loss(self, rendering:Rendering) -> Tuple[torch.Tensor, dict]:
     raise NotImplementedError
 
   @abstractmethod
@@ -23,9 +28,6 @@ class GaussianScene(metaclass=ABCMeta):
   def split_and_prune(self, keep_mask:torch.Tensor, split_idx:torch.Tensor):
     raise NotImplementedError
 
-  @abstractmethod
-  def update_learning_rate(self, lr_scale:float):
-    raise NotImplementedError
 
   @abstractmethod
   def write_to(self, output_dir:str):
@@ -35,16 +37,6 @@ class GaussianScene(metaclass=ABCMeta):
   def log(self, logger:Logger):
     raise NotImplementedError
   
-  @property
-  @abstractmethod
-  def scale(self) -> torch.Tensor:
-    raise NotImplementedError
-  
-  @property
-  @abstractmethod
-  def opacity(self) -> torch.Tensor:
-    raise NotImplementedError
-
 
   @property
   @abstractmethod

@@ -21,7 +21,7 @@ import torch.nn.functional as F
  
 from splat_trainer.controller.controller import Controller
 from splat_trainer.scene.scene import GaussianScene
-from splat_trainer.config import Varying
+from splat_trainer.config import Varying, VaryingFloat
 from splat_trainer.util.pointcloud import PointCloud
 from splat_trainer.util.lib_bilagrid import fit_affine_colors
 
@@ -81,20 +81,18 @@ class TrainConfig:
   l1_weight: float
   ssim_levels: int = 3
 
-  scale_reg: Varying[float]
-  opacity_reg: Varying[float]
-  aspect_reg: Varying[float]
-
   blur_cov: float
   antialias: bool = True
 
   save_checkpoints: bool = False
   save_output: bool = True
 
-  lr: Varying[float]
   raster_config: RasterConfig = RasterConfig()
   
-
+  scale_reg: VaryingFloat = 0.1
+  opacity_reg: VaryingFloat = 0.01
+  aspect_reg: VaryingFloat = 0.01
+  
 class Trainer:
   def __init__(self, config:TrainConfig,
                 scene:GaussianScene, 
@@ -122,9 +120,8 @@ class Trainer:
     self.render_timers = [CudaTimer() for _ in range(self.config.log_interval)]
 
     self.color_map = get_cv_colormap().to(self.device)
-    self.pbar = None
-
     self.ssim = partial(fused_ssim, padding="valid")
+    self.pbar = None
 
 
   @staticmethod
@@ -349,7 +346,7 @@ class Trainer:
     val = self.evaluate_dataset("val", self.dataset.val(), 
       log_count=self.config.num_logged_images, worst_count=self.config.log_worst_images)
     
-    val = self.evaluate_dataset("val_cc", self.dataset.val(), 
+    self.evaluate_dataset("val_cc", self.dataset.val(), 
       correct_image=evaluate_fit,
       log_count=self.config.num_logged_images, worst_count=self.config.log_worst_images)
     
@@ -404,19 +401,20 @@ class Trainer:
       return loss / levels
   
 
+
   def reg_loss(self, rendering:Rendering) -> Tuple[torch.Tensor, dict]:
-    # TODO: move this to Scene
     scale_term = rendering.scale / rendering.camera.focal_length[0]
     aspect = rendering.scale.max(-1).values / rendering.scale.min(-1).values
 
+    opacity = rendering.point_opacity
+
     regs = dict(
-      opacity_reg = (  self.scene.opacity.mean() * self.config.opacity_reg(self.t) ),
+      opacity_reg = ( opacity.mean() * self.config.opacity_reg(self.t) ),
       scale_reg = ( scale_term.mean() * self.config.scale_reg(self.t) ),
       aspect_reg = ( self.config.aspect_reg(self.t) * aspect.mean() )
     )
 
     return sum(regs.values()), {k:v.item() for k, v in regs.items()}
-
 
   def losses(self, rendering:Rendering, image:torch.Tensor):
     metrics = {}
@@ -490,15 +488,13 @@ class Trainer:
       if self.step % self.config.eval_steps == 0:
           eval_metrics = self.evaluate(self.config.save_checkpoints)
 
-          lr_scale = self.config.lr(self.t)
-          self.scene.update_learning_rate(lr_scale)
 
-          self.log_values("train", dict(lr_scale=lr_scale, blur_cov=self.blur_cov))
+          self.log_values("train", dict(blur_cov=self.blur_cov))
           torch.cuda.empty_cache()
 
       if self.step - next_densify > 0:
         self.controller.log_histograms(self.logger, self.step)
-        densify_metrics = self.controller.densify_and_prune(self.step, self.config.steps)
+        densify_metrics = self.controller.densify_and_prune(self.t)
 
         self.log_values("densify", densify_metrics)
         next_densify += self.config.densify_interval(self.t)

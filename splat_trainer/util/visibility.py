@@ -70,25 +70,24 @@ def random_points(info:ViewInfo, count:int) -> torch.Tensor:
     norm_points = torch.rand(count, 2, device=device)
     image_points = norm_points * info.image_sizes[camera_idx]
 
-    # depths = torch.rand((count, 1), device=device) * (depth_range[1] - depth_range[0]) + depth_range[0]
     depths = random_ndc(count, depth_range, device=device)
     ones = torch.ones((count, 1), device=device)
 
     homog = torch.cat([image_points * depths, depths, ones], dim=1)
-
     points_unproj = torch.bmm(world_t_image[camera_idx], homog.unsqueeze(2)).squeeze(-1)
-
     return points_unproj[..., :3] / points_unproj[..., 3:4]
 
 
 @beartype
-def random_cloud(info:ViewInfo, count:int) -> PointCloud:
+def random_cloud(info:ViewInfo, count:int, seed:int=0) -> PointCloud:
+
+  if seed is not None:
+    torch.manual_seed(seed)
 
   points = random_points(info, count)
   colors = torch.rand(count, 3, device=points.device)
   
   return PointCloud(points, colors, batch_size=(count,))
-
 
 
 @beartype
