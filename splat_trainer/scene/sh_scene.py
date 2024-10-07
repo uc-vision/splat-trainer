@@ -152,7 +152,7 @@ class SHScene(GaussianScene):
       points = self.points.tensors.select('position', 'rotation', 'log_scaling', 'alpha_logit', 'feature')
       return Gaussians3D.from_tensordict(points)
 
-  def render(self, camera_params:CameraParams, config:RasterConfig, cam_idx:torch.Tensor, 
+  def render(self, camera_params:CameraParams, config:RasterConfig, cam_idx:int, 
              **options) -> Rendering:
     
     

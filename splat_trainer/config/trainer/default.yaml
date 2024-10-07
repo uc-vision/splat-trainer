@@ -46,5 +46,8 @@ trainer:
   raster_config: 
     _target_: taichi_splatting.RasterConfig
 
+  disable_realtime_viewer: False
+  port: 8080
+
 
 
