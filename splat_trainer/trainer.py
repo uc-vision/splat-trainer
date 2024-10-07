@@ -522,7 +522,8 @@ class Trainer:
       if not self.config.disable_realtime_viewer:
         self.viewer.lock.release()
         num_train_steps_per_sec = 1.0 / (time.time() - tic)
-        num_train_rays_per_step = self.dataset.all_cameras[0].image.shape[0] * self.dataset.all_cameras[0].image.shape[1] * self.dataset.all_cameras[0].image.shape[2]
+        image = self.dataset.all_cameras[0].image
+        num_train_rays_per_step = image.shape[0] * image.shape[1] * image.shape[2]
         num_train_rays_per_sec = (
             num_train_rays_per_step * num_train_steps_per_sec
         )
