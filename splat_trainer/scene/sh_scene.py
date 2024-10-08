@@ -9,6 +9,7 @@ import torch
 import torch.nn.functional as F
 
 from splat_trainer.camera_table.camera_table import ViewTable
+from splat_trainer.config import eval_varyings
 from splat_trainer.logger.logger import Logger
 from splat_trainer.scene.io import write_gaussians
 from splat_trainer.scene.scene import GaussianSceneConfig, GaussianScene
@@ -83,12 +84,6 @@ class SHScene(GaussianScene):
     return f"SHScene({self.num_points} points)"
 
 
-  @beartype
-  def update_learning_rate(self, lr_scale:float):
-    if not self.config.use_depth_lr:
-      lr_scale *= self.config.scene_extents
-
-    self.points.set_learning_rate(position = self.learning_rates ['position'] * lr_scale)
 
 
   def sh_mask(self, t:float):
@@ -113,6 +108,17 @@ class SHScene(GaussianScene):
       F.normalize(self.points.rotation.detach(), dim=1), requires_grad=True)
 
     self.points.zero_grad()
+
+    lr = eval_varyings(self.config.learning_rates, t)
+    if not self.config.use_depth_lr:
+      lr['position'] *= self.scene_extents
+    
+    self.points.set_learning_rate(**lr)
+  
+    return {**lr}
+
+
+
 
   @beartype
   def split_and_prune(self, keep_mask:torch.Tensor, split_idx:torch.Tensor):

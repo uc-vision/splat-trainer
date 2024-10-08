@@ -9,7 +9,11 @@ import torch
 import torch.nn.functional as F
 
 from splat_trainer.camera_table.camera_table import ViewTable, camera_scene_extents
+<<<<<<< HEAD
 from splat_trainer.config import VaryingFloat,  eval_varyings
+=======
+from splat_trainer.config import Varying, VaryingFloat, eval_varying, eval_varyings
+>>>>>>> fix_varying
 from splat_trainer.logger.logger import Logger
 from splat_trainer.scene.color_model import ColorModel
 from splat_trainer.scene.io import write_gaussians
@@ -76,8 +80,6 @@ class TCNNConfig(GaussianSceneConfig):
     scene.color_model.load_state_dict(state['color_model'])
     scene.color_opt.load_state_dict(state['color_opt'])
 
-    
-
     return scene
 
 
@@ -102,7 +104,7 @@ class TCNNScene(GaussianScene):
     self.color_opt = self.color_model.optimizer(
       config.lr_nn, config.lr_image_feature)
     
-
+    self.scene_extents = camera_scene_extents(camera_table)
 
   @property
   def device(self):
@@ -120,7 +122,11 @@ class TCNNScene(GaussianScene):
   @beartype
   def step(self, rendering:Rendering, t:float) -> Dict[str, float]:
 
+<<<<<<< HEAD
     
+=======
+
+>>>>>>> fix_varying
     if self.config.use_depth_lr:
       update_depth(self.points, rendering, self.config.depth_ema)
 
@@ -137,7 +143,11 @@ class TCNNScene(GaussianScene):
 
     lr = eval_varyings(self.config.learning_rates, t)
     if not self.config.use_depth_lr:
+<<<<<<< HEAD
       lr['position'] *= camera_scene_extents(self.camera_table)
+=======
+      lr['position'] *= self.scene_extents
+>>>>>>> fix_varying
     
     self.points.set_learning_rate(**lr)
     self.color_model.schedule(self.color_opt, 
