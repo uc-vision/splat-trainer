@@ -169,7 +169,7 @@ class TargetController(Controller):
     near_points = rendering.point_depth.squeeze(1) < rendering.point_depth.quantile(0.5)
 
     # measure scale of near points in image
-    image_scale = rendering.scale.max(1).values / image_size
+    image_scale = rendering.point_scale.max(1).values / image_size
     image_scale[near_points] = 0.
 
     points.max_scale[idx] = torch.maximum(points.max_scale[idx], image_scale)

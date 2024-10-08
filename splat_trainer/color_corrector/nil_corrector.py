@@ -22,10 +22,8 @@ class NilCorrector(Corrector):
   def correct(self, rendering:Rendering, image_idx:int) -> Rendering:
     return rendering.image
 
-  def step(self, t:float):
-    pass
+  def step(self, t:float) -> Dict[str, float]:
+    return {} 
 
-  def loss(self) -> Tuple[torch.Tensor, Dict[str, float]]:
-    return torch.tensor(0.0, device=self.device), {}
 
   

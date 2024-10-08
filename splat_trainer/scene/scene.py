@@ -1,5 +1,5 @@
 from abc import ABCMeta, abstractmethod
-from typing import Tuple
+from typing import Dict, Tuple
 import torch
 
 from taichi_splatting import Gaussians3D, RasterConfig, Rendering
@@ -13,13 +13,9 @@ from splat_trainer.logger.logger import Logger
 
 class GaussianScene(metaclass=ABCMeta):  
   @abstractmethod
-  def step(self, rendering:Rendering, t:float):
+  def step(self, rendering:Rendering, t:float) -> Dict[str, float]:
     raise NotImplementedError
   
-  @abstractmethod
-  def reg_loss(self, rendering:Rendering) -> Tuple[torch.Tensor, dict]:
-    raise NotImplementedError
-
   @abstractmethod
   def render(self, camera_params:CameraParams, config:RasterConfig, cam_idx:torch.Tensor, **options) -> Rendering:
     raise NotImplementedError
@@ -28,10 +24,6 @@ class GaussianScene(metaclass=ABCMeta):
   def split_and_prune(self, keep_mask:torch.Tensor, split_idx:torch.Tensor):
     raise NotImplementedError
 
-
-  @abstractmethod
-  def write_to(self, output_dir:str):
-    raise NotImplementedError
   
   @abstractmethod
   def log(self, logger:Logger):
@@ -47,6 +39,10 @@ class GaussianScene(metaclass=ABCMeta):
   @abstractmethod
   def state_dict(self) -> dict:
     """ Return controller state for checkpointing """
+    raise NotImplementedError
+
+  @abstractmethod
+  def write_to(self, output_dir:str):
     raise NotImplementedError
 
 

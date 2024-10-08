@@ -87,8 +87,8 @@ class SHScene(GaussianScene):
   def update_learning_rate(self, lr_scale:float):
     if not self.config.use_depth_lr:
       lr_scale *= self.config.scene_extents
-    self.points.set_learning_rate(position = self.learning_rates ['position'] * lr_scale)
 
+    self.points.set_learning_rate(position = self.learning_rates ['position'] * lr_scale)
 
 
   def sh_mask(self, t:float):
