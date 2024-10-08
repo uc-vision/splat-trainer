@@ -1,6 +1,7 @@
 
-from dataclasses import  dataclass
+from dataclasses import  dataclass, replace
 from pathlib import Path
+from typing import Dict, Tuple
 from beartype import beartype
 from omegaconf import DictConfig, OmegaConf
 
@@ -8,6 +9,7 @@ import torch
 import torch.nn.functional as F
 
 from splat_trainer.camera_table.camera_table import ViewTable, camera_scene_extents
+from splat_trainer.config import Varying, VaryingFloat, eval_varying, eval_varyings
 from splat_trainer.logger.logger import Logger
 from splat_trainer.scene.color_model import ColorModel
 from splat_trainer.scene.io import write_gaussians
@@ -28,10 +30,10 @@ from splat_trainer.util.pointcloud import PointCloud
     
 @dataclass(kw_only=True, frozen=True)
 class TCNNConfig(GaussianSceneConfig):  
-  learning_rates : DictConfig
+  learning_rates : DictConfig | Dict
   
-  lr_image_feature:float= 0.001
-  lr_nn:float = 0.0001
+  lr_image_feature: VaryingFloat = 0.001
+  lr_nn:VaryingFloat = 0.0001
 
   image_features:int       = 8
   point_features:int       = 8
@@ -50,16 +52,19 @@ class TCNNConfig(GaussianSceneConfig):
 
 
   def from_color_gaussians(self, gaussians:Gaussians3D, 
-                           camera_table:ViewTable, device:torch.device):
+                           camera_table:ViewTable, 
+                           device:torch.device):
     
-    
-    feature = torch.zeros(gaussians.batch_size[0], self.point_features)
+    config = replace(self, learning_rates=OmegaConf.to_container(self.learning_rates))
+
+    feature = torch.zeros(gaussians.batch_size[0], config.point_features)
     torch.nn.init.normal_(feature, std=1.0)
 
     gaussians = gaussians.replace(feature=feature).to(device)
+    points = parameters_from_gaussians(gaussians, 
+          eval_varyings(config.learning_rates, 0.), betas=(config.beta1, config.beta2))
     
-    points = parameters_from_gaussians(gaussians, OmegaConf.to_container(self.learning_rates), betas=(self.beta1, self.beta2))
-    return TCNNScene(points, self, camera_table)
+    return TCNNScene(points, config, camera_table)
 
   
   def from_state_dict(self, state:dict, camera_table:ViewTable):
@@ -87,7 +92,6 @@ class TCNNScene(GaussianScene):
     self.points = points
 
     self.camera_table = camera_table
-    self.learning_rates = OmegaConf.to_container(config.learning_rates)
 
     size = camera_table.num_images if config.per_image else camera_table.num_cameras
 
@@ -98,7 +102,6 @@ class TCNNScene(GaussianScene):
     self.color_opt = self.color_model.optimizer(
       config.lr_nn, config.lr_image_feature)
     
-
 
 
   @property
@@ -112,20 +115,12 @@ class TCNNScene(GaussianScene):
   def __repr__(self):
     return f"TCNNScene({self.num_points} points)"
 
+
+
   @beartype
-  def update_learning_rate(self, lr_scale:float):
-    # scaled_lr = {k: v * lr_scale for k, v in self.learning_rates.items()}
-    # self.points.set_learning_rate(**scaled_lr)
-    if not self.config.use_depth_lr:
-      lr_scale *= camera_scene_extents(self.camera_table)
+  def step(self, rendering:Rendering, t:float) -> Dict[str, float]:
+
     
-    self.points.set_learning_rate(position = 
-              self.learning_rates['position'] * lr_scale)
-
-
-  @beartype
-  def step(self, rendering:Rendering, t:float):
-
     if self.config.use_depth_lr:
       update_depth(self.points, rendering, self.config.depth_ema)
 
@@ -136,18 +131,19 @@ class TCNNScene(GaussianScene):
       F.normalize(self.points.rotation.detach(), dim=1), requires_grad=True)
     
     
-
     self.points.zero_grad()
     self.color_opt.zero_grad()
 
 
-  @property
-  def scale(self):
-    return torch.exp(self.points.log_scaling)
-  
-  @property
-  def opacity(self):
-    return torch.sigmoid(self.points.alpha_logit)
+    lr = eval_varyings(self.config.learning_rates, t)
+    if not self.config.use_depth_lr:
+      lr['position'] *= camera_scene_extents(self.camera_table)
+    
+    self.points.set_learning_rate(**lr)
+    self.color_model.schedule(self.color_opt, 
+            self.config.lr_nn, self.config.lr_image_feature, t)
+    
+    return {**lr}
 
 
   def split_and_prune(self, keep_mask, split_idx):
@@ -204,8 +200,7 @@ class TCNNScene(GaussianScene):
 
     return render_projected(indexes, gaussians2d, features, depthvars, 
             camera_params, config, **options)
-      
+
+
     
-
-
 

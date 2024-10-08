@@ -5,6 +5,8 @@ import torch.nn.functional as F
 import torch.nn as nn
 from taichi_splatting.perspective import (CameraParams)
 
+from splat_trainer.config import Varying, VaryingFloat, eval_varying, schedule_groups, schedule_lr
+
 
 def positional_model(hidden:int, layers:int, num_features:int):
   import tinycudann as tcnn
@@ -92,12 +94,16 @@ class ColorModel(torch.nn.Module):
     feature = torch.cat([dir, point_features, cam_feature], dim=1)
     return self.color_model(feature).to(torch.float32)
   
-  def optimizer(self, lr_nn:float, lr_image_feature:float):
+  def optimizer(self, lr_nn:VaryingFloat, lr_image_features:VaryingFloat):
+    lr_nn = eval_varying(lr_nn, 0.)
+    lr_image_features = eval_varying(lr_image_features, 0.)
 
     param_groups = [
-      dict(params=self.color_model.parameters(), lr=lr_nn, name="color_model"),
-      dict(params=[self.image_features], lr=lr_image_feature, name="image_features")
+      dict(params=self.color_model.parameters(), lr=lr_nn, name="nn"),
+      dict(params=[self.image_features], lr=lr_image_features, name="image_features")
 
     ]
-
     return torch.optim.Adam(param_groups, betas=(0.9, 0.999))
+  
+  def schedule(self, optimizer, lr_nn: VaryingFloat, lr_image_features: VaryingFloat, t:float):
+    schedule_groups(dict(nn=lr_nn, image_features=lr_image_features), t, optimizer)

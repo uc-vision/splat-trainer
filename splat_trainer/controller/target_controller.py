@@ -19,7 +19,6 @@ from splat_trainer.scene import GaussianScene
 class PointStatistics:
   split_score : torch.Tensor  # (N, ) - averaged split score
   prune_cost : torch.Tensor  # (N, ) - max prune cost
-  
   max_scale : torch.Tensor # (N, ) - max scale
 
 
@@ -46,10 +45,11 @@ class TargetConfig(ControllerConfig):
   target_count:Optional[int] = None
 
   # base rate (relative to count) to prune points 
-  prune_rate:float = 0.2
+  prune_rate:float = 0.05
 
   # ema half life
-  alpha:float = 0.1
+  split_alpha:float = 0.1
+  prune_alpha:float = 0.01
 
   # maximum screen-space size for a floater point (otherwise pruned)
   max_scale:float = 0.25
@@ -123,28 +123,31 @@ class TargetController(Controller):
     both = (split_mask & prune_mask)
     return split_mask ^ both, prune_mask ^ both
 
-  def densify_and_prune(self, step:int, total_steps:int) -> Dict[str, float]:
+  def densify_and_prune(self, t:float) -> Dict[str, float]:
 
-    t = max(0, step / total_steps)
+    points = self.points
     split_mask, prune_mask = self.find_split_prune_indexes(t)
     split_idx = split_mask.nonzero().squeeze(1)
 
     n_prune = prune_mask.sum().item()
     n_split = split_idx.shape[0]
 
-    prune_thresh = self.points.prune_cost[prune_mask].max().item() if n_prune > 0 else 0.
-    split_thresh = self.points.split_score[split_idx].min().item() if n_split > 0 else 0.
+    self.prune_thresh = points.prune_cost[prune_mask].max().item() if n_prune > 0 else 0.
+    self.split_thresh = points.split_score[split_idx].min().item() if n_split > 0 else 0.
 
     keep_mask = ~(split_mask | prune_mask)
   # maximum scale for a point to not be pruned
     self.scene.split_and_prune(keep_mask, split_idx)
+
+
     self.points = PointStatistics.zeros(self.scene.num_points, device=self.scene.device)
+    # self.points.prune_cost[:keep_mask.sum().item()] = points.prune_cost[keep_mask]
 
     stats = dict(n=self.points.batch_size[0], 
             prune=n_prune,       
             split=n_split,
-            max_prune_score=prune_thresh, 
-            min_split_score=split_thresh)
+            max_prune_score=self.prune_thresh, 
+            min_split_score=self.split_thresh)
     
     return stats
 
@@ -155,20 +158,18 @@ class TargetController(Controller):
 
     points = self.points
 
-    # Some alternative update rules
+    # Some alternative update rule
 
-    # points.prune_cost[idx] = torch.maximum(points.prune_cost[idx]  * self.ema_alpha, prune_cost) 
-    # points.split_score[idx] = torch.maximum(points.split_score[idx] * self.ema_alpha, split_score)  
-
-    points.split_score[idx] = exp_lerp(self.config.alpha, split_score, points.split_score[idx])
-    points.prune_cost[idx] = torch.maximum(points.prune_cost[idx], prune_cost) 
-
+    points.split_score[idx] = exp_lerp(self.config.split_alpha, split_score, points.split_score[idx])
+    points.prune_cost[idx] = exp_lerp(self.config.prune_alpha, prune_cost, points.prune_cost[idx])
+    
+    # points.prune_cost[idx] = torch.maximum(points.prune_cost[idx], prune_cost) 
 
     image_size = max(rendering.camera.image_size)
     near_points = rendering.point_depth.squeeze(1) < rendering.point_depth.quantile(0.5)
 
     # measure scale of near points in image
-    image_scale = rendering.scale.max(1).values / image_size
+    image_scale = rendering.point_scale.max(1).values / image_size
     image_scale[near_points] = 0.
 
     points.max_scale[idx] = torch.maximum(points.max_scale[idx], image_scale)

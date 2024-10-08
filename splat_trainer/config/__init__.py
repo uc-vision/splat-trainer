@@ -1,18 +1,18 @@
 from abc import abstractmethod, ABCMeta
 
-from dataclasses import fields, replace
+from dataclasses import asdict, fields, replace
 import math
 from os import path
 from omegaconf import OmegaConf 
 
 from wonderwords import RandomWord
 from pathlib import Path
-from typing import Generic, Protocol, Tuple, TypeVar
+from typing import Generic, Mapping, Protocol, Sequence, Tuple, TypeVar, runtime_checkable
 from beartype import beartype
 
 from torch.optim import Optimizer
 
-
+@runtime_checkable
 class IsDataclass(Protocol):
     __dataclass_fields__: dict
 
@@ -64,6 +64,38 @@ class Piecewise(Varying[T]):
 def clamp(x:float, min_val:float, max_val:float):
   return max(min_val, min(x, max_val))
 
+VaryingFloat = Varying[float] | float
+VaryingInt = Varying[int] | int
+
+
+def eval_varyings(value, t:float):
+  if isinstance(value, IsDataclass):
+    return resolve_varying(value, t, deep=True)
+  if isinstance(value, Mapping):
+    return value.__class__(**{k: eval_varyings(v, t) for k, v in value.items()})
+  elif isinstance(value, Sequence):
+    return value.__class__(eval_varyings(v, t) for v in value)
+
+  elif isinstance(value, Varying):
+    return value(t)
+  else:
+    return value
+
+def resolve_varying(cfg:IsDataclass, t:float, deep:bool = False):
+  if deep:
+    varying = {field.name: eval_varyings(field.value, t) for field in fields(cfg) if isinstance(field.value, Varying)}
+    return cfg.__class__(**varying)
+  else:
+    varying = {field.name: field.update(t) for field in fields(cfg) if isinstance(field.value, Varying)}
+    return replace(cfg, **varying)
+  
+@beartype
+def eval_varying(value:Varying[T] | T, t:float) -> T:
+  if isinstance(value, Varying):
+    return value(t)
+  else:
+    return value  
+
 
 class Between(Varying[T]):
   def __init__(self, t_start:float, t_end:float, varying:Varying[T]):
@@ -76,15 +108,23 @@ class Between(Varying[T]):
     t = clamp(t, 0, 1)
     return self.varying(t)
 
-def resolve_varying(cfg:IsDataclass, t:float):
-  varying = {field.name: field.value(t) for field in fields(cfg) if isinstance(field.value, Varying)}
-  return replace(cfg, **varying)
+
   
 @beartype
-def schedule_lr(v:Varying[float], t:float,  optimizer:Optimizer):
-  lr = v(t)
+def schedule_lr(v:Varying[float] | float, t:float,  optimizer:Optimizer):
+  lr = v(t) if isinstance(v, Varying) else v
+  
   for param_group in optimizer.param_groups:
     param_group['lr'] = lr
+
+@beartype
+def schedule_groups(groups:dict[str, VaryingFloat], t:float, optimizer:Optimizer):
+    for param_group in optimizer.param_groups:
+      if param_group['name'] in groups:
+        param_group['lr'] = eval_varying(groups[param_group['name']], t)
+
+
+
 
 
 def target(name:str, **kwargs):
@@ -110,6 +150,10 @@ def add_resolvers():
 
     OmegaConf.register_new_resolver("log_linear", 
         lambda x, y: target('LogLinear', start=x, end=y))
+
+    OmegaConf.register_new_resolver("log_decay", 
+        lambda x, y: target('LogLinear', start=x, end=x * y))
+
     OmegaConf.register_new_resolver("piecewise", 
         lambda init,values: target('Piecewise', init=init, values=values))
     OmegaConf.register_new_resolver("between", 
