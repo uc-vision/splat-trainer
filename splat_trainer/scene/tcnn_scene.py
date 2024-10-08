@@ -9,7 +9,7 @@ import torch
 import torch.nn.functional as F
 
 from splat_trainer.camera_table.camera_table import ViewTable, camera_scene_extents
-from splat_trainer.config import Varying, VaryingFloat, eval_varying, eval_varyings
+from splat_trainer.config import VaryingFloat,  eval_varyings
 from splat_trainer.logger.logger import Logger
 from splat_trainer.scene.color_model import ColorModel
 from splat_trainer.scene.io import write_gaussians
