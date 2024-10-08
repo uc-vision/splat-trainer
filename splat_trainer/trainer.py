@@ -3,9 +3,8 @@ from functools import partial
 import heapq
 import json
 import math
-from numbers import Number
 from pathlib import Path
-from typing import Callable, Tuple, TypeVar
+from typing import Callable, Tuple
 
 from tqdm import tqdm 
 from termcolor import colored
@@ -17,11 +16,10 @@ import torch
 
 from fused_ssim import fused_ssim
 import torch.nn.functional as F
-# import torchmetrics.image as torchmetrics
  
 from splat_trainer.controller.controller import Controller
 from splat_trainer.scene.scene import GaussianScene
-from splat_trainer.config import Varying, VaryingFloat, VaryingInt, eval_varying, resolve_varying
+from splat_trainer.config import VaryingFloat, VaryingInt, eval_varying
 from splat_trainer.util.pointcloud import PointCloud
 from splat_trainer.util.lib_bilagrid import fit_affine_colors
 
