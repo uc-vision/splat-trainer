@@ -76,6 +76,8 @@ class TCNNConfig(GaussianSceneConfig):
     scene.color_model.load_state_dict(state['color_model'])
     scene.color_opt.load_state_dict(state['color_opt'])
 
+    
+
     return scene
 
 
