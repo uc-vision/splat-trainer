@@ -1,7 +1,8 @@
 
-from dataclasses import  dataclass
+from dataclasses import  dataclass, replace
 import math
 from pathlib import Path
+from typing import Dict
 from beartype import beartype
 from omegaconf import DictConfig, OmegaConf
 
@@ -23,10 +24,11 @@ from taichi_splatting.perspective import CameraParams
 from taichi_splatting.optim.sparse_adam import SparseAdam
 
 
-
+@beartype
 @dataclass(kw_only=True, frozen=True)
 class SHConfig(GaussianSceneConfig):  
-  learning_rates : DictConfig
+  learning_rates : DictConfig | Dict
+
   sh_ratio:float      = 20.0
   sh_degree:int       = 3
 
@@ -42,12 +44,13 @@ class SHConfig(GaussianSceneConfig):
 
 
   def from_color_gaussians(self, gaussians:Gaussians3D, camera_table:ViewTable, device:torch.device):
+
     sh_feature = torch.zeros(gaussians.batch_size[0], 3, (self.sh_degree + 1)**2)
     sh_feature[:, :, 0] = rgb_to_sh(gaussians.feature)
 
     gaussians = gaussians.replace(feature=sh_feature).to(device)
 
-    points = parameters_from_gaussians(gaussians, OmegaConf.to_container(self.learning_rates), betas=(self.beta1, self.beta2))
+    points = parameters_from_gaussians(gaussians, self.learning_rates, betas=(self.beta1, self.beta2))
     return SHScene(points, self, camera_table)
 
   
@@ -69,7 +72,7 @@ class SHScene(GaussianScene):
     self.points = points
 
     self.camera_table = camera_table
-    self.learning_rates = OmegaConf.to_container(config.learning_rates)
+
         
     
   @property
@@ -96,12 +99,22 @@ class SHScene(GaussianScene):
 
     return mask
 
+  def update_learning_rate(self, t:float):
+    lr = eval_varyings(self.config.learning_rates, t)
+    if not self.config.use_depth_lr:
+      lr['position'] *= self.scene_extents
+    
+    self.points.set_learning_rate(**lr)
+    self.points.update_group('feature', mask_lr=self.sh_mask(t))
+
+    return lr
+
+
   @beartype
   def step(self, rendering:Rendering, t:float):
-    self.points.update_group('feature', mask_lr=self.sh_mask(t))
+    lr = self.update_learning_rate(t)
+
     update_depth(self.points, rendering, self.config.depth_ema)
-
-
     self.points.step(visible_indexes=rendering.visible_indices)
 
     self.points.rotation = torch.nn.Parameter(
@@ -109,15 +122,7 @@ class SHScene(GaussianScene):
 
     self.points.zero_grad()
 
-    lr = eval_varyings(self.config.learning_rates, t)
-    if not self.config.use_depth_lr:
-      lr['position'] *= self.scene_extents
-    
-    self.points.set_learning_rate(**lr)
-  
     return {**lr}
-
-
 
 
   @beartype
@@ -139,15 +144,6 @@ class SHScene(GaussianScene):
     for k, v in dict(log_scaling=self.points.log_scaling, alpha_logit=self.points.alpha_logit).items():
       logger.log_histogram(f"points/{k}", v.detach(), step=step)
 
-
-
-  @property
-  def scale(self):
-    return torch.exp(self.points.log_scaling)
-  
-  @property
-  def opacity(self):
-    return torch.sigmoid(self.points.alpha_logit)
 
 
   def state_dict(self):
