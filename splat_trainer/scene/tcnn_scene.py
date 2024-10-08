@@ -102,7 +102,6 @@ class TCNNScene(GaussianScene):
     
     self.scene_extents = camera_scene_extents(camera_table)
 
-
   @property
   def device(self):
     return self.points.position.device
@@ -119,7 +118,11 @@ class TCNNScene(GaussianScene):
   @beartype
   def step(self, rendering:Rendering, t:float) -> Dict[str, float]:
 
+<<<<<<< HEAD
 
+=======
+    
+>>>>>>> 9a2250cd338e988b0df8c643b24a35135bc1bc9f
     if self.config.use_depth_lr:
       update_depth(self.points, rendering, self.config.depth_ema)
 
@@ -136,7 +139,11 @@ class TCNNScene(GaussianScene):
 
     lr = eval_varyings(self.config.learning_rates, t)
     if not self.config.use_depth_lr:
+<<<<<<< HEAD
       lr['position'] *= self.scene_extents
+=======
+      lr['position'] *= camera_scene_extents(self.camera_table)
+>>>>>>> 9a2250cd338e988b0df8c643b24a35135bc1bc9f
     
     self.points.set_learning_rate(**lr)
     self.color_model.schedule(self.color_opt, 

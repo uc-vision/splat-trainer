@@ -3,9 +3,8 @@ from functools import partial
 import heapq
 import json
 import math
-from numbers import Number
 from pathlib import Path
-from typing import Callable, Tuple, TypeVar
+from typing import Callable, Tuple
 
 from tqdm import tqdm 
 from termcolor import colored
@@ -17,11 +16,10 @@ import torch
 
 from fused_ssim import fused_ssim
 import torch.nn.functional as F
-# import torchmetrics.image as torchmetrics
  
 from splat_trainer.controller.controller import Controller
 from splat_trainer.scene.scene import GaussianScene
-from splat_trainer.config import Varying
+from splat_trainer.config import VaryingFloat, VaryingInt, eval_varying
 from splat_trainer.util.pointcloud import PointCloud
 from splat_trainer.util.lib_bilagrid import fit_affine_colors
 
@@ -42,13 +40,12 @@ from splat_trainer.util.containers import transpose_rows
 from splat_trainer.util.misc import CudaTimer, next_multiple, strided_indexes
 
 from splat_trainer.controller import ControllerConfig
-from splat_trainer.scheduler import Scheduler, Uniform
 from splat_trainer.color_corrector import CorrectorConfig, Corrector
 
 
 
 @beartype
-@dataclass(kw_only=True)
+@dataclass(kw_only=True, frozen=True)
 class TrainConfig:
   device: str
 
@@ -75,15 +72,17 @@ class TrainConfig:
   num_logged_images: int = 8
   log_worst_images: int  = 2
 
-  densify_interval: Varying[int]
+  densify_interval: VaryingInt = 100
 
   ssim_weight: float
   l1_weight: float
-  ssim_levels: int = 3
+  ssim_levels: int = 4
 
-  scale_reg: Varying[float]
-  opacity_reg: Varying[float]
-  aspect_reg: Varying[float]
+  raster_config: RasterConfig = RasterConfig()
+  
+  scale_reg: VaryingFloat = 0.1
+  opacity_reg: VaryingFloat = 0.01
+  aspect_reg: VaryingFloat = 0.01
 
   blur_cov: float
   antialias: bool = True
@@ -91,10 +90,8 @@ class TrainConfig:
   save_checkpoints: bool = False
   save_output: bool = True
 
-  lr: Varying[float]
-  raster_config: RasterConfig = RasterConfig()
   
-
+  
 class Trainer:
   def __init__(self, config:TrainConfig,
                 scene:GaussianScene, 
@@ -115,6 +112,7 @@ class Trainer:
     self.camera_info = dataset.view_info().to(self.device)
 
     self.config = config
+
     self.logger = logger
     self.step = step
 
@@ -122,9 +120,8 @@ class Trainer:
     self.render_timers = [CudaTimer() for _ in range(self.config.log_interval)]
 
     self.color_map = get_cv_colormap().to(self.device)
-    self.pbar = None
-
     self.ssim = partial(fused_ssim, padding="valid")
+    self.pbar = None
 
 
   @staticmethod
@@ -204,6 +201,15 @@ class Trainer:
     return Path.cwd() 
 
   def write_checkpoint(self):
+    iteration_path = self.output_path / f"point_cloud/iteration_{self.step}"
+    iteration_path.mkdir(parents=True, exist_ok=True)
+
+    self.scene.write_to(iteration_path)
+    
+    camera_json = self.dataset.camera_json(self.camera_table)
+    with open(iteration_path / "cameras.json", "w") as f:
+      json.dump(camera_json, f)
+
     path = self.output_path / "checkpoint" / f"checkpoint_{self.step}.pt"
     path.parent.mkdir(parents=True, exist_ok=True)
     checkpoint = self.state_dict()
@@ -303,7 +309,7 @@ class Trainer:
 
       l1 = torch.nn.functional.l1_loss(image, source_image)
 
-      radius_hist = radius_hist.append(rendering.radii.log() / math.log(10.0), trim=False)
+      radius_hist = radius_hist.append(rendering.point_radii.log() / math.log(10.0), trim=False)
       image_id = filename.replace("/", "_")
 
       if i in log_indexes:
@@ -336,36 +342,29 @@ class Trainer:
     return {f"{name}_psnr": float(mean_psnr)}
 
 
-  def evaluate(self, write_outputs=False):
+  def evaluate_trained(self, rendering, source_image, image_idx):
+    return self.color_corrector.correct(rendering, image_idx)
+  
+  def evaluate_fit(self, rendering, source_image):
+    return fit_affine_colors(rendering.image, source_image)
 
-    evaluate_trained = lambda rendering, _, image_idx: self.color_corrector.correct(rendering, image_idx)
-    evaluate_fit = lambda rendering, source_image: fit_affine_colors(rendering.image, source_image)
+
+  def evaluate(self):
 
     train = self.evaluate_dataset("train", self.dataset.train(shuffle=False), 
-        correct_image=evaluate_trained,
+        correct_image=self.evaluate_trained,
         log_count=self.config.num_logged_images, 
         worst_count=self.config.log_worst_images)
     
     val = self.evaluate_dataset("val", self.dataset.val(), 
       log_count=self.config.num_logged_images, worst_count=self.config.log_worst_images)
     
-    val = self.evaluate_dataset("val_cc", self.dataset.val(), 
-      correct_image=evaluate_fit,
+    self.evaluate_dataset("val_cc", self.dataset.val(), 
+      correct_image=self.evaluate_fit,
       log_count=self.config.num_logged_images, worst_count=self.config.log_worst_images)
-    
-
-    if write_outputs:
-      iteration_path = self.output_path / f"point_cloud/iteration_{self.step}"
-      iteration_path.mkdir(parents=True, exist_ok=True)
-
-      self.scene.write_to(iteration_path)
-      self.write_checkpoint()
-      
-      camera_json = self.dataset.camera_json(self.camera_table)
-      with open(iteration_path / "cameras.json", "w") as f:
-        json.dump(camera_json, f)
 
     self.scene.log(self.logger, self.step)
+
 
     return {**train, **val}
   
@@ -404,19 +403,19 @@ class Trainer:
       return loss / levels
   
 
+
   def reg_loss(self, rendering:Rendering) -> Tuple[torch.Tensor, dict]:
-    # TODO: move this to Scene
-    scale_term = rendering.scale / rendering.camera.focal_length[0]
-    aspect = rendering.scale.max(-1).values / rendering.scale.min(-1).values
+    scale_term = (rendering.point_scale / rendering.camera.focal_length[0])
+    aspect_term = (rendering.point_scale.max(-1).values / rendering.point_scale.min(-1).values)
+    opacity_term = rendering.point_opacity
 
     regs = dict(
-      opacity_reg = (  self.scene.opacity.mean() * self.config.opacity_reg(self.t) ),
-      scale_reg = ( scale_term.mean() * self.config.scale_reg(self.t) ),
-      aspect_reg = ( self.config.aspect_reg(self.t) * aspect.mean() )
+      opacity_reg   =  opacity_term.mean() * eval_varying(self.config.opacity_reg, self.t),  
+      scale_reg     =  scale_term.mean() * eval_varying(self.config.scale_reg, self.t),
+      aspect_reg    =  aspect_term.mean() * eval_varying(self.config.aspect_reg, self.t),
     )
 
     return sum(regs.values()), {k:v.item() for k, v in regs.items()}
-
 
   def losses(self, rendering:Rendering, image:torch.Tensor):
     metrics = {}
@@ -439,11 +438,6 @@ class Trainer:
     metrics["reg"] = reg_loss.item()
     loss += reg_loss 
 
-    cc_loss, cc_metrics = self.color_corrector.loss()
-
-    loss += cc_loss
-    metrics.update(cc_metrics)
-
     return loss, metrics
 
 
@@ -458,19 +452,19 @@ class Trainer:
       rendering = replace(rendering, image=self.color_corrector.correct(rendering, image_idx))
 
       loss, losses = self.losses(rendering, image)
-
       loss.backward()
+
+      metrics_scene = self.scene.step(rendering, self.t)
+      metrics_cc = self.color_corrector.step(self.t)
+
 
     with torch.no_grad():
       metrics =  self.controller.step(rendering, self.t)
-      self.scene.step(rendering, self.t)
-      self.color_corrector.step(self.t)
 
-      
     del loss
 
     self.step += 1
-    return dict(**losses, **metrics)
+    return dict(**losses, **metrics, **metrics_scene, **metrics_cc)
 
   
   def train(self):
@@ -488,20 +482,22 @@ class Trainer:
     while self.step < self.config.steps:
 
       if self.step % self.config.eval_steps == 0:
-          eval_metrics = self.evaluate(self.config.save_checkpoints)
+          eval_metrics = self.evaluate()
+          if self.config.save_checkpoints and self.config.save_output:
+            self.write_checkpoint()
 
-          lr_scale = self.config.lr(self.t)
-          self.scene.update_learning_rate(lr_scale)
 
-          self.log_values("train", dict(lr_scale=lr_scale, blur_cov=self.blur_cov))
+          self.log_values("train", dict(blur_cov=self.blur_cov))
           torch.cuda.empty_cache()
 
       if self.step - next_densify > 0:
         self.controller.log_histograms(self.logger, self.step)
-        densify_metrics = self.controller.densify_and_prune(self.step, self.config.steps)
+
+        torch.cuda.empty_cache()
+        densify_metrics = self.controller.densify_and_prune(self.t)
 
         self.log_values("densify", densify_metrics)
-        next_densify += self.config.densify_interval(self.t)
+        next_densify += eval_varying(self.config.densify_interval, self.t)
       
 
       with torch.enable_grad():
@@ -532,7 +528,9 @@ class Trainer:
                   render=sum([timer.ellapsed() for timer in self.render_timers]) / self.config.log_interval
                 ))
 
-    eval_metrics = self.evaluate(self.config.save_output)
+    eval_metrics = self.evaluate()
+    if self.config.save_output:
+      self.write_checkpoint()
 
     self.pbar.set_postfix(**metrics, **eval_metrics)        
     self.pbar.close()

@@ -87,7 +87,7 @@ class ThresholdController(Controller):
       return keep_mask, split_idx, counts     
 
 
-  def densify_and_prune(self, step:int, total_steps:int) -> Dict[str, float]:
+  def densify_and_prune(self, t:float) -> Dict[str, float]:
 
     keep_mask, split_idx, counts = self.find_split_prune_indexes()
 

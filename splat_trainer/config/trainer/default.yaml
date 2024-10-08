@@ -6,8 +6,6 @@ trainer:
 
   device: "cuda:0"
 
-  lr: ${log_linear:1.0,0.1}
-
   steps : 20000
   eval_steps: 2000
 
@@ -29,10 +27,9 @@ trainer:
   l1_weight: 1.0
   ssim_levels: 4
 
-  scale_reg: ${constant:0.1}
+  scale_reg: 0.1
   opacity_reg: ${log_linear:1.0,0.01}
-
-  aspect_reg: ${constant:0.01}
+  aspect_reg: 0.01
 
   blur_cov: 0.3 # only used if antialias is false
   antialias: False
