@@ -128,7 +128,7 @@ class TCNNScene(GaussianScene):
   @beartype
   def step(self, rendering:Rendering, t:float) -> Dict[str, float]:
     lr = self.update_learning_rate(t)
-
+  
     if self.config.use_depth_lr:
       update_depth(self.points, rendering, self.config.depth_ema)
 
@@ -141,7 +141,6 @@ class TCNNScene(GaussianScene):
     
     self.points.zero_grad()
     self.color_opt.zero_grad()
-
     
     return {**lr}
 
