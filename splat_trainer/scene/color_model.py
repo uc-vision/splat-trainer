@@ -53,8 +53,6 @@ class EnvironmentModel(torch.nn.Module):
     # Initialize image features with small standard deviation
     nn.init.normal_(self.image_features.weight, std=1.0)
 
-  def forward(self, feature:torch.Tensor):
-    return self.model(feature).to(torch.float32).sigmoid()
   
 
   def forward(self, dir:torch.Tensor, cam_idx:int):
