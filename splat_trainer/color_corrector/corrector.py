@@ -19,11 +19,8 @@ class Corrector(metaclass=ABCMeta):
     raise NotImplementedError
 
   @abstractmethod
-  def step(self, t:float):
+  def step(self, t:float) -> Dict[str, float]:
+    """ perform one step of optimization, returns dict of metrics to log """
     raise NotImplementedError
   
-  @abstractmethod
-  def loss(self) -> Tuple[torch.Tensor, Dict[str, float]]:
-    """ returns loss, dict of metrics to log"""
-    raise NotImplementedError
 

@@ -40,8 +40,11 @@ def parameters_from_gaussians(gaussians:Gaussians3D, learning_rates:Dict[str, fl
     points_dict:TensorDict = gaussians.to_tensordict().update(dict(
       running_depth = torch.zeros(gaussians.batch_size[0], device=gaussians.position.device)))
   
-    parameter_groups = {k:dict(lr=lr) for k, lr in learning_rates.items()}
+    # parameter_groups = {k:dict(lr=lr, type='position' if k == 'position' else 'adam') 
+    #                     for k, lr in learning_rates.items()}
 
+    parameter_groups = {k:dict(lr=lr) for k, lr in learning_rates.items()}
+    
     return ParameterClass(points_dict, 
           parameter_groups=parameter_groups, 
           optimizer=SparseAdam,

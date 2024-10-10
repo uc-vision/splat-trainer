@@ -10,5 +10,6 @@ trainer:
     prune_rate: 0.05
 
     # min visbility to be considered for splitting/pruning
-    alpha: 0.1
+    split_alpha: 0.1
+    prune_alpha: 0.01
   
