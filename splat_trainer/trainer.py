@@ -13,10 +13,8 @@ from termcolor import colored
 
 from beartype import beartype
 from beartype.typing import Optional
-import nerfview
 import numpy as np
 import torch
-import viser
 
 from fused_ssim import fused_ssim
 import torch.nn.functional as F
@@ -47,6 +45,7 @@ from splat_trainer.util.misc import CudaTimer, next_multiple, strided_indexes
 from splat_trainer.controller import ControllerConfig
 from splat_trainer.scheduler import Scheduler, Uniform
 from splat_trainer.color_corrector import CorrectorConfig, Corrector
+from splat_trainer.viewer import Viewer
 
 
 
@@ -132,13 +131,7 @@ class Trainer:
 
     self.ssim = partial(fused_ssim, padding="valid")
 
-    if not self.config.disable_realtime_viewer:
-      self.server = viser.ViserServer(port=self.config.port, verbose=False)
-      self.viewer = nerfview.Viewer(
-        server=self.server,
-        render_fn=self._viewer_render_fn,
-        mode="training",
-      )
+    self.viewer = Viewer(config, dataset, scene)
 
 
   @staticmethod
@@ -508,11 +501,7 @@ class Trainer:
         self.log_values("densify", densify_metrics)
         next_densify += self.config.densify_interval(self.t)
 
-      if not self.config.disable_realtime_viewer:
-        while self.viewer.state.status == "paused":
-          time.sleep(0.01)
-        self.viewer.lock.acquire()
-        tic = time.time()
+      self.viewer.aquire_lock()
 
       if self.step % self.config.eval_steps == 0:
           eval_metrics = self.evaluate(self.config.save_checkpoints)
@@ -530,16 +519,8 @@ class Trainer:
 
       torch.cuda.empty_cache()
 
-      if not self.config.disable_realtime_viewer:
-        self.viewer.lock.release()
-        num_train_steps_per_sec = 1.0 / (time.time() - tic)
-        image = self.dataset.all_cameras[0].image
-        num_train_rays_per_step = image.shape[0] * image.shape[1] * image.shape[2]
-        num_train_rays_per_sec = (
-            num_train_rays_per_step * num_train_steps_per_sec
-        )
-        self.viewer.state.num_train_rays_per_sec = num_train_rays_per_sec
-        self.viewer.update(self.step, num_train_rays_per_step)
+      self.viewer.release_lock()
+      self.viewer.update(self.step)
 
       if self.step % self.config.log_interval  == 0:
         steps = transpose_rows(steps)
@@ -574,25 +555,6 @@ class Trainer:
   def close(self):
     if self.pbar is not None:
       self.pbar.close()
-
-  def _viewer_render_fn(self, camera_state: nerfview.CameraState, img_wh: Tuple[int, int]):
-    W, H = img_wh
-    c2w = camera_state.c2w
-    K = camera_state.get_K(img_wh)
-    c2w = torch.from_numpy(c2w).float().to(self.device)
-    K = torch.from_numpy(K).float().to(self.device)
-    projection = torch.tensor([K[0,0], K[1,1], K[0,2], K[1,2]], device=self.device)
-    near, far = self.dataset.depth_range()
-    camera_params = CameraParams(projection=projection,
-                                  T_camera_world=c2w,
-                                  near_plane=near,
-                                  far_plane=far,
-                                  image_size=img_wh)
-    config = replace(self.config.raster_config, compute_split_heuristics=True, 
-                    antialias=self.config.antialias,
-                    blur_cov=self.blur_cov)
-    rendering = self.scene.render(camera_params, config, 0)
-    return rendering.image.detach().cpu().numpy()
 
 
 def compute_psnr(a, b):
