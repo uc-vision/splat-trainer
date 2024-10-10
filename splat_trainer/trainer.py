@@ -133,7 +133,7 @@ class Trainer:
     self.ssim = partial(fused_ssim, padding="valid")
 
     if not self.config.disable_realtime_viewer:
-      self.server = viser.ViserServer(port=config.port, verbose=False)
+      self.server = viser.ViserServer(port=self.config.port, verbose=False)
       self.viewer = nerfview.Viewer(
         server=self.server,
         render_fn=self._viewer_render_fn,
@@ -501,6 +501,19 @@ class Trainer:
 
     while self.step < self.config.steps:
 
+      if self.step - next_densify > 0:
+        self.controller.log_histograms(self.logger, self.step)
+        densify_metrics = self.controller.densify_and_prune(self.step, self.config.steps)
+
+        self.log_values("densify", densify_metrics)
+        next_densify += self.config.densify_interval(self.t)
+
+      if not self.config.disable_realtime_viewer:
+        while self.viewer.state.status == "paused":
+          time.sleep(0.01)
+        self.viewer.lock.acquire()
+        tic = time.time()
+
       if self.step % self.config.eval_steps == 0:
           eval_metrics = self.evaluate(self.config.save_checkpoints)
 
@@ -509,19 +522,6 @@ class Trainer:
 
           self.log_values("train", dict(lr_scale=lr_scale, blur_cov=self.blur_cov))
           torch.cuda.empty_cache()
-
-      if self.step - next_densify > 0:
-        self.controller.log_histograms(self.logger, self.step)
-        densify_metrics = self.controller.densify_and_prune(self.step, self.config.steps)
-
-        self.log_values("densify", densify_metrics)
-        next_densify += self.config.densify_interval(self.t)
-      
-      if not self.config.disable_realtime_viewer:
-        while self.viewer.state.status == "paused":
-          time.sleep(0.01)
-        self.viewer.lock.acquire()
-        tic = time.time()
 
       with torch.enable_grad():
         with step_timer:
@@ -538,9 +538,7 @@ class Trainer:
         num_train_rays_per_sec = (
             num_train_rays_per_step * num_train_steps_per_sec
         )
-        # Update the viewer state.
         self.viewer.state.num_train_rays_per_sec = num_train_rays_per_sec
-        # Update the scene.
         self.viewer.update(self.step, num_train_rays_per_step)
 
       if self.step % self.config.log_interval  == 0:
@@ -564,7 +562,6 @@ class Trainer:
                   render=sum([timer.ellapsed() for timer in self.render_timers]) / self.config.log_interval
                 ))
 
-    self.viewer.complete()
 
     eval_metrics = self.evaluate(self.config.save_output)
 
