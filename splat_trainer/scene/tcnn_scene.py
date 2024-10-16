@@ -38,12 +38,14 @@ class TCNNConfig(GaussianSceneConfig):
   image_features:int       = 8
   point_features:int       = 8
 
-  hidden:int             = 32
+  affine_color_model:bool  = False
+  hidden_features:int      = 32
+
   layers:int             = 2
 
   per_image:bool = True
 
-  depth_ema:float = 0.95
+  depth_ema:float = 0.99
   use_depth_lr:bool = True
 
   beta1:float = 0.9
@@ -91,11 +93,15 @@ class TCNNScene(GaussianScene):
 
     self.camera_table = camera_table
 
-    size = camera_table.num_images if config.per_image else camera_table.num_cameras
+    num_glo_embeddings = camera_table.num_images if config.per_image else camera_table.num_cameras
 
     self.color_model = ColorModel(
-      size, config.image_features, 
-      config.point_features, config.hidden, config.layers).to(self.device)
+      num_glo_embeddings, 
+      glo_features=config.image_features, 
+      point_features=config.point_features, 
+      hidden_features=config.hidden_features, 
+      layers=config.layers,
+      affine_model=config.affine_color_model).to(self.device)
     
     self.color_opt = self.color_model.optimizer(
       config.lr_nn, config.lr_image_feature)

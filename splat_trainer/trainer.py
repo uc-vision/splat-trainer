@@ -129,7 +129,7 @@ class Trainer:
     device = torch.device(config.device)
     camera_info = dataset.view_info().to(device)
 
-    dataset_cloud = dataset.pointcloud() if config.load_dataset_cloud else None
+    dataset_cloud:Optional[PointCloud] = dataset.pointcloud() if config.load_dataset_cloud else None
     points = None
 
     if dataset_cloud is not None:
@@ -152,7 +152,7 @@ class Trainer:
     
       if points is not None:
         print(f"Adding {random_points.batch_size[0]} random points")
-        points = points.concat(random_points)
+        points = torch.cat([points, random_points], dim=0)
       else:
         print(f"Using {random_points.batch_size[0]} random points")
         points = random_points

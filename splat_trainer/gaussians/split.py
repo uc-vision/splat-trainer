@@ -11,6 +11,8 @@ import torch.nn.functional as F
 import roma
     
 
+    
+
 def point_basis(points:TensorDict):
   scale = torch.exp(points['log_scaling'])
 

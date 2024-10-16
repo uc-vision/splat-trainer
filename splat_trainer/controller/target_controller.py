@@ -52,7 +52,7 @@ class TargetConfig(ControllerConfig):
   prune_alpha:float = 0.01
 
   # maximum screen-space size for a floater point (otherwise pruned)
-  max_scale:float = 0.25
+  max_scale:float = 0.5
 
 
 

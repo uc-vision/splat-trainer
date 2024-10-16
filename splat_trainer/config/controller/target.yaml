@@ -12,4 +12,7 @@ trainer:
     # min visbility to be considered for splitting/pruning
     split_alpha: 0.1
     prune_alpha: 0.01
+
+    # threshold (of screen width) for pruning large points
+    max_scale: 0.25
   
