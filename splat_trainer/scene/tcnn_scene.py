@@ -45,7 +45,7 @@ class TCNNConfig(GaussianSceneConfig):
 
   per_image:bool = True
 
-  depth_ema:float = 0.99
+  depth_ema:float = 0.95
   use_depth_lr:bool = True
 
   beta1:float = 0.9

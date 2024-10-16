@@ -13,8 +13,8 @@ trainer:
   save_output: True
 
   # Initialisation from a point cloud
-  num_neighbors: 3
-  initial_alpha: 0.2
+  num_neighbors: 5
+  initial_alpha: 0.5
   initial_point_scale: 0.2
 
   initial_points: 50000

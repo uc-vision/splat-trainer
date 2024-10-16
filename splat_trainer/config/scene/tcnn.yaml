@@ -23,7 +23,7 @@ trainer:
     hidden_features: 64
     affine_color_model: False
 
-    layers: 2
+    layers: 3
 
     # Per image features (as opposed to per-camera features)
     per_image: True
