@@ -18,6 +18,9 @@ def split_stride(images, stride=0):
   return train_cameras, val_cameras
 
 
+def next_multiple(x, multiple):
+  return x + multiple - x % multiple
+
 
 def sigmoid(x):
   return 1 / (1 + np.exp(-x))
@@ -46,7 +49,7 @@ def inv_lerp(t, a, b):
 
 @torch.compile
 def exp_lerp(t, a, b):
-    max_ab = torch.max(a, b)
+    max_ab = torch.maximum(a, b)
     return max_ab + torch.log(torch.lerp(torch.exp(a - max_ab), torch.exp(b - max_ab), t))
 
 @torch.compile

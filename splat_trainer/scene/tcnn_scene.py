@@ -1,13 +1,15 @@
 
-from dataclasses import  dataclass
+from dataclasses import  dataclass, replace
 from pathlib import Path
+from typing import Dict, Tuple
 from beartype import beartype
 from omegaconf import DictConfig, OmegaConf
 
 import torch
 import torch.nn.functional as F
 
-from splat_trainer.camera_table.camera_table import CameraTable, camera_extents
+from splat_trainer.camera_table.camera_table import ViewTable, camera_scene_extents
+from splat_trainer.config import VaryingFloat,  eval_varyings
 from splat_trainer.logger.logger import Logger
 from splat_trainer.scene.color_model import ColorModel
 from splat_trainer.scene.io import write_gaussians
@@ -15,7 +17,7 @@ from splat_trainer.scene.scene import GaussianSceneConfig, GaussianScene
 from splat_trainer.gaussians.split import split_gaussians_uniform
 
 
-from taichi_splatting.optim.parameter_class import ParameterClass
+from taichi_splatting.optim import ParameterClass, SparseAdam
 from taichi_splatting import Gaussians3D, RasterConfig, Rendering
 
 from taichi_splatting.renderer import render_projected, project_to_image
@@ -25,41 +27,53 @@ from taichi_splatting.perspective import CameraParams
 from splat_trainer.scene.util import parameters_from_gaussians, update_depth
 from splat_trainer.util.pointcloud import PointCloud
 
-
-    
+@beartype
 @dataclass(kw_only=True, frozen=True)
 class TCNNConfig(GaussianSceneConfig):  
-  learning_rates : DictConfig
+  learning_rates : DictConfig | Dict
   
-  lr_image_feature:float= 0.001
-  lr_nn:float = 0.0001
+  lr_image_feature: VaryingFloat = 0.001
+  lr_nn:VaryingFloat = 0.0001
 
   image_features:int       = 8
   point_features:int       = 8
 
-  hidden:int             = 32
+  affine_color_model:bool  = False
+  hidden_features:int      = 32
+
   layers:int             = 2
 
   per_image:bool = True
 
-  depth_ema:float = 0.95
+  depth_ema:float = 0.99
   use_depth_lr:bool = True
+
+  beta1:float = 0.9
+  beta2:float = 0.999
+
 
 
   def from_color_gaussians(self, gaussians:Gaussians3D, 
-                           camera_table:CameraTable, device:torch.device):
+                           camera_table:ViewTable, 
+                           device:torch.device):
     
+
+    feature = torch.zeros(gaussians.batch_size[0], self.point_features)
+    torch.nn.init.normal_(feature, std=1.0)
+
+    gaussians = gaussians.replace(feature=feature).to(device)
+    points = parameters_from_gaussians(gaussians, 
+          eval_varyings(self.learning_rates, 0.), betas=(self.beta1, self.beta2))
     
-    features = torch.randn(gaussians.batch_size[0], self.point_features)
-    gaussians = gaussians.replace(feature=features).to(device)
-    
-    points = parameters_from_gaussians(gaussians, OmegaConf.to_container(self.learning_rates))
     return TCNNScene(points, self, camera_table)
 
   
-  def from_state_dict(self, state:dict):
-    points = ParameterClass.from_state_dict(state['points'])
-    scene = TCNNScene(self, points, self)
+  def from_state_dict(self, state:dict, camera_table:ViewTable):
+
+    points = ParameterClass.from_state_dict(state['points'], 
+          optimizer=SparseAdam, betas=(self.beta1, self.beta2))
+    
+    scene = TCNNScene(points, self, camera_table)
 
     scene.color_model.load_state_dict(state['color_model'])
     scene.color_opt.load_state_dict(state['color_opt'])
@@ -72,23 +86,27 @@ class TCNNScene(GaussianScene):
   def __init__(self, 
           points: ParameterClass, 
           config: TCNNConfig,       
-          camera_table:CameraTable,     
+          camera_table:ViewTable,     
     ):
     self.config = config
     self.points = points
 
     self.camera_table = camera_table
-    self.learning_rates = OmegaConf.to_container(config.learning_rates)
 
-    size = camera_table.num_images if config.per_image else camera_table.num_cameras
+    num_glo_embeddings = camera_table.num_images if config.per_image else camera_table.num_cameras
 
     self.color_model = ColorModel(
-      size, config.image_features, 
-      config.point_features, config.hidden, config.layers).to(self.device)
+      num_glo_embeddings, 
+      glo_features=config.image_features, 
+      point_features=config.point_features, 
+      hidden_features=config.hidden_features, 
+      layers=config.layers,
+      affine_model=config.affine_color_model).to(self.device)
     
     self.color_opt = self.color_model.optimizer(
       config.lr_nn, config.lr_image_feature)
-
+    
+    self.scene_extents = camera_scene_extents(camera_table)
 
   @property
   def device(self):
@@ -99,22 +117,24 @@ class TCNNScene(GaussianScene):
     return self.points.position.shape[0]
 
   def __repr__(self):
-    return f"GaussianScene({self.points.position.shape[0]} points)"
+    return f"TCNNScene({self.num_points} points)"
 
-  @beartype
-  def update_learning_rate(self, lr_scale:float):
-    # scaled_lr = {k: v * lr_scale for k, v in self.learning_rates.items()}
-    # self.points.set_learning_rate(**scaled_lr)
+  def update_learning_rate(self, t:float):
+    lr = eval_varyings(self.config.learning_rates, t)
     if not self.config.use_depth_lr:
-      lr_scale *= camera_extents(self.camera_table)
+      lr['position'] *= self.scene_extents
     
-    self.points.set_learning_rate(position = 
-              self.learning_rates['position'] * lr_scale)
+    self.points.set_learning_rate(**lr)
+    self.color_model.schedule(self.color_opt, 
+            self.config.lr_nn, self.config.lr_image_feature, t)
+    
+    return lr
 
 
   @beartype
-  def step(self, rendering:Rendering, step:int):
-
+  def step(self, rendering:Rendering, t:float) -> Dict[str, float]:
+    lr = self.update_learning_rate(t)
+  
     if self.config.use_depth_lr:
       update_depth(self.points, rendering, self.config.depth_ema)
 
@@ -124,18 +144,11 @@ class TCNNScene(GaussianScene):
     self.points.rotation = torch.nn.Parameter(
       F.normalize(self.points.rotation.detach(), dim=1), requires_grad=True)
     
-
+    
     self.points.zero_grad()
     self.color_opt.zero_grad()
-
-
-  @property
-  def scale(self):
-    return torch.exp(self.points.log_scaling)
-  
-  @property
-  def opacity(self):
-    return torch.sigmoid(self.points.alpha_logit)
+    
+    return {**lr}
 
 
   def split_and_prune(self, keep_mask, split_idx):
@@ -153,6 +166,7 @@ class TCNNScene(GaussianScene):
 
   def write_to(self, output_dir:Path):
     output_dir.mkdir(parents=True, exist_ok=True)
+
     write_gaussians(output_dir / 'point_cloud.ply', self.gaussians.apply(torch.detach), with_sh=False)
 
     d = self.color_model.state_dict()
@@ -191,8 +205,7 @@ class TCNNScene(GaussianScene):
 
     return render_projected(indexes, gaussians2d, features, depthvars, 
             camera_params, config, **options)
-      
+
+
     
-
-
 

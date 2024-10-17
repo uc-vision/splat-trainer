@@ -1,10 +1,11 @@
 from abc import ABCMeta, abstractmethod
+from typing import Dict, Tuple
 import torch
 
 from taichi_splatting import Gaussians3D, RasterConfig, Rendering
 from taichi_splatting.perspective import CameraParams
 
-from splat_trainer.camera_table.camera_table import CameraTable
+from splat_trainer.camera_table.camera_table import ViewTable
 from splat_trainer.logger.logger import Logger
 
 
@@ -12,9 +13,9 @@ from splat_trainer.logger.logger import Logger
 
 class GaussianScene(metaclass=ABCMeta):  
   @abstractmethod
-  def step(self, visible:torch.Tensor, step:int):
+  def step(self, rendering:Rendering, t:float) -> Dict[str, float]:
     raise NotImplementedError
-
+  
   @abstractmethod
   def render(self, camera_params:CameraParams, config:RasterConfig, cam_idx:torch.Tensor, **options) -> Rendering:
     raise NotImplementedError
@@ -23,28 +24,11 @@ class GaussianScene(metaclass=ABCMeta):
   def split_and_prune(self, keep_mask:torch.Tensor, split_idx:torch.Tensor):
     raise NotImplementedError
 
-  @abstractmethod
-  def update_learning_rate(self, lr_scale:float):
-    raise NotImplementedError
-
-  @abstractmethod
-  def write_to(self, output_dir:str):
-    raise NotImplementedError
   
   @abstractmethod
   def log(self, logger:Logger):
     raise NotImplementedError
   
-  @property
-  @abstractmethod
-  def scale(self):
-    raise NotImplementedError
-  
-  @property
-  @abstractmethod
-  def opacity(self):
-    raise NotImplementedError
-
 
   @property
   @abstractmethod
@@ -57,15 +41,18 @@ class GaussianScene(metaclass=ABCMeta):
     """ Return controller state for checkpointing """
     raise NotImplementedError
 
+  @abstractmethod
+  def write_to(self, output_dir:str):
+    raise NotImplementedError
+
 
 class GaussianSceneConfig(metaclass=ABCMeta):
 
-
   @abstractmethod
-  def from_color_gaussians(self, gaussians:Gaussians3D, camera_table:CameraTable, device:torch.device) -> GaussianScene:
+  def from_color_gaussians(self, gaussians:Gaussians3D, camera_table:ViewTable, device:torch.device) -> GaussianScene:
     raise NotImplementedError
   
   @abstractmethod
-  def from_state_dict(self, state_dict:dict, device:torch.device) -> GaussianScene:
+  def from_state_dict(self, state:dict, camera_table:ViewTable) -> GaussianScene:
     raise NotImplementedError
 

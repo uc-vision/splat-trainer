@@ -1,5 +1,7 @@
 
 from dataclasses import dataclass
+from pathlib import Path
+from typing import Optional, Tuple
 from beartype.typing import Dict, Iterator, List
 
 import cv2
@@ -7,10 +9,12 @@ import torch
 
 from camera_geometry import FrameSet, Camera
 from camera_geometry.scan.views import load_frames_with, Undistortion
+from camera_geometry.camera_models.camera import optimal_undistorted
 
 from beartype import beartype
 import numpy as np
 
+from splat_trainer.camera_table.camera_table import CameraRigTable
 from splat_trainer.dataset import CameraView
 
 @dataclass
@@ -19,11 +23,52 @@ class CameraImage:
    image : torch.Tensor
    image_id: int
 
+   camera_name: str
+   frame_index: int
+
    filename: str
 
    @property
    def image_size(self):
       return self.image.shape[1], self.image.shape[0]
+
+
+
+def load_scan(scan_file:str, image_scale:Optional[float]=None, resize_longest:Optional[int]=None) -> Tuple[FrameSet, List[CameraImage]]:
+    scan = FrameSet.load_file(Path(scan_file))
+
+    cameras = {k: optimal_undistorted(camera, alpha=0)
+                 for k, camera in scan.cameras.items()}
+
+    assert resize_longest is None or image_scale is None, "Specify either resize_longest or image_scale"
+
+    if resize_longest is not None:
+      cameras = {k: camera.resize_longest(longest=resize_longest) for k, camera in cameras.items()}
+    elif image_scale is not None:
+      cameras = {k: camera.scale_image(image_scale) for k, camera in cameras.items()}
+
+
+    print("Undistorted cameras:")
+    for k, camera in cameras.items():
+        print(k, camera)
+
+    print("Loading images...")
+    all_cameras = preload_images(scan, cameras)
+    return scan.copy(cameras=cameras), all_cameras
+
+
+def camera_rig_table(scan:FrameSet):
+    camera_t_rig = np.array(
+      [camera.camera_t_parent for camera in scan.cameras.values()])
+    
+    world_t_rig = torch.from_numpy(np.array(scan.rig_poses)).to(torch.float32)
+    projections = np.array([[*camera.focal_length, *camera.principal_point] for camera in scan.cameras.values()])
+
+    return CameraRigTable(
+      rig_t_world=torch.linalg.inv(world_t_rig),
+      camera_t_rig=torch.from_numpy(camera_t_rig).to(torch.float32),
+      projection=torch.from_numpy(projections).to(torch.float32))
+
 
 
 def concat_lists(xs):
@@ -47,6 +92,9 @@ def preload_images(scan:FrameSet, undistorted:Dict[str, Camera]) -> List[CameraI
     camera_id = camera_names.index(camera_name)
     return CameraImage(
         camera=undistortion.undistorted.transform(rig_pose),
+        camera_name=camera_name,
+        frame_index=frame_index,
+
         image=torch.from_numpy(image).pin_memory(),
         image_id=frame_index * len(camera_names) + camera_id,
         filename=image_file

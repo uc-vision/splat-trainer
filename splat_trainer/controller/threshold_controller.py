@@ -34,7 +34,6 @@ class PointStatistics:
 @dataclass
 class ThresholdConfig(ControllerConfig):
 
-  enabled:bool = True
   grad_threshold:float = 0.0002
   min_split_size:float = 0.001
 
@@ -88,23 +87,22 @@ class ThresholdController(Controller):
       return keep_mask, split_idx, counts     
 
 
-  def densify_and_prune(self, step:int, total_steps:int) -> Dict[str, float]:
+  def densify_and_prune(self, t:float) -> Dict[str, float]:
 
     keep_mask, split_idx, counts = self.find_split_prune_indexes()
 
-    if self.config.enabled:
-      self.scene.split_and_prune(keep_mask, split_idx)
-      self.points = self.points[keep_mask]
+    self.scene.split_and_prune(keep_mask, split_idx)
+    self.points = self.points[keep_mask]
 
-      new_points = PointStatistics.zeros(split_idx.shape[0] * 2, device=self.scene.device)
-      self.points = torch.cat([self.points, new_points], dim=0)
+    new_points = PointStatistics.zeros(split_idx.shape[0] * 2, device=self.scene.device)
+    self.points = torch.cat([self.points, new_points], dim=0)
 
     return counts    
 
 
 
 
-  def step(self, rendering:Rendering, step:int) -> Dict[str, float]: 
+  def step(self, rendering:Rendering, t:float) -> Dict[str, float]: 
     idx = rendering.points_in_view
 
     longest_side = max(*rendering.image_size)

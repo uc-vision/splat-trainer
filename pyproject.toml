@@ -20,13 +20,15 @@ dependencies = [
   'roma>=1.4',
   'tabulate',
   'torchmetrics',
+  'fused-ssim',
   'opencv-python',
   'pycolmap',
   'scipy',
   'tensorboard',
   'wandb',
   'termcolor',
-  'debugpy'
+  'debugpy',
+  'wonderwords'
 #  'tinycudann @ git+https://github.com/NVlabs/tiny-cuda-nn/#subdirectory=bindings/torch'
 ]
 
@@ -49,9 +51,13 @@ dependency_links = ["https://pypi.taichi.graphics/simple/"]
 
 [project.scripts]  # Optional
 splat-trainer = "splat_trainer.scripts.train_scan:main"
-trainer-grid-search = "splat_trainer.scripts.grid_search:main"
+to-colmap = "splat_trainer.scripts.to_colmap:main"
+grid-search-trainer = "splat_trainer.scripts.grid_search:main"
+evaluate-trainer = "splat_trainer.scripts.evaluate:evaluate"
+resume-trainer = "splat_trainer.scripts.evaluate:resume"
 rq-worker = "splat_trainer.scripts.rq_worker:main"
 rq-worker-launcher = "splat_trainer.scripts.rq_worker_launcher:main"
+
 
 
 [tool.setuptools.package-data]
@@ -67,4 +73,3 @@ filterwarnings = [
     # disable "UserWarning: The .grad attribute of a Tensor that is not a leaf Tensor"
     "ignore::UserWarning"  
 ]
-

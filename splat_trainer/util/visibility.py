@@ -4,7 +4,7 @@ from typing import Tuple
 from beartype import beartype
 import torch
 
-from splat_trainer.camera_table.camera_table import CameraInfo, CameraTable
+from splat_trainer.camera_table.camera_table import ViewInfo, ViewTable
 from splat_trainer.util.pointcloud import PointCloud
 from splat_trainer.util.transforms import expand_proj, transform44
 
@@ -31,13 +31,13 @@ def project_points(transform, xyz):
   return (xy / depth), depth
 
 
-def projection(camera_table:CameraTable):
+def projection(camera_table:ViewTable):
   cam_t_world, image_t_cam = camera_table(torch.arange(len(camera_table), device=camera_table.device))
   return expand_proj(image_t_cam) @ cam_t_world
 
 
 @beartype
-def crop_cloud(info:CameraInfo, pcd:PointCloud) -> PointCloud:
+def crop_cloud(info:ViewInfo, pcd:PointCloud) -> PointCloud:
     counts = point_visibility(info, pcd.points)
     return pcd[counts > 0]
 
@@ -58,7 +58,7 @@ def random_ndc(n, depth_range:Tuple[Number, Number], device=None) -> torch.Tenso
 
 
 @beartype
-def random_points(info:CameraInfo, count:int) -> torch.Tensor:
+def random_points(info:ViewInfo, count:int) -> torch.Tensor:
     
     depth_range = info.depth_range
 
@@ -70,20 +70,19 @@ def random_points(info:CameraInfo, count:int) -> torch.Tensor:
     norm_points = torch.rand(count, 2, device=device)
     image_points = norm_points * info.image_sizes[camera_idx]
 
-    # depths = torch.rand((count, 1), device=device) * (depth_range[1] - depth_range[0]) + depth_range[0]
     depths = random_ndc(count, depth_range, device=device)
     ones = torch.ones((count, 1), device=device)
 
     homog = torch.cat([image_points * depths, depths, ones], dim=1)
-
     points_unproj = torch.bmm(world_t_image[camera_idx], homog.unsqueeze(2)).squeeze(-1)
-
     return points_unproj[..., :3] / points_unproj[..., 3:4]
 
 
 @beartype
-def random_cloud(info:CameraInfo, count:int, min_depth:float=0.) -> PointCloud:
-  info = replace(info, depth_range=(max(min_depth, info.depth_range[1]), info.depth_range[1]))
+def random_cloud(info:ViewInfo, count:int, seed:int=0) -> PointCloud:
+
+  if seed is not None:
+    torch.manual_seed(seed)
 
   points = random_points(info, count)
   colors = torch.rand(count, 3, device=points.device)
@@ -91,9 +90,8 @@ def random_cloud(info:CameraInfo, count:int, min_depth:float=0.) -> PointCloud:
   return PointCloud(points, colors, batch_size=(count,))
 
 
-
 @beartype
-def point_visibility(info:CameraInfo, 
+def point_visibility(info:ViewInfo, 
                      points:torch.Tensor) -> torch.Tensor:
   
   counts = torch.zeros(points.shape[0], dtype=torch.int32, device=info.camera_table.device)
