@@ -20,15 +20,15 @@
             </thead>
             <tbody>
                 {% for machine in machines %}
-                {% if machine.error is not none %}
+                {% if machine.err is not none %}
                 <tr>
                     <td>{{ machine.hostname }}</td>
-                    <td colspan="7" class="text-danger">{{ machine.error }}</td>
+                    <td colspan="7" class="text-danger">{{ machine.err }}</td>
                 </tr>
                 {% else %}
                 <tr id="{{ machine.hostname }}">
                     <td>{{ machine.hostname }}</td>
-                    <td class="result-cell"><pre> {{ machine.result }} </pre></td>
+                    <td class="result-cell"><pre> {{ machine.msg }} </pre></td>
                 </tr>
                 {% endif %}
                 {% endfor %}
