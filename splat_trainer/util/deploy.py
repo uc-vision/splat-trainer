@@ -35,35 +35,48 @@ def rq_worker():
   w = Worker(['default'], connection=Redis.from_url(redis_url), serializer=cloudpickle) 
   w.work()
 
-
-def deploy(worker: str):
-  host = socket.gethostname()
-  connect_kwargs = get_connect_keys()
-
-  try:
-    with fabric.Connection(worker, connect_kwargs=connect_kwargs) as c:
-      command = """
-        source ~/.bashrc
-        conda activate splat-trainer
-        cd ~/splat-trainer
-        mkdir -p ./log
-        rq-worker --host {host} > ./log/{worker}.log 2>&1
-        """.format(host=host, worker=worker)
-      c.run(command, hide=True, asynchronous=True)
-      return Machine(worker, msg=f"RQ worker started on {worker}")
-
-  except (SSHException, socket.error) as e:
-    return Machine(worker, err=str(e))
-
   
-def deploy_group(workers:List[str]):
+def deploy_group(workers:List[str], connect_kwargs):
+
+  def deploy(worker: str):
+    host = socket.gethostname()
+
+    try:
+      with fabric.Connection(worker, connect_kwargs=connect_kwargs) as c:
+        command = """
+          source ~/.bashrc
+          conda activate splat-trainer
+          cd ~/splat-trainer
+          mkdir -p ./log
+          rq-worker --host {host} > ./log/{worker}.log 2>&1
+          """.format(host=host, worker=worker)
+        c.run(command, hide=True, asynchronous=True)
+        return Machine(worker, msg=f"RQ worker started on {worker}")
+
+    except (SSHException, socket.error) as e:
+      return Machine(worker, err=str(e))
+
+
   with ThreadPoolExecutor() as pool:
     return list(pool.map(deploy, workers))
   
 
 def deploy_all(config):
-  return {name:deploy_group(workers)  
+  connect_kwargs = get_connect_keys()
+
+  result = {name:deploy_group(workers, connect_kwargs)  
           for name, workers in config['groups'].items()}
+
+  count = 0
+  machines = [machine for name, group in result.items() for machine in group]
+  for machine in machines:
+    if machine.msg:
+      count += 1
+    else:
+      print(f"{machine.hostname}: {machine.err}")
+  print(f"\nRQ workers started on {count}/{len(machines)} worker machines.\n")
+
+  return result
 
 
 def deployer(args):
@@ -79,10 +92,9 @@ def deploy_workers(args):
   return deploy()
 
 
-
 def get_args():
   args = argparse.ArgumentParser(description='Monitor lab computers')
-  args.add_argument('--config', default="test", help='List of host files to monitor')  
+  args.add_argument('--config', default="lab3", help='List of host files to monitor')  
   args.add_argument('--port', default=8000, help='Specify the port on which Flask app runs')
 
   return args.parse_args()
@@ -109,13 +121,15 @@ def read_config(config_path):
 
 
 def terminate_all(data: dict[str: List[Machine]]):
-  machines = [machine for name, group in data.items() for machine in group]
+  connect_kwargs = get_connect_keys()
   
+  machines = [machine for name, group in data.items() for machine in group]
+
   if any(machine.msg for machine in machines):
     print("\nTerminating rq worker processes...")
-    result = {name:terminate_group(workers)  
+        
+    result = {name:terminate_group(workers, connect_kwargs)  
             for name, workers in data.items()}
-
 
     for name, group in result.items():
       for machine in group:
@@ -123,32 +137,37 @@ def terminate_all(data: dict[str: List[Machine]]):
           or (machine.msg is None and machine.err is not None), \
           f"Warning: RQ worker is not terminated on Machine {machine.hostname} properly."
 
-    print("\nRQ workers terminated on worker machines successfully.\n")
+    print("\nRQ workers terminated on all worker machines successfully.\n")
+
     return result
-  
-
-def terminate_group(workers: List[Machine]):
-  with ThreadPoolExecutor() as pool:
-    return list(pool.map(terminate, workers))
-
-
-def terminate(worker: Machine):
-  connect_kwargs = get_connect_keys()
-  if worker.msg:
-    try:
-      with fabric.Connection(worker.hostname, connect_kwargs=connect_kwargs) as c:
-        command = """
-          pkill -f rq:worker
-          pkill -f splat-trainer
-          """
-        c.run(command, hide=True, asynchronous=True)
-        return Machine(worker, msg=f"RQ worker terminated on {worker}")
-
-    except (SSHException, socket.error) as e:
-      return Machine(worker, err=str(e))
 
   else:
-    return Machine(worker)
+    print("\nNo RQ workers to terminate on worker machines.\n")
 
+    return data
+
+  
+
+def terminate_group(workers: List[Machine], connect_kwargs):
+
+  def terminate(worker: Machine):
+    if worker.msg:
+      try:
+        with fabric.Connection(worker.hostname, connect_kwargs=connect_kwargs) as c:
+          command = """
+            pkill -f rq:worker
+            pkill -f splat-trainer
+            """
+          c.run(command, hide=True, asynchronous=True)
+          return Machine(worker.hostname, worker.err, f"RQ worker terminated on {worker.hostname}")
+
+      except (SSHException, socket.error) as e:
+        return Machine(worker.hostname, str(e), worker.msg)
+
+    else:
+      return worker
+
+  with ThreadPoolExecutor() as pool:
+    return list(pool.map(terminate, workers))
 
 
