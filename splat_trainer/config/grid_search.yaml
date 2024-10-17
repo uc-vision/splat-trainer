@@ -6,6 +6,7 @@ defaults:
   - scene: tcnn
   - trainer: default
   - test_datasets: default
+  - color_corrector: nil
   - /hydra/callbacks:
     - average_result
   - override hydra/launcher: custom_rq
@@ -33,8 +34,11 @@ hydra:
   mode: MULTIRUN
   sweeper:
     params:
-      trainer.scene.learning_rates.position: 0.1, 0.05, 0.01
-      +test_scene: bonsai, scan_1457_west, scan_21
+      # trainer.reg_loss_weight: choice([1, 1, 1], [0, 0, 0], [1, 0, 0], [0, 1, 0], [0, 0, 1], [1, 1, 0], [1, 0, 1], [0, 1, 1])
+      trainer.reg_loss_weight: choice([1, 1, 1], [0, 0, 0])
+      # scene: sh, tcnn
+      # color_corrector: nil, bilateral
+      test_scene: bonsai, scan_1457_west, scan_21
 
 
 

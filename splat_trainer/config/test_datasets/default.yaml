@@ -22,6 +22,8 @@ test_datasets:
         base_path: ${mipnerf_path}/room
       stump:
         base_path: ${mipnerf_path}/stump
+      treehill:
+        base_path: ${mipnerf_path}/treehill
       
     common: 
       _target_: splat_trainer.dataset.COLMAPDataset

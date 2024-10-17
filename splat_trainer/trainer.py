@@ -1,10 +1,10 @@
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, replace, field
 from functools import partial
 import heapq
 import json
 import math
 from pathlib import Path
-from typing import Callable, Tuple
+from typing import Callable, Tuple, List
 
 from tqdm import tqdm 
 from termcolor import colored
@@ -83,6 +83,7 @@ class TrainConfig:
   scale_reg: VaryingFloat = 0.1
   opacity_reg: VaryingFloat = 0.01
   aspect_reg: VaryingFloat = 0.01
+  reg_loss_weight: List[int] = field(default_factory=lambda: [1, 1, 1])
 
   blur_cov: float
   antialias: bool = True
@@ -415,7 +416,9 @@ class Trainer:
       aspect_reg    =  aspect_term.mean() * eval_varying(self.config.aspect_reg, self.t),
     )
 
-    return sum(regs.values()), {k:v.item() for k, v in regs.items()}
+    w_scale, w_opacity, w_aspect = self.config.reg_loss_weight
+
+    return sum(regs['scale_reg']*w_scale+regs['opacity_reg']*w_opacity+regs['aspect_reg']*w_aspect), {k:v.item() for k, v in regs.items()}
 
   def losses(self, rendering:Rendering, image:torch.Tensor):
     metrics = {}
