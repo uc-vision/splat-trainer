@@ -17,24 +17,22 @@ def point_basis(points:TensorDict):
   scale = torch.exp(points['log_scaling'])
 
   r = F.normalize(points['rotation'], dim=1)
-  m = roma.unitquat_to_rotmat(r)
+  return roma.unitquat_to_rotmat(r) * scale.unsqueeze(-2)
 
-
-  return m.transpose(1, 2) * scale.unsqueeze(-1)
-
-
-def split_by_samples(points: TensorDict, samples: torch.Tensor) -> TensorDict:
-  num_points, n, _ = samples.shape
-
+def sample_gaussians(points:TensorDict, local_samples:torch.Tensor, n:int=2):
   basis = point_basis(points)
-  point_samples = (samples.view(-1, 3).unsqueeze(1) @ basis.repeat_interleave(repeats=n, dim=0)).squeeze(1)
+  return (basis.repeat_interleave(repeats=n, dim=0) @ local_samples.view(-1, 3).unsqueeze(-1)).view(-1, n, 3)
+
+
+def split_with_offsets(points: TensorDict, offsets: torch.Tensor) -> TensorDict:
+  num_points, n, _ = offsets.shape
 
   gaussians = points.apply(
     partial(torch.repeat_interleave, repeats=n, dim=0), 
     batch_size=[num_points * n])
   
   return gaussians.update(dict(
-      position = gaussians['position'] + point_samples,
+      position = gaussians['position'] + offsets.view(-1, 3),
     ))
    
 
@@ -60,18 +58,18 @@ def split_gaussians(points: TensorDict, n:int=2, scaling:Optional[float]=None) -
 
   scaled = points.update(dict(
       log_scaling = points['log_scaling'] + math.log(scaling)))
+  
+  offsets = sample_gaussians(points, samples, n)
 
-  return split_by_samples(scaled, samples)
+  return split_with_offsets(scaled, offsets)
 
 
-def split_gaussians_uniform(points: TensorDict, n:int=2, scaling:Optional[float]=None, noise=0.0) -> TensorDict:
+def split_gaussians_uniform(points: TensorDict, n:int=2, scaling:Optional[float]=None, sep:float=0.7) -> TensorDict:
   """ Split along most significant axis """
   axis = F.one_hot(torch.argmax(points['log_scaling'], dim=1), num_classes=3)
-  values = torch.linspace(-1, 1, n, device=points['position'].device)
+  values = torch.linspace(-sep, sep, n, device=points['position'].device)
 
   samples = values.view(1, -1, 1) * axis.view(-1, 1, 3)
-  if noise > 0:
-    samples += torch.randn_like(samples) * noise
 
   if scaling is None:
     scaling = 1 / math.sqrt(n)
@@ -79,4 +77,5 @@ def split_gaussians_uniform(points: TensorDict, n:int=2, scaling:Optional[float]
   scaled = points.update(
       dict(log_scaling = points['log_scaling'] + math.log(scaling) * axis))
 
-  return split_by_samples(scaled, samples)
+  offsets = sample_gaussians(points, samples, n)
+  return split_with_offsets(scaled, offsets)
