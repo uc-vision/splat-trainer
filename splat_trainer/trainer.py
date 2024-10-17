@@ -41,6 +41,7 @@ from splat_trainer.util.misc import CudaTimer, next_multiple, strided_indexes
 
 from splat_trainer.controller import ControllerConfig
 from splat_trainer.color_corrector import CorrectorConfig, Corrector
+from splat_trainer.viewer import Viewer
 
 
 
@@ -90,6 +91,9 @@ class TrainConfig:
   save_checkpoints: bool = False
   save_output: bool = True
 
+  disable_realtime_viewer: bool = True
+  port: int = 8080
+
   
   
 class Trainer:
@@ -122,6 +126,8 @@ class Trainer:
     self.color_map = get_cv_colormap().to(self.device)
     self.ssim = partial(fused_ssim, padding="valid")
     self.pbar = None
+
+    self.viewer = Viewer(config, dataset, scene)
 
 
   @staticmethod
@@ -481,6 +487,17 @@ class Trainer:
 
     while self.step < self.config.steps:
 
+      if self.step - next_densify > 0:
+        self.controller.log_histograms(self.logger, self.step)
+
+        torch.cuda.empty_cache()
+        densify_metrics = self.controller.densify_and_prune(self.t)
+
+        self.log_values("densify", densify_metrics)
+        next_densify += eval_varying(self.config.densify_interval, self.t)
+
+      self.viewer.aquire_lock()
+
       if self.step % self.config.eval_steps == 0:
           eval_metrics = self.evaluate()
           if self.config.save_checkpoints and self.config.save_output:
@@ -490,22 +507,15 @@ class Trainer:
           self.log_values("train", dict(blur_cov=self.blur_cov))
           torch.cuda.empty_cache()
 
-      if self.step - next_densify > 0:
-        self.controller.log_histograms(self.logger, self.step)
-
-        torch.cuda.empty_cache()
-        densify_metrics = self.controller.densify_and_prune(self.t)
-
-        self.log_values("densify", densify_metrics)
-        next_densify += eval_varying(self.config.densify_interval, self.t)
-      
-
       with torch.enable_grad():
         with step_timer:
           steps = [self.training_step(*next(iter_train), timer=timer) 
                   for timer in self.render_timers]
 
       torch.cuda.empty_cache()
+
+      self.viewer.release_lock()
+      self.viewer.update(self.step)
 
       if self.step % self.config.log_interval  == 0:
         steps = transpose_rows(steps)
