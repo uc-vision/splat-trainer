@@ -1,0 +1,7 @@
+defaults:
+  - ray
+
+
+ray:
+  init:
+    address: 'localhost:6378'
