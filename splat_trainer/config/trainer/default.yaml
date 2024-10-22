@@ -30,7 +30,7 @@ trainer:
   scale_reg: 0.1
   opacity_reg: ${log_linear:1.0,0.01}
   aspect_reg: 0.01
-  reg_loss_weight: [1, 1, 1] # scale, opacity, aspect
+  reg_loss_weight: [1, 1, 1] # opacity, scale, aspect
 
   blur_cov: 0.3 # only used if antialias is false
   antialias: False

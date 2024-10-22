@@ -1,0 +1,15 @@
+# @package _global_
+
+
+hydra:
+  callbacks:
+    manage_rq_workers:
+      _target_: splat_trainer.util.manage_rq_worker.ManageRQWorkers
+      redis_url: redis://localhost:6379
+      flask_port: 8000
+      config_file: test
+
+    average_result:
+      _target_: splat_trainer.util.average_result.AverageResult
+      output_dir: ${hydra.sweep.dir}
+      sweep_params: ${hydra.sweeper.params}

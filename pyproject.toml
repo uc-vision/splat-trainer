@@ -55,9 +55,7 @@ to-colmap = "splat_trainer.scripts.to_colmap:main"
 grid-search-trainer = "splat_trainer.scripts.grid_search:main"
 evaluate-trainer = "splat_trainer.scripts.evaluate:evaluate"
 resume-trainer = "splat_trainer.scripts.evaluate:resume"
-rq-worker = "splat_trainer.util.deploy:rq_worker"
 rq-worker-launcher = "splat_trainer.scripts.rq_worker_launcher:main"
-
 
 
 [tool.setuptools.package-data]
@@ -73,3 +71,4 @@ filterwarnings = [
     # disable "UserWarning: The .grad attribute of a Tensor that is not a leaf Tensor"
     "ignore::UserWarning"  
 ]
+

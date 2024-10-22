@@ -1,7 +1,0 @@
-# @package _global_
-hydra:
-  callbacks:
-    average_result:
-      _target_: splat_trainer.util.callbacks.Average_result
-      output_dir: ${hydra.sweep.dir}
-      sweep_params: ${hydra.sweeper.params}

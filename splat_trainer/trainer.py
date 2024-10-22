@@ -340,7 +340,10 @@ class Trainer:
     self.log_histogram(f"eval_{name}/psnr_hist", torch.tensor(totals['psnr']))
     self.log_histogram(f"eval_{name}/radius_hist", radius_hist)
 
-    return {f"{name}_psnr": float(mean_psnr)}
+    return {
+            f"{name}_psnr": float(mean_psnr),
+            f"{name}_l1": float(mean_l1)
+            }
 
 
   def evaluate_trained(self, rendering, source_image, image_idx):
@@ -416,9 +419,9 @@ class Trainer:
       aspect_reg    =  aspect_term.mean() * eval_varying(self.config.aspect_reg, self.t),
     )
 
-    w_scale, w_opacity, w_aspect = self.config.reg_loss_weight
+    regs = {k:regs[k] for k, flag in zip(regs.keys(), self.config.reg_loss_weight) if flag == 1}
 
-    return sum(regs['scale_reg']*w_scale+regs['opacity_reg']*w_opacity+regs['aspect_reg']*w_aspect), {k:v.item() for k, v in regs.items()}
+    return sum(regs.values()), {k:v.item() for k, v in regs.items()}
 
   def losses(self, rendering:Rendering, image:torch.Tensor):
     metrics = {}
@@ -435,11 +438,11 @@ class Trainer:
       loss += ssim * self.config.ssim_weight 
       metrics["ssim"] = ssim.item()
 
-
-    reg_loss, reg_losses = self.reg_loss(rendering)
-    metrics.update(reg_losses)
-    metrics["reg"] = reg_loss.item()
-    loss += reg_loss 
+    if self.config.reg_loss_weight != [0, 0, 0]:
+      reg_loss, reg_losses = self.reg_loss(rendering)
+      metrics.update(reg_losses)
+      metrics["reg"] = reg_loss.item()
+      loss += reg_loss 
 
     return loss, metrics
 
