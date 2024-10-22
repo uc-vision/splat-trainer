@@ -27,7 +27,7 @@ from taichi_splatting.optim.sparse_adam import SparseAdam
 @beartype
 @dataclass(kw_only=True, frozen=True)
 class SHConfig(GaussianSceneConfig):  
-  learning_rates : DictConfig | Dict
+  parameters : DictConfig | Dict
 
   sh_ratio:float      = 20.0
   sh_degree:int       = 3
@@ -50,7 +50,7 @@ class SHConfig(GaussianSceneConfig):
 
     gaussians = gaussians.replace(feature=sh_feature).to(device)
 
-    points = parameters_from_gaussians(gaussians, self.learning_rates, betas=(self.beta1, self.beta2))
+    points = parameters_from_gaussians(gaussians, self.parameters, betas=(self.beta1, self.beta2))
     return SHScene(points, self, camera_table)
 
   

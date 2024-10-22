@@ -64,7 +64,7 @@ class EnvironmentModel(torch.nn.Module):
     self.image_features = nn.Parameter(torch.zeros(num_cameras, image_features))
 
     # Initialize image features with small standard deviation
-    nn.init.normal_(self.image_features.weight, std=1.0)
+    nn.init.normal_(self.image_features.weight, std=0.5)
 
   
 

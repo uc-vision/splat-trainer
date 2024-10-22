@@ -5,6 +5,7 @@ from typing import Dict
 from beartype import beartype
 from beartype.typing import Optional
 import numpy as np
+
 from splat_trainer.util.misc import exp_lerp
 from taichi_splatting import Rendering
 from tensordict import tensorclass
@@ -14,6 +15,7 @@ from splat_trainer.logger.logger import Logger
 from .controller import Controller, ControllerConfig
 from splat_trainer.scene import GaussianScene
 
+from splat_trainer.config import Between, SmoothStep, VaryingFloat, eval_varying, smoothstep
 
 @tensorclass
 class PointStatistics:
@@ -32,12 +34,8 @@ class PointStatistics:
       batch_size=(batch_size,)
     )
 
-def smoothstep(x, a, b, interval=(0, 1)):
-  # interpolate with smoothstep function
-  r = interval[1] - interval[0]
-  x =  np.clip((x - interval[0]) / r, 0, 1)
-  return a + (b - a) * (3 * x ** 2 - 2 * x ** 3)
 
+@beartype
 @dataclass
 class TargetConfig(ControllerConfig):
 
@@ -101,12 +99,13 @@ class TargetController(Controller):
     config = self.config  
     n = self.points.shape[0]
 
-    # nonlinear point count schedule
-    target = math.ceil(smoothstep(t, self.start_count, config.target_count, interval=(0.0, 0.6)))
+    # point count schedule
+    # schedule = eval_varying(self.config.target_schedule, t)
+    schedule = smoothstep(t, self.start_count, self.config.target_count, interval=(0, 0.6))
+    target = max(n, math.ceil(schedule))
 
     # number of pruned points is controlled by the split rated
-    # prune_rate = (config.prune_rate * config.densify_interval/100)
-    n_prune = math.ceil(config.prune_rate * n * 1 - t)
+    n_prune = math.ceil(config.prune_rate * n * (1 - t))
 
     n = self.points.split_score.shape[0]
     prune_mask = (take_n(self.points.prune_cost, n_prune, descending=False) 
@@ -132,6 +131,9 @@ class TargetController(Controller):
     n_prune = prune_mask.sum().item()
     n_split = split_idx.shape[0]
 
+    n = self.points.batch_size[0]
+    n_unseen = n - torch.count_nonzero(points.prune_cost).item()
+
     self.prune_thresh = points.prune_cost[prune_mask].max().item() if n_prune > 0 else 0.
     self.split_thresh = points.split_score[split_idx].min().item() if n_split > 0 else 0.
 
@@ -147,7 +149,8 @@ class TargetController(Controller):
             prune=n_prune,       
             split=n_split,
             max_prune_score=self.prune_thresh, 
-            min_split_score=self.split_thresh)
+            min_split_score=self.split_thresh,
+            unseen = n_unseen)
     
     return stats
 

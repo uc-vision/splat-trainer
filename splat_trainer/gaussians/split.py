@@ -13,12 +13,10 @@ import roma
 
     
 
-def point_basis(points:TensorDict):
-  scale = torch.exp(points['log_scaling'])
-
-  r = F.normalize(points['rotation'], dim=1)
+def point_basis(log_scaling:torch.Tensor, rotation_quat:torch.Tensor):
+  scale = torch.exp(log_scaling)
+  r = F.normalize(rotation_quat, dim=1)
   m = roma.unitquat_to_rotmat(r)
-
 
   return m.transpose(1, 2) * scale.unsqueeze(-1)
 
@@ -26,7 +24,7 @@ def point_basis(points:TensorDict):
 def split_by_samples(points: TensorDict, samples: torch.Tensor) -> TensorDict:
   num_points, n, _ = samples.shape
 
-  basis = point_basis(points)
+  basis = point_basis(points['log_scaling'], points['rotation'])
   point_samples = (samples.view(-1, 3).unsqueeze(1) @ basis.repeat_interleave(repeats=n, dim=0)).squeeze(1)
 
   gaussians = points.apply(
