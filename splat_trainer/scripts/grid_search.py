@@ -5,6 +5,7 @@ import taichi as ti
 
 from splat_trainer.scripts.train_scan import train_with_config
 from splat_trainer.trainer import Trainer
+from splat_trainer import config
 
 
 def find_dataset_config(name:str, test_datasets:DictConfig):
@@ -17,6 +18,8 @@ def find_dataset_config(name:str, test_datasets:DictConfig):
 
   raise AttributeError(f"Scene {name} not found in test datasets")
 
+
+OmegaConf.register_new_resolver("sanitize", lambda x: x.replace("/", "__"))
 
 
 @hydra.main(config_path="../config", version_base="1.2", config_name="grid_search")

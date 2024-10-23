@@ -32,7 +32,9 @@ class AverageResult(Callback):
 
         job_num = config.hydra.job.num
         params = {k: v for k, v in (override.split('=') 
-                        for override in OmegaConf.select(config, "hydra.overrides.task"))}
+                    for override in OmegaConf.select(config, "hydra.overrides.task")) 
+                    if k in self.params}
+        
         assert self.params.keys() == params.keys()
 
         if job_return.status == JobStatus.COMPLETED:
@@ -44,10 +46,12 @@ class AverageResult(Callback):
                 "params": params,
                 "result": job_return.return_value
             }
+
             self.save_to_json(self.results_file, result_data)
+            self.log.info(f"Job {job_num} result has been successfully saved to {file}.\n")
 
         else:
-            self.log.error(f"Job {job_num} failed with error: {job_return.return_value}")
+            self.log.error(f"Job {job_num} failed with error: {job_return._return_value}")
 
             job = rq.get_current_job()
             job_data = {
@@ -55,11 +59,15 @@ class AverageResult(Callback):
                 "job_id": job.id,
                 "params": params,
                 "hostname": socket.gethostname(),
-                "status": job_return.status,
-                "error": job_return.return_value
+                "status": 'failed',
+                "error_info": {
+                    "error_type": type(job_return._return_value).__name__,
+                    "error_message": str(job_return._return_value),
+                }
             }
 
             self.save_to_json(self.failed_jobs_file, job_data)
+            self.log.info(f"Job {job_num} has failed and the details have been saved to {file}.\n")
 
 
     def on_multirun_end(self, config: DictConfig, **kwargs: Any) -> None:
@@ -107,11 +115,6 @@ class AverageResult(Callback):
             all_data = self.load_data(file)
             all_data[job_num] = data
             self.dump_data(file, all_data)
-
-        if 'error' in data:
-            self.log.info(f"Job {job_num} has failed and the details have been saved to {file}.\n")
-        else:
-            self.log.info(f"Job {job_num} result has been successfully saved to {file}.\n")
 
 
 def average_results(file_path: Union[Path, str] = None) -> None:

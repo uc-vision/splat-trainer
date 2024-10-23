@@ -1,0 +1,11 @@
+# @package _global_
+
+
+hydra:
+  callbacks:
+    manage_rq_workers:
+      _target_: splat_trainer.util.manage_rq_worker.ManageRQWorkers
+      config_file: test
+      flask_port: 8000
+      redis_port: 6379
+      get_pass: False

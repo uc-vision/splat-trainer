@@ -8,8 +8,9 @@ defaults:
   - test_datasets: default
   - color_corrector: nil
   - /hydra/callbacks:
+    - manage_rq_workers
     - average_result
-  - override hydra/launcher: custom_rq
+  - override hydra/launcher: rq_launcher
   - _self_
 
 
@@ -17,7 +18,7 @@ trainer:
   save_checkpoints: False
   save_output: False
 
-  steps: 1000 # tiny number for testing
+  steps: 20
 
 test_scene: ???
 
@@ -35,12 +36,14 @@ hydra:
   sweeper:
     params:
       # trainer.reg_loss_weight: choice([1, 1, 1], [0, 0, 0], [1, 0, 0], [0, 1, 0], [0, 0, 1], [1, 1, 0], [1, 0, 1], [0, 1, 1])
-      trainer.reg_loss_weight: choice([1, 1, 1], [0, 0, 0])
-      # scene: sh, tcnn
+      scene: sh, tcnn
+      # trainer.reg_loss_weight: choice([1,1,1], [0,0,0])
       # color_corrector: nil, bilateral
-      test_scene: bonsai, scan_1457_west, scan_21
+      # test_scene: bonsai, scan_1457_west, scan_21, bicycle, counter, flowers, garden, kitchen, room, stump, treehill, scan_1457_east, scan_23
+      test_scene: kitchen, scan_1457_west
 
-
+project: ${sanitize:${hydra:sweep.dir}}
+run_name: ${sanitize:${hydra:sweep.subdir}}
 
 wait_exit: False
 debug: False
