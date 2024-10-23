@@ -11,8 +11,9 @@ import fabric
 import keyring
 import yaml
 import redis
-from rq import Worker
-from rq.command import send_shutdown_command
+import uuid
+from rq.worker import Worker, WorkerStatus
+from rq.command import send_shutdown_command, send_kill_horse_command
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from paramiko.ssh_exception import SSHException, AuthenticationException
 
@@ -25,10 +26,11 @@ class Machine:
   msg:Optional[str] = None
 
   
-def deploy_group(workers:List[str], connect_kwargs):
+def deploy_group(workers:List[str], connect_kwargs, redis_url):
 
   def deploy(worker: str):
-    host = socket.gethostname()
+    worker_name = f'{worker}_{str(uuid.uuid4())}'
+
     try:
       with fabric.Connection(worker, connect_kwargs=connect_kwargs) as c:
         command = """
@@ -37,8 +39,11 @@ def deploy_group(workers:List[str], connect_kwargs):
           conda activate splat-trainer-py10
           cd ~/splat-trainer
           mkdir -p ./log
-          rq worker -c splat_trainer.config.settings --serializer splat_trainer.util.deploy.cloudpickle > ./log/{worker}.log 2>&1
-          """.format(host=host, worker=worker)
+          rq worker --url {redis_url} \\
+                    --name {worker_name} \\
+                    --serializer splat_trainer.util.deploy.cloudpickle \\
+                    > ./log/{worker}.log 2>&1
+          """.format(redis_url=redis_url, worker_name=worker_name, worker=worker)
         # try:
         c.run(command, hide="stdout", asynchronous=True)
         return Machine(worker, msg=f"RQ worker started on {worker}")
@@ -55,10 +60,9 @@ def deploy_group(workers:List[str], connect_kwargs):
     return list(pool.map(deploy, workers))
   
 
-def deploy_all(config):
-  connect_kwargs = get_connect_keys()
+def deploy_all(config, connect_kwargs, redis_url):
 
-  result = {name:deploy_group(workers, connect_kwargs)  
+  result = {name:deploy_group(workers, connect_kwargs, redis_url)  
           for name, workers in config['groups'].items()}
 
   count = 0
@@ -73,29 +77,32 @@ def deploy_all(config):
   return result
 
 
-def deployer(config_file: str):
+def deployer(args):
   config_path = Path(__file__).parent.parent / 'config'
-  config = read_config(config_path / f"{config_file}.yaml")
+  config = read_config(config_path / f"{args.config}.yaml")
 
-  return partial(deploy_all, config)
+  connect_kwargs = get_connect_keys(args.getpass)
+
+  return partial(deploy_all, config, connect_kwargs, args.redis_url)
 
 
-def deploy_workers(config_file: str):
-  deploy = deployer(config_file)
+def deploy_workers(args):
+  deploy = deployer(args)
   return deploy()  
 
 
-def get_connect_keys():
+def get_connect_keys(getpass: bool):
   connect_kwargs = {}
   user = getuser()
 
-  password = keyring.get_password('deploy_workers', user)
+  if getpass:
+    password = keyring.get_password('deploy_workers', user)
 
-  if password is None:
-    password = getpass()
-    keyring.set_password('deploy_workers', user, password)
+    if password is None:
+      password = getpass()
+      keyring.set_password('deploy_workers', user, password)
 
-  connect_kwargs=dict(password=password)
+    connect_kwargs=dict(password=password)
 
   return connect_kwargs
 
@@ -113,10 +120,15 @@ def get_all_workers(redis_url):
 
 
 def shutdown_all_workers(redis_url):
-  workers, redis_conn = get_all_workers(redis_url)
-  
-  for worker in workers:
-    send_shutdown_command(redis_conn, worker.name)
+    workers, redis_conn = get_all_workers(redis_url)
+    
+    for worker in workers:
+      if worker.state == WorkerStatus.BUSY:
+        send_kill_horse_command(redis_conn, worker.name)
+
+      send_shutdown_command(redis_conn, worker.name)
+
+
 
 
 

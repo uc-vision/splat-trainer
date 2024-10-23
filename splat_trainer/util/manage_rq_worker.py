@@ -1,56 +1,78 @@
-from typing import Any, Optional, Union
-import threading
 import importlib.resources
 import logging
+import socket
+import sys
+import threading
+import traceback
+from typing import Any, Optional, Union
+from types import SimpleNamespace
 
+import redis
+import rq_dashboard
+import signal
+from flask import Flask, render_template
 from hydra.experimental.callback import Callback
 from omegaconf import DictConfig, OmegaConf
-import redis
-import signal
-import importlib.resources
-import rq_dashboard
-from flask import Flask, render_template
 from rq import Worker
 
-from splat_trainer.util.deploy import get_all_workers, deploy_workers, shutdown_all_workers
+from splat_trainer.util.deploy import deploy_workers, shutdown_all_workers
 
 
 class ManageRQWorkers(Callback):
-    def __init__(self, redis_url, flask_port, config_file):
+    def __init__(self, config_file: str, flask_port: int=8000, redis_port: int=6379, get_pass: bool = False):
         self.data = {}
-        self.redis_url = redis_url
-        self.flask_port = flask_port
-        self.config_file = config_file
 
-
-    def on_multirun_start(self, config: DictConfig, **kwargs: Any) -> None:
-
-        result = deploy_workers(self.config_file)
-        self.data.update(result)
-
-        workers, conn = get_all_workers(self.redis_url)
-        print(workers)
-
-        flask_thread = threading.Thread(target=self.run_flask_app, daemon=True)
-        flask_thread.start()
+        self.args = SimpleNamespace(
+            config=config_file,
+            getpass=get_pass,
+            flask_port=flask_port,
+            redis_url=f'redis://{socket.gethostname()}:{redis_port}'
+        )
 
         signal.signal(signal.SIGINT, self.signal_handler)
         signal.signal(signal.SIGTSTP, self.signal_handler)
 
+
+    def on_multirun_start(self, config: DictConfig, **kwargs: Any) -> None:
+
+        try:
+            result = deploy_workers(self.args)
+        
+        except Exception as e:
+            self.shutdown_all_workers()
+            error_message = ''.join(traceback.format_exception(type(e), e, e.__traceback__))
+            raise SystemExit(error_message)  
+
+        self.data.update(result)
+
+        flask_thread = threading.Thread(target=self.run_flask_app, daemon=True)
+        flask_thread.start()
+
+
     def on_multirun_end(self, config: DictConfig, **kwargs: Any) -> None:
-        shutdown_all_workers(self.redis_url)
-        exit(0)
+        self.shutdown_all_workers()
         
 
     def signal_handler(self, signum, frame):
-        shutdown_all_workers(self.redis_url)
+        self.shutdown_all_workers()
+
+
+    def shutdown_all_workers(self):
+        try:
+            print("Shutting down all workers and exiting.")
+            shutdown_all_workers(self.args.redis_url)
+
+        except Exception as e:
+            print(f"Error while shutting down workers: {e}")
+
+        finally:
+            sys.exit(0)
 
     
     def run_flask_app(self):
+        flask_url = f"http://127.0.0.1:{self.args.flask_port}"
 
-        flask_url = f"http://127.0.0.1:{self.flask_port}"
-
-        print("\n" + " " + "-" * 61)
+        print(" " + "-" * 61)
         print(f"|{' ' * 61}|")
         print(f"| Running on {flask_url:<46}   |")
         print(f"| RQ Dashboard running on: {(flask_url + '/rq'):<31}    |")
@@ -66,7 +88,7 @@ class ManageRQWorkers(Callback):
             app = Flask(__name__, template_folder=str(template_folder))
 
         app.config.from_object(rq_dashboard.default_settings)
-        app.config['RQ_DASHBOARD_REDIS_URL'] = self.redis_url
+        app.config['RQ_DASHBOARD_REDIS_URL'] = self.args.redis_url
         rq_dashboard.web.setup_rq_connection(app)
         app.register_blueprint(rq_dashboard.blueprint, url_prefix="/rq")
                
@@ -74,8 +96,7 @@ class ManageRQWorkers(Callback):
         def index():
             return render_template('index.html', data=self.data)
 
-        app.run(host="0.0.0.0", debug=True, port=self.flask_port, use_reloader=False)
-
+        app.run(host="0.0.0.0", debug=True, port=self.args.flask_port, use_reloader=False)
 
 
 
