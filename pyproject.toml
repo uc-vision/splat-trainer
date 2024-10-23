@@ -56,6 +56,7 @@ grid-search-trainer = "splat_trainer.scripts.grid_search:main"
 evaluate-trainer = "splat_trainer.scripts.evaluate:evaluate"
 resume-trainer = "splat_trainer.scripts.evaluate:resume"
 rq-worker-launcher = "splat_trainer.scripts.rq_worker_launcher:main"
+shutdown-workers = "splat_trainer.scripts.shutdown_all_workers:main"
 
 
 [tool.setuptools.package-data]

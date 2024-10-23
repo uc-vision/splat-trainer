@@ -310,6 +310,8 @@ class Trainer:
 
       l1 = torch.nn.functional.l1_loss(image, source_image)
 
+      ssim = self.compute_ssim(image, source_image, self.config.ssim_levels)
+
       radius_hist = radius_hist.append(rendering.point_radii.log() / math.log(10.0), trim=False)
       image_id = filename.replace("/", "_")
 
@@ -320,7 +322,7 @@ class Trainer:
       add_worst = heapq.heappush if len(worst) < worst_count else heapq.heappushpop
       add_worst(worst, (-psnr.item(), l1.item(), rendering.detach(), source_image, image_id))
       
-      eval = dict(filename=filename, psnr = psnr.item(), l1 = l1.item())
+      eval = dict(filename=filename, psnr = psnr.item(), l1 = l1.item(), ssim = ssim.item())
       rows.append(eval)
       
       pbar.update(1)
@@ -332,7 +334,7 @@ class Trainer:
 
     self.logger.log_evaluations(f"eval_{name}/evals", rows, step=self.step)
     totals = transpose_rows(rows)
-    mean_l1, mean_psnr = np.mean(totals['l1']), np.mean(totals['psnr'])
+    mean_l1, mean_psnr, mean_ssim = np.mean(totals['l1']), np.mean(totals['psnr']), np.mean(totals['ssim'])
 
     self.log_value(f"eval_{name}/psnr", mean_psnr) 
     self.log_value(f"eval_{name}/l1", mean_l1) 
@@ -342,7 +344,8 @@ class Trainer:
 
     return {
             f"{name}_psnr": float(mean_psnr),
-            f"{name}_l1": float(mean_l1)
+            f"{name}_l1": float(mean_l1),
+            f"{name}_ssim": float(mean_ssim)
             }
 
 

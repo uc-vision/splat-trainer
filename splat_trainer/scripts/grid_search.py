@@ -5,7 +5,6 @@ import taichi as ti
 
 from splat_trainer.scripts.train_scan import train_with_config
 from splat_trainer.trainer import Trainer
-from splat_trainer import config
 
 
 def find_dataset_config(name:str, test_datasets:DictConfig):

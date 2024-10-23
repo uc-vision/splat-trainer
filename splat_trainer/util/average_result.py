@@ -48,7 +48,7 @@ class AverageResult(Callback):
             }
 
             self.save_to_json(self.results_file, result_data)
-            self.log.info(f"Job {job_num} result has been successfully saved to {file}.\n")
+            self.log.info(f"Job {job_num} result has been successfully saved to {self.results_file}.\n")
 
         else:
             self.log.error(f"Job {job_num} failed with error: {job_return._return_value}")
@@ -67,7 +67,7 @@ class AverageResult(Callback):
             }
 
             self.save_to_json(self.failed_jobs_file, job_data)
-            self.log.info(f"Job {job_num} has failed and the details have been saved to {file}.\n")
+            self.log.info(f"Job {job_num} has failed and the details have been saved to {self.failed_jobs_file}.\n")
 
 
     def on_multirun_end(self, config: DictConfig, **kwargs: Any) -> None:
