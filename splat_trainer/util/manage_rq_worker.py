@@ -19,14 +19,20 @@ from splat_trainer.util.deploy import deploy_workers, shutdown_all_workers
 
 
 class ManageRQWorkers(Callback):
-    def __init__(self, config_file: str, flask_port: int=8000, redis_port: int=6379, get_pass: bool = False):
+    def __init__(self, 
+                config_file: str, 
+                flask_port: int=8000, 
+                redis_port: int=6379, 
+                get_pass: bool=False,
+                max_num_worker_on_each_machine: int=1):
         self.data = {}
 
         self.args = SimpleNamespace(
             config=config_file,
             getpass=get_pass,
             flask_port=flask_port,
-            redis_url=f'redis://{socket.gethostname()}:{redis_port}'
+            redis_url=f'redis://{socket.gethostname()}:{redis_port}',
+            max_num_worker=max_num_worker_on_each_machine
         )
 
         signal.signal(signal.SIGINT, self.signal_handler)

@@ -3,6 +3,7 @@ import logging
 import json
 import os
 from collections import defaultdict
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional, Union
 
@@ -32,10 +33,9 @@ class AverageResult(Callback):
 
         job_num = config.hydra.job.num
         params = {k: v for k, v in (override.split('=') 
-                    for override in OmegaConf.select(config, "hydra.overrides.task")) 
-                    if k in self.params}
-        
-        assert self.params.keys() == params.keys()
+                    for override in OmegaConf.select(config, "hydra.overrides.task"))}
+        hostname = socket.gethostname()
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S" )
 
         if job_return.status == JobStatus.COMPLETED:
             self.log.info(f"Job {job_num} succeeded with return value: {job_return.return_value}. Saving job result...")
@@ -44,7 +44,9 @@ class AverageResult(Callback):
             result_data = {
                 "job_num": job_num,
                 "params": params,
-                "result": job_return.return_value
+                "result": job_return.return_value,
+                "hostname": hostname,
+                "timestamp": timestamp
             }
 
             self.save_to_json(self.results_file, result_data)
@@ -58,12 +60,13 @@ class AverageResult(Callback):
                 "job_num": job_num,
                 "job_id": job.id,
                 "params": params,
-                "hostname": socket.gethostname(),
                 "status": 'failed',
                 "error_info": {
                     "error_type": type(job_return._return_value).__name__,
                     "error_message": str(job_return._return_value),
-                }
+                },
+                "hostname": hostname,
+                "timestamp": timestamp
             }
 
             self.save_to_json(self.failed_jobs_file, job_data)

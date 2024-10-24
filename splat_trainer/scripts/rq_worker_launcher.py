@@ -57,6 +57,7 @@ def get_args():
   parsed_args = args.parse_args()  
   hostname = socket.gethostname()
   parsed_args.redis_url = f"redis://{hostname}:{parsed_args.redis_port}"
+  parsed_args.max_num_worker = 1
 
   return  parsed_args
 

@@ -19,6 +19,7 @@ def find_dataset_config(name:str, test_datasets:DictConfig):
 
 
 OmegaConf.register_new_resolver("sanitize", lambda x: x.replace("/", "__"))
+OmegaConf.register_new_resolver("simplify", lambda x: "__".join([item.split("=")[1] for item in x.split(",")]))
 
 
 @hydra.main(config_path="../config", version_base="1.2", config_name="grid_search")
