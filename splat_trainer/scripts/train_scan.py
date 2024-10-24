@@ -162,6 +162,7 @@ def train_with_config(cfg) -> dict | str:
   try:
     ti.init(arch=ti.cuda, debug=cfg.debug, device_memory_GB=0.1)
     
+    
     train_config = hydra.utils.instantiate(cfg.trainer, _convert_="object")
     dataset = hydra.utils.instantiate(cfg.dataset)
     

@@ -120,7 +120,9 @@ class SHScene(GaussianScene):
   def step(self, rendering:Rendering, t:float):
     lr = self.update_learning_rate(t)
 
-    update_depth(self.points, rendering, self.config.depth_ema)
+    if self.config.use_depth_lr:
+      update_depth(self.points, rendering, self.config.depth_ema)
+      
     self.points.step(visible_indexes=rendering.visible_indices)
 
     self.points.rotation = torch.nn.Parameter(

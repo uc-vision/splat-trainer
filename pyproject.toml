@@ -52,12 +52,11 @@ dependency_links = ["https://pypi.taichi.graphics/simple/"]
 [project.scripts]  # Optional
 splat-trainer = "splat_trainer.scripts.train_scan:main"
 to-colmap = "splat_trainer.scripts.to_colmap:main"
-
-
 grid-search-trainer = "splat_trainer.scripts.grid_search:main"
 evaluate-trainer = "splat_trainer.scripts.evaluate:evaluate"
 resume-trainer = "splat_trainer.scripts.evaluate:resume"
-
+rq-worker-launcher = "splat_trainer.scripts.rq_worker_launcher:main"
+shutdown-workers = "splat_trainer.scripts.shutdown_all_workers:main"
 
 
 [tool.setuptools.package-data]
@@ -73,3 +72,4 @@ filterwarnings = [
     # disable "UserWarning: The .grad attribute of a Tensor that is not a leaf Tensor"
     "ignore::UserWarning"  
 ]
+

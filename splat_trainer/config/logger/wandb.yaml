@@ -2,6 +2,6 @@
 
 logger:
   _target_: splat_trainer.logger.WandbLogger
-  entity: null
+  entity: UCVision
   project: ${..project}
   name: ${..run_name}
