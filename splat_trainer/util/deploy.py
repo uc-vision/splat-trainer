@@ -30,7 +30,7 @@ class Machine:
 def deploy_group(group_name: str, hosts:List[str], connect_kwargs, args):
 
   def deploy(host: str):
-    count, workers = get_worker_num(host, args.redis_url)
+    count = get_worker_num(host, args.redis_url)
 
     try:
       with fabric.Connection(host, connect_kwargs=connect_kwargs) as c:
@@ -61,12 +61,15 @@ def deploy_group(group_name: str, hosts:List[str], connect_kwargs, args):
                     --serializer splat_trainer.util.deploy.cloudpickle \\
                     > ./log/{host}.log 2>&1
           """.format(group_name=group_name, redis_url=args.redis_url, worker_name=worker_name, host=host)
+
+        # TODO: add logic to catch asynchronous error
         # try:
         c.run(command, hide="stdout", asynchronous=True)
         return Machine(host, msg=f"RQ worker started on {host}")
     
         # except Exception as e:
-        #   raise RuntimeError(f"{str(e)}")
+        #   raise SystemExit(f"{str(e)}")
+        #   shutdown_all_workers(args.redis_url)
 
     except (SSHException, socket.error) as e:
       return Machine(host, err=str(e))
@@ -77,7 +80,8 @@ def deploy_group(group_name: str, hosts:List[str], connect_kwargs, args):
   
 
 def deploy_all(config, connect_kwargs, args):
-
+  flush_all(args.redis_url)
+ 
   result = {group_name:deploy_group(group_name, hosts, connect_kwargs, args)  
           for group_name, hosts in config['groups'].items() if hosts}
 
@@ -141,28 +145,32 @@ def get_all_workers(redis_url):
   redis_conn = redis.from_url(redis_url)
   workers = Worker.all(connection=redis_conn)
 
-  return workers, redis_conn
+  return workers
 
 
 def shutdown_all_workers(redis_url):
-    workers, redis_conn = get_all_workers(redis_url)
-    
-    for worker in workers:
-      if worker.state == WorkerStatus.BUSY:
-        send_kill_horse_command(redis_conn, worker.name)
+  redis_conn = redis.from_url(redis_url)
+  workers = get_all_workers(redis_url)
+  
+  for worker in workers:
+    if worker.state == WorkerStatus.BUSY:
+      send_kill_horse_command(redis_conn, worker.name)
 
-      send_shutdown_command(redis_conn, worker.name)
-
-
-def get_worker_num(hostname: str, redis_url: str):
-    workers, _ = get_all_workers(redis_url)
-    count = 0
-    for rq_worker in workers:
-      if rq_worker.name.split('_')[0] == hostname:
-        count += 1
-    return count, workers
+    send_shutdown_command(redis_conn, worker.name)
 
 
+def get_worker_num(name: str, redis_url: str):
+  workers = get_all_workers(redis_url)
+  count = 0
+  for worker in workers:
+    if name in worker.name:
+      count += 1
+  return count
+
+
+def flush_all(redis_url: str):
+  redis_conn = redis.from_url(redis_url)
+  redis_conn.flushall()
 
 
 

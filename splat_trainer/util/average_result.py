@@ -152,6 +152,9 @@ def average_results(file_path: Union[Path, str] = None) -> None:
         for param_values, job_num, test_scene, value in metric_list:
             results[param_values].append((job_num, test_scene, value))
 
+        for k in results:
+            results[k].sort(key=lambda x: x[1])
+
         for param_values, job_list in results.items():
             total_value = sum(value for _, _, value in job_list)
             avg_value = total_value / len(job_list)
@@ -161,14 +164,12 @@ def average_results(file_path: Union[Path, str] = None) -> None:
         updated_metric_list.sort(key=lambda x: x[-1], reverse=True if 'psnr' in metric else False)
         metric_results[metric] = updated_metric_list
 
-    sorted_averaged_results = []
     averaged_results = []
     for metric, job_list in metric_results.items():
         for param_values, job_num, test_scene, value, avg_value in job_list:
             averaged_results.append((job_num, *param_values, test_scene, value, avg_value, metric))
-        sorted_averaged_results.extend(averaged_results.sort(key=lambda x: x[-4]))
 
-    df = pd.DataFrame(sorted_averaged_results, columns=['job_num', *param_names, 'test_scene', 'value', 'avg_value', 'metric'])
+    df = pd.DataFrame(averaged_results, columns=['job_num', *param_names, 'test_scene', 'value', 'avg_value', 'metric'])
 
     for col in ['metric']:
         df.loc[df[col].duplicated(), col] = ''
