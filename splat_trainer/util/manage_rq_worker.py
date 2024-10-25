@@ -45,9 +45,9 @@ class ManageRQWorkers(Callback):
             result = deploy_workers(self.args)
         
         except Exception as e:
-            self.shutdown_all_workers()
             error_message = ''.join(traceback.format_exception(type(e), e, e.__traceback__))
             raise SystemExit(error_message)  
+            self.shutdown_all_workers()
 
         self.data.update(result)
 

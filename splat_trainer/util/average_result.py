@@ -161,12 +161,14 @@ def average_results(file_path: Union[Path, str] = None) -> None:
         updated_metric_list.sort(key=lambda x: x[-1], reverse=True if 'psnr' in metric else False)
         metric_results[metric] = updated_metric_list
 
+    sorted_averaged_results = []
     averaged_results = []
     for metric, job_list in metric_results.items():
         for param_values, job_num, test_scene, value, avg_value in job_list:
             averaged_results.append((job_num, *param_values, test_scene, value, avg_value, metric))
+        sorted_averaged_results.extend(averaged_results.sort(key=lambda x: x[-4]))
 
-    df = pd.DataFrame(averaged_results, columns=['job_num', *param_names, 'test_scene', 'value', 'avg_value', 'metric'])
+    df = pd.DataFrame(sorted_averaged_results, columns=['job_num', *param_names, 'test_scene', 'value', 'avg_value', 'metric'])
 
     for col in ['metric']:
         df.loc[df[col].duplicated(), col] = ''
@@ -177,15 +179,16 @@ def average_results(file_path: Union[Path, str] = None) -> None:
     for col in ['avg_value']:
         df.loc[df[col].duplicated(), col] = np.nan
 
-    output_file = file_path / "averaged_results.csv"
+    output_file = Path(file_path) / "averaged_results.csv"
     df.to_csv(output_file, index=False)
     
     print(f"Averaged results saved to {output_file}")
+    return
 
 
 def get_args():
   args = argparse.ArgumentParser(description='Average training results across the scenes.')
-  args.add_argument('path', type=str, required=True, help='Path to the result file')
+  args.add_argument('path', type=str, help='Path to the result file')
 
   return args.parse_args()
 

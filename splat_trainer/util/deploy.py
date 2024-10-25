@@ -27,7 +27,7 @@ class Machine:
   msg:Optional[str] = None
 
   
-def deploy_group(hosts:List[str], connect_kwargs, args):
+def deploy_group(group_name: str, hosts:List[str], connect_kwargs, args):
 
   def deploy(host: str):
     count, workers = get_worker_num(host, args.redis_url)
@@ -51,7 +51,7 @@ def deploy_group(hosts:List[str], connect_kwargs, args):
 
         worker_name = f'{host}_{str(uuid.uuid4())}'
         command = """
-          export TORCH_EXTENSIONS_DIR=~/.cache/torch_extensions/py310_cu121_worker
+          export TORCH_EXTENSIONS_DIR=~/.cache/torch_extensions/py310_cu121_{group_name}
           source ~/.bashrc
           conda activate splat-trainer-py10
           cd ~/splat-trainer
@@ -60,7 +60,7 @@ def deploy_group(hosts:List[str], connect_kwargs, args):
                     --name {worker_name} \\
                     --serializer splat_trainer.util.deploy.cloudpickle \\
                     > ./log/{host}.log 2>&1
-          """.format(redis_url=args.redis_url, worker_name=worker_name, host=host)
+          """.format(group_name=group_name, redis_url=args.redis_url, worker_name=worker_name, host=host)
         # try:
         c.run(command, hide="stdout", asynchronous=True)
         return Machine(host, msg=f"RQ worker started on {host}")
@@ -78,10 +78,10 @@ def deploy_group(hosts:List[str], connect_kwargs, args):
 
 def deploy_all(config, connect_kwargs, args):
 
-  result = {name:deploy_group(hosts, connect_kwargs, args)  
-          for name, hosts in config['groups'].items()}
+  result = {group_name:deploy_group(group_name, hosts, connect_kwargs, args)  
+          for group_name, hosts in config['groups'].items() if hosts}
 
-  machines = [machine for name, group in result.items() for machine in group]
+  machines = [machine for group_name, group in result.items() for machine in group]
 
   count = 0
   machine_names = []
@@ -96,7 +96,8 @@ def deploy_all(config, connect_kwargs, args):
   max_duplicate = max(duplicate_counts.values())
   assert max_duplicate <= args.max_num_worker, f"Maximum {max_num_worker} rq workers allowed on each machine, got {max_duplicate}."
 
-  print(f"\n{count} RQ workers are to be running on {len(machines)} machines.\n")
+  print(f"\n{len(machine_names)}/{len(machines)} machines connected.")
+  print(f"{count} RQ workers starts running...\n")
 
   return result
 
