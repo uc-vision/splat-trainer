@@ -106,7 +106,7 @@ class ThresholdController(Controller):
     idx = rendering.points_in_view
 
     longest_side = max(*rendering.image_size)
-    point_grad = rendering.split_heuristics[:, 1] * 0.5 * longest_side
+    point_grad = rendering.split_score * 0.5 * longest_side
 
     visible_mask = (point_grad > 0)
 

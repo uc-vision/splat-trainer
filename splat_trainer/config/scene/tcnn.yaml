@@ -5,16 +5,27 @@ trainer:
   scene: 
     _target_: splat_trainer.scene.TCNNConfig
 
-    learning_rates:
-      position:     ${log_decay:0.05, 0.1}
-      log_scaling:  0.01
-      rotation:     0.0025
-      alpha_logit:  0.025
-      feature:   0.05
+    parameters:
+      position:
+        lr: ${log_decay:0.1, 0.1}
+        type: local_vector
+
+      log_scaling:
+        lr: 0.03
+
+      rotation:
+        lr: 0.01
+
+      alpha_logit:
+        lr: 0.05
+
+      feature:
+        lr: 0.5
+        type: vector
 
 
-    beta1: 0.8
-    beta2: 0.999
+    beta1: 0.9
+    beta2: 0.99
 
     # TCNN specific
     image_features: 16
@@ -23,7 +34,7 @@ trainer:
     hidden_features: 64
     affine_color_model: False
 
-    layers: 2
+    layers: 3
 
     # Per image features (as opposed to per-camera features)
     per_image: True

@@ -13,7 +13,8 @@ import taichi as ti
 def show_image(image):
   image = (image * 255).to(torch.uint8).cpu().numpy()
   cv2.imshow("rendering", image)
-  return cv2.waitKey(0)
+  while cv2.waitKey(1) == -1:
+    pass
 
 
 def main():
@@ -21,7 +22,7 @@ def main():
 
   while True:
     camera = random_camera(image_size=(640, 480))
-    gaussians = random_3d_gaussians(5, camera, alpha_range=(1.0, 1.0), scale_factor=0.2)
+    gaussians = random_3d_gaussians(5, camera, alpha_range=(0.5, 1.0), scale_factor=0.2)
 
     device = torch.device("cuda:0")
     camera, gaussians = camera.to(device), gaussians.to(device)

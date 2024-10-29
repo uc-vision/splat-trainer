@@ -11,13 +11,14 @@ trainer:
 
   save_checkpoints: False
   save_output: True
+  evaluate_first: False
 
   # Initialisation from a point cloud
-  num_neighbors: 3
+  num_neighbors: 5
   initial_alpha: 0.2
-  initial_point_scale: 0.2
+  initial_point_scale: 0.5
 
-  initial_points: 50000
+  initial_points: 200000
   limit_points: null
   
   add_initial_points: False  # if true, add extra random points to the point cloud
@@ -27,19 +28,21 @@ trainer:
   l1_weight: 1.0
   ssim_levels: 4
 
-  scale_reg: 0.1
-  opacity_reg: ${log_linear:1.0,0.01}
-  aspect_reg: 0.01
+  scale_reg: ${log_decay:10.0, 0.01}
+  opacity_reg: ${log_decay:0.01, 0.01}
+  
+
+  aspect_reg: 0.0
 
   blur_cov: 0.3 # only used if antialias is false
   antialias: False
 
   densify_interval: 
     _target_: splat_trainer.config.Piecewise
-    start: 100
+    start: 200
     steps:
-      - [0.2, 200]
-      - [0.5, 400]
+      - [0.2, 400]
+      - [0.5, 800]
 
   raster_config: 
     _target_: taichi_splatting.RasterConfig
