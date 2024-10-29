@@ -45,8 +45,6 @@ class TCNNConfig(GaussianSceneConfig):
 
   per_image:bool = True
 
-  # depth_ema:float = 0.95
-  # use_depth_lr:bool = True
 
   beta1:float = 0.9
   beta2:float = 0.999
@@ -79,6 +77,9 @@ class TCNNConfig(GaussianSceneConfig):
     scene.color_opt.load_state_dict(state['color_opt'])
 
     return scene
+
+
+
 
 
 @beartype
@@ -122,9 +123,6 @@ class TCNNScene(GaussianScene):
   def update_learning_rate(self, t:float):
     groups = eval_varyings(self.config.parameters, t)
 
-    # if not self.config.use_depth_lr:
-    #   groups['position']['lr'] *= self.scene_extents
-    
     self.points.update_groups(**groups)
     self.color_model.schedule(self.color_opt, 
             self.config.lr_nn, self.config.lr_image_feature, t)
@@ -136,21 +134,14 @@ class TCNNScene(GaussianScene):
   def step(self, rendering:Rendering, t:float) -> Dict[str, float]:
     self.update_learning_rate(t)
   
-    # if self.config.use_depth_lr:
-    #   update_depth(self.points, rendering, self.config.depth_ema)
+    vis = rendering.visible_indices
+    basis = point_basis(self.points.log_scaling[vis], self.points.rotation[vis]).contiguous()
+    self.points.step(visible_indexes=vis, basis=basis)
 
-    idx = rendering.visible_indices
-    basis = point_basis(self.points.log_scaling[idx], self.points.rotation[idx]).contiguous()
-
-    self.points.update_group('position', basis=basis)
-
-    self.points.step(visible_indexes=idx)
-    # check_finite(self.points)
     self.color_opt.step()
     self.points.rotation = torch.nn.Parameter(
       F.normalize(self.points.rotation.detach(), dim=1), requires_grad=True)
-    
-    
+        
     self.points.zero_grad()
     self.color_opt.zero_grad()
     
@@ -159,7 +150,7 @@ class TCNNScene(GaussianScene):
 
   def split_and_prune(self, keep_mask, split_idx):
     splits = split_gaussians_uniform(
-      self.points[split_idx].detach(), n=2)
+      self.points[split_idx].detach(), n=2, random_axis=True)
 
     self.points = self.points[keep_mask].append_tensors(splits)
  

@@ -15,7 +15,7 @@ from splat_trainer.logger.logger import Logger
 from .controller import Controller, ControllerConfig
 from splat_trainer.scene import GaussianScene
 
-from splat_trainer.config import Between, SmoothStep, VaryingFloat, eval_varying, smoothstep
+from splat_trainer.config import Between, SmoothStep, VaryingFloat, eval_varying
 
 @tensorclass
 class PointStatistics:
@@ -51,6 +51,7 @@ class TargetConfig(ControllerConfig):
 
   # maximum screen-space size for a floater point (otherwise pruned)
   max_scale:float = 0.5
+  target_schedule:VaryingFloat = Between(0, 0.6, SmoothStep(0.0, 1.0))
 
 
 
@@ -97,20 +98,22 @@ class TargetController(Controller):
 
   def find_split_prune_indexes(self, t:float):
     config = self.config  
-    n = self.points.shape[0]
+    n = self.points.batch_size[0]
 
     # point count schedule
-    # schedule = eval_varying(self.config.target_schedule, t)
-    schedule = smoothstep(t, self.start_count, self.config.target_count, interval=(0, 0.6))
-    target = max(n, math.ceil(schedule))
+    schedule = eval_varying(self.config.target_schedule, t)
+    target = max(n, math.ceil(schedule * self.config.target_count))
 
     # number of pruned points is controlled by the split rated
+    # prune_rate = (config.prune_rate * config.densify_interval/100)
     n_prune = math.ceil(config.prune_rate * n * (1 - t))
+
+    
 
     n = self.points.split_score.shape[0]
     prune_mask = (take_n(self.points.prune_cost, n_prune, descending=False) 
-                  | (~torch.isfinite(self.points.prune_cost)) 
-                  | (self.points.max_scale > self.config.max_scale))
+                  | (~torch.isfinite(self.points.prune_cost)))
+                  # | (self.points.max_scale > self.config.max_scale))
 
     # number of split points is directly set to achieve the target count 
     # (and compensate for pruned points)
@@ -157,14 +160,12 @@ class TargetController(Controller):
 
   def step(self, rendering:Rendering, step:int)  -> Dict[str, float]: 
     idx = rendering.points_in_view
-    split_score, prune_cost = rendering.split_heuristics.unbind(1)
-
     points = self.points
 
     # Some alternative update rule
 
-    points.split_score[idx] = exp_lerp(self.config.split_alpha, split_score, points.split_score[idx])
-    points.prune_cost[idx] = exp_lerp(self.config.prune_alpha, prune_cost, points.prune_cost[idx])
+    points.split_score[idx] = exp_lerp(self.config.split_alpha, rendering.split_score, points.split_score[idx])
+    points.prune_cost[idx] = exp_lerp(self.config.prune_alpha, rendering.prune_cost, points.prune_cost[idx])
     
     # points.prune_cost[idx] = torch.maximum(points.prune_cost[idx], prune_cost) 
 

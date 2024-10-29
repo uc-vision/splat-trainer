@@ -14,8 +14,8 @@ from splat_trainer.config import eval_varyings
 from splat_trainer.logger.logger import Logger
 from splat_trainer.scene.io import write_gaussians
 from splat_trainer.scene.scene import GaussianSceneConfig, GaussianScene
-from splat_trainer.gaussians.split import  split_gaussians_uniform
-from splat_trainer.scene.util import parameters_from_gaussians, update_depth
+from splat_trainer.gaussians.split import  point_basis, split_gaussians_uniform
+from splat_trainer.scene.util import parameters_from_gaussians
 from splat_trainer.util.misc import   rgb_to_sh
 
 from taichi_splatting.optim.parameter_class import ParameterClass
@@ -35,8 +35,6 @@ class SHConfig(GaussianSceneConfig):
   # proportion of training progress per sh degree
   degree_progress: float = 0.1 
 
-  depth_ema:float = 0.95
-  use_depth_lr:bool = True
 
   beta1:float = 0.9
   beta2:float = 0.999
@@ -87,12 +85,6 @@ class SHScene(GaussianScene):
     return f"SHScene({self.num_points} points)"
 
 
-  @beartype
-  def update_learning_rate(self, lr_scale:float):
-    if not self.config.use_depth_lr:
-      lr_scale *= self.config.scene_extents
-
-    self.points.set_learning_rate(position = self.learning_rates ['position'] * lr_scale)
 
 
   def sh_mask(self, t:float):
@@ -106,22 +98,22 @@ class SHScene(GaussianScene):
     return mask
 
   def update_learning_rate(self, t:float):
-    lr = eval_varyings(self.config.learning_rates, t)
-    if not self.config.use_depth_lr:
-      lr['position'] *= self.scene_extents
-    
-    self.points.set_learning_rate(**lr)
+    groups = eval_varyings(self.config.parameters, t)
+
+    self.points.update_groups(**groups)
     self.points.update_group('feature', mask_lr=self.sh_mask(t))
 
-    return lr
+    return self.points.learning_rates
 
 
   @beartype
   def step(self, rendering:Rendering, t:float):
     lr = self.update_learning_rate(t)
 
-    update_depth(self.points, rendering, self.config.depth_ema)
-    self.points.step(visible_indexes=rendering.visible_indices)
+    vis = rendering.visible_indices
+    basis = point_basis(self.points.log_scaling[vis], self.points.rotation[vis]).contiguous()
+    self.points.step(visible_indexes=vis, basis=basis)
+
 
     self.points.rotation = torch.nn.Parameter(
       F.normalize(self.points.rotation.detach(), dim=1), requires_grad=True)

@@ -66,7 +66,7 @@ def split_gaussians(points: TensorDict, n:int=2, scaling:Optional[float]=None) -
   return split_with_offsets(scaled, offsets)
 
 
-def split_gaussians_uniform(points: TensorDict, n:int=2, scaling:Optional[float]=None, sep:float=0.7, random_axis:bool=True) -> TensorDict:
+def split_gaussians_uniform(points: TensorDict, n:int=2, scaling:Optional[float]=None, sep:float=0.7, random_axis:bool=False) -> TensorDict:
   if random_axis:
     normalized_scaling = F.normalize(points['log_scaling'].exp(), dim=1)
 

@@ -7,11 +7,11 @@ trainer:
 
     parameters:
       position:
-        lr: ${log_decay:0.05, 0.1}
-        type: vector
+        lr: ${log_decay:0.1, 0.1}
+        type: local_vector
 
       log_scaling:
-        lr: 0.02
+        lr: 0.03
 
       rotation:
         lr: 0.01

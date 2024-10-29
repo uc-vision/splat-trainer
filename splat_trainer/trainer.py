@@ -299,7 +299,7 @@ class Trainer:
     pbar = tqdm(total=len(data), desc=f"rendering {name}", leave=False)
     for i, (filename, camera_params, image_idx, source_image) in enumerate(self.iter_data(data)):
 
-      config = replace(self.config.raster_config, compute_split_heuristics=True, 
+      config = replace(self.config.raster_config, compute_point_heuristics=True, 
                         antialias=self.config.antialias,
                        blur_cov=self.blur_cov)
       
@@ -444,7 +444,7 @@ class Trainer:
   def training_step(self, filename:str, camera_params:CameraParams, image_idx:int, image:torch.Tensor, timer:CudaTimer) -> dict:
 
     with timer:
-      config = replace(self.config.raster_config, compute_split_heuristics=True, 
+      config = replace(self.config.raster_config, compute_point_heuristics=True, 
                        antialias=self.config.antialias,
                        blur_cov=self.blur_cov)  
       
