@@ -6,7 +6,7 @@ from beartype import beartype
 from beartype.typing import Optional
 import numpy as np
 
-from splat_trainer.util.misc import exp_lerp
+from splat_trainer.util.misc import exp_lerp, lerp
 from taichi_splatting import Rendering
 from tensordict import tensorclass
 import torch
@@ -102,7 +102,9 @@ class TargetController(Controller):
 
     # point count schedule
     schedule = eval_varying(self.config.target_schedule, t)
-    target = max(n, math.ceil(schedule * self.config.target_count))
+
+    total_added = self.config.target_count - self.start_count
+    target = max(n, self.start_count + math.ceil(schedule * total_added))
 
     # number of pruned points is controlled by the split rated
     # prune_rate = (config.prune_rate * config.densify_interval/100)
@@ -164,7 +166,7 @@ class TargetController(Controller):
 
     # Some alternative update rule
 
-    points.split_score[idx] = exp_lerp(self.config.split_alpha, rendering.split_score, points.split_score[idx])
+    points.split_score[idx] = exp_lerp(self.config.split_alpha, rendering.split_score, points.split_score[idx])    
     points.prune_cost[idx] = exp_lerp(self.config.prune_alpha, rendering.prune_cost, points.prune_cost[idx])
     
     # points.prune_cost[idx] = torch.maximum(points.prune_cost[idx], prune_cost) 

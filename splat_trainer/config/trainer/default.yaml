@@ -16,7 +16,7 @@ trainer:
   # Initialisation from a point cloud
   num_neighbors: 5
   initial_alpha: 0.2
-  initial_point_scale: 0.1
+  initial_point_scale: 0.2
 
   initial_points: 200000
   limit_points: null
@@ -29,9 +29,8 @@ trainer:
   ssim_levels: 4
 
   scale_reg: ${log_decay:10.0, 0.01}
-  opacity_reg: ${log_decay:0.01, 0.01}
+  opacity_reg: ${log_decay:0.1, 0.01}
   
-
   aspect_reg: 0.0
 
   blur_cov: 0.3 # only used if antialias is false
@@ -39,10 +38,12 @@ trainer:
 
   densify_interval: 
     _target_: splat_trainer.config.Piecewise
-    start: 200
+    start: 50
     steps:
-      - [0.2, 400]
-      - [0.5, 800]
+      - [0.2, 100]
+      - [0.5, 200]
+
+
 
   raster_config: 
     _target_: taichi_splatting.RasterConfig

@@ -5,7 +5,7 @@ trainer:
     _target_: splat_trainer.scene.SHConfig
     parameters:
       position:
-        lr: ${log_decay:0.1, 0.1}
+        lr: ${log_decay:0.1, 0.25}
         type: local_vector
 
       log_scaling:
