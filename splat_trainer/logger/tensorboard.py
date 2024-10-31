@@ -63,9 +63,9 @@ class TensorboardLogger(Logger):
       self.process.terminate()
     
   @beartype
-  def log_evaluations(self, name, rows:List[Dict], step):
+  def log_evaluations(self, name, rows:Dict[str, Dict], step):
     headers = list(rows[0].keys())
-    rows = [list(row.values()) for row in rows]
+    rows = [list(k, *row.values()) for k, row in rows.items()]
     table = tabulate.tabulate(rows, headers, tablefmt="pipe", floatfmt=".3f")
 
     self.enqueue(self.writer.add_text, name, table, global_step=step)

@@ -11,7 +11,6 @@ trainer:
 
   save_checkpoints: False
   save_output: True
-  evaluate_first: False
 
   # Initialisation from a point cloud
   num_neighbors: 5

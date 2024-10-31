@@ -1,4 +1,5 @@
 from abc import ABCMeta, abstractmethod
+from typing import Dict
 from beartype.typing import  List
 import torch
 
@@ -10,7 +11,7 @@ from splat_trainer.util.pointcloud import PointCloud
 class Logger(metaclass=ABCMeta):
 
   @abstractmethod
-  def log_evaluations(self, name:str, data:List[dict], step:int):
+  def log_evaluations(self, name:str, data:Dict[str, Dict], step:int):
     raise NotImplementedError
 
   @abstractmethod
@@ -50,7 +51,7 @@ class NullLogger(Logger):
   def log_config(self, config:dict):
     pass
   
-  def log_evaluations(self, name:str,  data:List[dict], step:int):
+  def log_evaluations(self, name:str,  data:Dict[str, Dict], step:int):
     pass
 
   def log_image(self, name:str, image:torch.Tensor, step:int, caption:str | None = None):

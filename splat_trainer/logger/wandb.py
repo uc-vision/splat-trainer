@@ -57,10 +57,10 @@ class WandbLogger(Logger):
     self.run.config.update(config)
     
   @beartype
-  def log_evaluations(self, name, rows:List[Dict], step):
+  def log_evaluations(self, name, rows:Dict[str, Dict], step):
     table = wandb.Table(columns=list(rows[0].keys()))
-    for row in rows:
-      table.add_data(*row.values())
+    for k, row in rows.items():
+      table.add_data(k, *row.values())
                         
     self.log_data({name:table}, step=step)
 
