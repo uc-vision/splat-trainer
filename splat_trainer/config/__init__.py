@@ -60,6 +60,25 @@ class Piecewise(Varying[T]):
         value = next_value
 
     return value
+  
+
+def smoothstep(t, a, b, interval=(0, 1)):
+  # interpolate with smoothstep function
+  r = interval[1] - interval[0]
+  t =  clamp((t - interval[0]) / r, 0, 1)
+  return a + (b - a) * (3 * t ** 2 - 2 * t ** 3)
+
+
+
+class SmoothStep(Varying[float]):
+  def __init__(self, start:float, end:float):
+    self.start = start
+    self.end = end
+
+  def __call__(self, t:float) -> float:
+    return smoothstep(t, self.start, self.end)
+  
+
 
 def clamp(x:float, min_val:float, max_val:float):
   return max(min_val, min(x, max_val))
@@ -73,7 +92,7 @@ def eval_varyings(value, t:float):
     return resolve_varying(value, t, deep=True)
   if isinstance(value, Mapping):
     return value.__class__(**{k: eval_varyings(v, t) for k, v in value.items()})
-  elif isinstance(value, Sequence):
+  elif isinstance(value, Sequence) and not isinstance(value, str):
     return value.__class__(eval_varyings(v, t) for v in value)
 
   elif isinstance(value, Varying):
@@ -156,9 +175,13 @@ def add_resolvers():
 
     OmegaConf.register_new_resolver("piecewise", 
         lambda init,values: target('Piecewise', init=init, values=values))
+    
     OmegaConf.register_new_resolver("between", 
         lambda t_start,t_end,varying: target('Between', 
             dict(t_start=t_start, t_end=t_end, varying=varying)))
+
+    OmegaConf.register_new_resolver("smoothstep", 
+        lambda start,end: target('SmoothStep', start=start, end=end))
 
 
 def pretty(cfg):

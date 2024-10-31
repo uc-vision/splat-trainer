@@ -3,15 +3,25 @@
 trainer:
   scene: 
     _target_: splat_trainer.scene.SHConfig
-    learning_rates:
-      position:     ${log_decay:0.05, 0.1}
+    parameters:
+      position:
+        lr: ${log_decay:0.1, 0.25}
+        type: local_vector
 
-      log_scaling:  0.02
-      rotation:     0.0025
-      alpha_logit:  0.025
-      feature:   0.002
+      log_scaling:
+        lr: 0.03
 
-    beta1: 0.8
+      rotation:
+        lr: 0.01
+
+      alpha_logit:
+        lr: 0.05
+
+      feature:
+        lr: 0.02
+
+
+    beta1: 0.9
     beta2: 0.999
 
     sh_ratio: 20.0

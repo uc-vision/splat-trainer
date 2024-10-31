@@ -14,7 +14,7 @@ from splat_trainer.logger.logger import Logger
 from splat_trainer.scene.color_model import ColorModel
 from splat_trainer.scene.io import write_gaussians
 from splat_trainer.scene.scene import GaussianSceneConfig, GaussianScene
-from splat_trainer.gaussians.split import split_gaussians_uniform
+from splat_trainer.gaussians.split import point_basis, split_gaussians_uniform
 
 
 from taichi_splatting.optim import ParameterClass, SparseAdam
@@ -24,13 +24,13 @@ from taichi_splatting.renderer import render_projected, project_to_image
 from taichi_splatting.perspective import CameraParams
 
 
-from splat_trainer.scene.util import parameters_from_gaussians, update_depth
+from splat_trainer.scene.util import parameters_from_gaussians
 from splat_trainer.util.pointcloud import PointCloud
 
 @beartype
 @dataclass(kw_only=True, frozen=True)
 class TCNNConfig(GaussianSceneConfig):  
-  learning_rates : DictConfig | Dict
+  parameters : DictConfig | Dict
   
   lr_image_feature: VaryingFloat = 0.001
   lr_nn:VaryingFloat = 0.0001
@@ -45,8 +45,6 @@ class TCNNConfig(GaussianSceneConfig):
 
   per_image:bool = True
 
-  depth_ema:float = 0.99
-  use_depth_lr:bool = True
 
   beta1:float = 0.9
   beta2:float = 0.999
@@ -59,11 +57,11 @@ class TCNNConfig(GaussianSceneConfig):
     
 
     feature = torch.zeros(gaussians.batch_size[0], self.point_features)
-    torch.nn.init.normal_(feature, std=1.0)
+    torch.nn.init.normal_(feature, std=0.5)
 
     gaussians = gaussians.replace(feature=feature).to(device)
     points = parameters_from_gaussians(gaussians, 
-          eval_varyings(self.learning_rates, 0.), betas=(self.beta1, self.beta2))
+          eval_varyings(self.parameters, 0.), betas=(self.beta1, self.beta2))
     
     return TCNNScene(points, self, camera_table)
 
@@ -79,6 +77,9 @@ class TCNNConfig(GaussianSceneConfig):
     scene.color_opt.load_state_dict(state['color_opt'])
 
     return scene
+
+
+
 
 
 @beartype
@@ -120,40 +121,36 @@ class TCNNScene(GaussianScene):
     return f"TCNNScene({self.num_points} points)"
 
   def update_learning_rate(self, t:float):
-    lr = eval_varyings(self.config.learning_rates, t)
-    if not self.config.use_depth_lr:
-      lr['position'] *= self.scene_extents
-    
-    self.points.set_learning_rate(**lr)
+    groups = eval_varyings(self.config.parameters, t)
+
+    self.points.update_groups(**groups)
     self.color_model.schedule(self.color_opt, 
             self.config.lr_nn, self.config.lr_image_feature, t)
     
-    return lr
+
 
 
   @beartype
   def step(self, rendering:Rendering, t:float) -> Dict[str, float]:
-    lr = self.update_learning_rate(t)
+    self.update_learning_rate(t)
   
-    if self.config.use_depth_lr:
-      update_depth(self.points, rendering, self.config.depth_ema)
+    vis = rendering.visible_indices
+    basis = point_basis(self.points.log_scaling[vis], self.points.rotation[vis]).contiguous()
+    self.points.step(visible_indexes=vis, basis=basis)
 
-    self.points.step(visible_indexes=rendering.visible_indices)
-    # check_finite(self.points)
     self.color_opt.step()
     self.points.rotation = torch.nn.Parameter(
       F.normalize(self.points.rotation.detach(), dim=1), requires_grad=True)
-    
-    
+        
     self.points.zero_grad()
     self.color_opt.zero_grad()
     
-    return {**lr}
+    return self.points.learning_rates
 
 
   def split_and_prune(self, keep_mask, split_idx):
     splits = split_gaussians_uniform(
-      self.points[split_idx].detach(), n=2)
+      self.points[split_idx].detach(), n=2, random_axis=True)
 
     self.points = self.points[keep_mask].append_tensors(splits)
  

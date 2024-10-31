@@ -44,6 +44,11 @@ def cfg_from_args():
   training_group.add_argument("--bilateral", action="store_true", help="Use bilateral color correction")
 
 
+  # Rendering group
+  rendering_group = parser.add_argument_group("Rendering")
+  rendering_group.add_argument("--antialias", action="store_true", help="Use antialiasing")
+
+
   # Output group
   output_group = parser.add_argument_group("Output")
   output_group.add_argument("--project", type=str, required=True, help="Project name")
@@ -114,6 +119,10 @@ def cfg_from_args():
 
   if args.bilateral:
     overrides.append("color_corrector=bilateral")
+
+
+  if args.antialias:
+    overrides.append("trainer.antialias=true")
 
   # Output group
   if args.wandb is not None:
