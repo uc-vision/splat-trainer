@@ -34,7 +34,7 @@ def deploy_group(group_name: str, hosts:List[str], connect_kwargs, args):
 
     try:
       with fabric.Connection(host, connect_kwargs=connect_kwargs) as c:
-        check_existing_worker = f"pgrep -f 'rq worker --url {args.redis_url}'"
+        check_existing_worker = f"pgrep -f 'rq:worker'"
         result = c.run(check_existing_worker, warn=True, hide="stdout")
 
         if result.ok and result.stdout.strip():
@@ -56,10 +56,10 @@ def deploy_group(group_name: str, hosts:List[str], connect_kwargs, args):
           conda activate splat-trainer-py10
           cd ~/splat-trainer
           mkdir -p ./log
-          rq worker --url {redis_url} \\
-                    --name {worker_name} \\
-                    --serializer splat_trainer.util.deploy.cloudpickle \\
-                    > ./log/{host}.log 2>&1
+          rq worker high --url {redis_url} \\
+                         --name {worker_name} \\
+                         --serializer splat_trainer.util.deploy.cloudpickle \\
+                         > ./log/{host}.log 2>&1
           """.format(group_name=group_name, redis_url=args.redis_url, worker_name=worker_name, host=host)
 
         # TODO: add logic to catch asynchronous error
@@ -80,7 +80,6 @@ def deploy_group(group_name: str, hosts:List[str], connect_kwargs, args):
   
 
 def deploy_all(config, connect_kwargs, args):
-  flush_all(args.redis_url)
  
   result = {group_name:deploy_group(group_name, hosts, connect_kwargs, args)  
           for group_name, hosts in config['groups'].items() if hosts}
@@ -153,10 +152,24 @@ def shutdown_all_workers(redis_url):
   workers = get_all_workers(redis_url)
   
   for worker in workers:
-    if worker.state == WorkerStatus.BUSY:
-      send_kill_horse_command(redis_conn, worker.name)
+    shutdown_worker(worker, redis_url)
+    
 
-    send_shutdown_command(redis_conn, worker.name)
+def shutdown_worker(worker, redis_url):
+  redis_conn = redis.from_url(redis_url)
+  if worker.state == WorkerStatus.BUSY:
+    send_kill_horse_command(redis_conn, worker.name)
+
+  send_shutdown_command(redis_conn, worker.name)
+  
+
+def kill_rq_worker_by_name():
+  redis_url = "redis://cs24004kw:6379"
+  hostname = socket.gethostname()
+  workers = get_all_workers(redis_url)
+  for worker in workers:
+      if hostname in worker.name:
+          shutdown_worker(worker, redis_url)
 
 
 def get_worker_num(name: str, redis_url: str):
@@ -172,6 +185,29 @@ def flush_all(redis_url: str):
   redis_conn = redis.from_url(redis_url)
   redis_conn.flushall()
 
+
+def shutdown_all(hosts, connect_kwargs):
+  def shutdown(host: str):
+    try:
+      with fabric.Connection(host, connect_kwargs=connect_kwargs) as c:
+        command = "pgrep -f 'rq:worker'"
+        result = c.run(command, hide=True, warn=True)
+        num_rq_worker = len(result.stdout.strip().splitlines())
+        print(f"{host}__{num_rq_worker}")
+        if num_rq_worker:
+          command = """
+                    pkill -f rq:worker
+                    pkill -f splat-trainer
+                    """
+          c.run(command, hide=True, warn=True)
+          print(f"RQ worker terminated on {host}")
+
+    except (SSHException, socket.error) as e:
+      print(e)
+
+
+  with ThreadPoolExecutor() as pool:
+    return list(pool.map(shutdown, hosts))
 
 
 

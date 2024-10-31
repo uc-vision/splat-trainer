@@ -1,5 +1,7 @@
 import hydra
 from omegaconf import DictConfig, OmegaConf
+import re
+import sys
 
 import taichi as ti
 
@@ -19,12 +21,21 @@ def find_dataset_config(name:str, test_datasets:DictConfig):
 
 
 OmegaConf.register_new_resolver("sanitize", lambda x: x.replace("/", "__"))
-OmegaConf.register_new_resolver("extract", lambda x:  "__".join([item.split("=")[1] for item in x]) if x else "")
+OmegaConf.register_new_resolver(
+    "extract",
+    lambda x: "; ".join([
+        f"{(item.split('=')[0]).split('.')[-1]}={item.split('=')[1]}" 
+        if bool(re.match(r'^-?\d+(\.\d+)?$', item.split('=')[1])) or item.split('=')[1] in ['True', 'False', 'true', 'false'] 
+        else item.split('=')[1]
+        for item in x
+    ]) if x else ""
+)
+OmegaConf.register_new_resolver("format", lambda x: f"{x:04d}")
+
 
 
 @hydra.main(config_path="../config", version_base="1.2", config_name="grid_search")
 def main(cfg : DictConfig) -> None:
-    
   dataset_cfg = find_dataset_config(cfg.test_scene, cfg.test_datasets)
   OmegaConf.update(cfg, "dataset", dataset_cfg, force_add=True)
 

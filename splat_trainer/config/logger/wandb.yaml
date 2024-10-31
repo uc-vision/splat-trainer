@@ -5,3 +5,4 @@ logger:
   entity: UCVision
   project: ${..project}
   name: ${..run_name}
+  group: ${hydra:job.override_dirname}

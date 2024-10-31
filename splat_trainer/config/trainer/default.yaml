@@ -23,7 +23,7 @@ trainer:
   add_initial_points: False  # if true, add extra random points to the point cloud
   load_dataset_cloud: True  # if false, use a random point cloud
 
-  ssim_weight: 1.0 # ssim is expensive but converges faster than just l1 loss
+  ssim_weight: 0.0 # ssim is expensive but converges faster than just l1 loss
   l1_weight: 1.0
   ssim_levels: 4
 

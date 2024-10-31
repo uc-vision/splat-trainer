@@ -15,7 +15,7 @@ from hydra.experimental.callback import Callback
 from omegaconf import DictConfig, OmegaConf
 from rq import Worker
 
-from splat_trainer.util.deploy import deploy_workers, shutdown_all_workers
+from splat_trainer.util.deploy import deploy_workers, shutdown_all_workers, flush_all
 
 
 class ManageRQWorkers(Callback):
@@ -40,6 +40,7 @@ class ManageRQWorkers(Callback):
 
 
     def on_multirun_start(self, config: DictConfig, **kwargs: Any) -> None:
+        flush_all(self.args.redis_url)
 
         try:
             result = deploy_workers(self.args)
@@ -57,10 +58,12 @@ class ManageRQWorkers(Callback):
 
     def on_multirun_end(self, config: DictConfig, **kwargs: Any) -> None:
         self.shutdown_all_workers()
+        pass
         
 
     def signal_handler(self, signum, frame):
         self.shutdown_all_workers()
+        sys.exit(0)
 
 
     def shutdown_all_workers(self):
@@ -71,8 +74,8 @@ class ManageRQWorkers(Callback):
         except Exception as e:
             print(f"Error while shutting down workers: {e}")
 
-        finally:
-            sys.exit(0)
+        # finally:
+        #     sys.exit(0)
 
     
     def run_flask_app(self):

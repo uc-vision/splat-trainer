@@ -4,3 +4,5 @@ defaults:
   
 enqueue:
   job_timeout: '1d'
+
+queue: high

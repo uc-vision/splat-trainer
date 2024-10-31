@@ -18,11 +18,11 @@ trainer:
   save_checkpoints: False
   save_output: False
 
-  steps: 20
+  steps: 20000
 
 test_scene: ???
 
-worker_machines: test
+worker_machines: lab3
 
 hydra:
   sweep:
@@ -37,17 +37,25 @@ hydra:
   mode: MULTIRUN
   sweeper:
     params:
+      test_scene: scan_1457_east, scan_23, bonsai, scan_1457_west, room, scan_21, bicycle, counter, flowers, garden, kitchen, stump, treehill
+      trainer.load_dataset_cloud: True, False
+      trainer.add_initial_points: True, False
+
+      # trainer.add_initial_points: False, True  # if true, add extra random points to the point cloud
+
       # trainer.reg_loss_weight: choice([1, 1, 1], [0, 0, 0], [1, 0, 0], [0, 1, 0], [0, 0, 1], [1, 1, 0], [1, 0, 1], [0, 1, 1])
-      scene: sh, tcnn
-      trainer.reg_loss_weight: choice([1,0,0], [0,0,1], [1,1,0], [0,1,1])
+      # scene: sh, tcnn
+      # trainer.reg_loss_weight: choice([1,0,0], [0,0,1], [1,1,0], [0,1,1])
       # trainer.reg_loss_weight: choice([1,0,0], [0,0,1])
       # color_corrector: nil, bilateral
       # test_scene: bonsai, scan_21
-      # test_scene: bonsai, scan_1457_west, scan_21, bicycle, counter, flowers, garden, kitchen, room, stump, treehill, scan_1457_east, scan_23
-      test_scene: scan_21, scan_1457_west, treehill, kitchen, counter, flowers, bonsai, scan_23, room
+      # trainer.num_neighbors: 3, 4
+      # trainer.initial_alpha: 0.2, 0.3
+      # trainer.initial_point_scale: 0.2, 0.3, 0.4
+      # test_scene: scan_21, scan_1457_west, treehill, kitchen, counter, flowers, bonsai, scan_23, room
 
 project: ${sanitize:${hydra:sweep.dir}}
-run_name: ${hydra:job.num}__${extract:${hydra:overrides.task}}
+run_name: ${format:${hydra:job.num}}__${extract:${hydra:overrides.task}}
 
 wait_exit: False
 debug: False

@@ -2,6 +2,7 @@ import argparse
 import logging
 import json
 import os
+import time
 from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
@@ -9,13 +10,18 @@ from typing import Any, Optional, Union
 
 import numpy as np
 import pandas as pd
+import psutil
 import rq
 import socket
 import traceback
+import wandb
 from filelock import FileLock
 from hydra.core.utils import JobReturn, JobStatus
 from hydra.experimental.callback import Callback
 from omegaconf import DictConfig, OmegaConf
+
+from splat_trainer.logger import Logger
+from splat_trainer.util.deploy import kill_rq_worker_by_name
 
 
 
@@ -25,10 +31,17 @@ class AverageResult(Callback):
         self.results_file = os.path.join(output_dir, "results.json")
         self.failed_jobs_file = os.path.join(output_dir, "failed_jobs.json")
         self.params = sweep_params
-
         self.log = logging.getLogger(f"{__name__}.{self.__class__.__name__}")
         
-
+        
+    def on_job_start(self, config: DictConfig, **kwargs: Any) -> None:
+        job = rq.get_current_job()
+        hostname = socket.gethostname()
+        
+        job.descripton = hostname + '__' + job.description
+        job.save()
+    
+    
     def on_job_end(self, config: DictConfig, job_return: JobReturn, **kwargs: Any) -> None:
 
         job_num = config.hydra.job.num
@@ -36,6 +49,7 @@ class AverageResult(Callback):
                     for override in OmegaConf.select(config, "hydra.overrides.task"))}
         hostname = socket.gethostname()
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S" )
+        job = rq.get_current_job()
 
         if job_return.status == JobStatus.COMPLETED:
             self.log.info(f"Job {job_num} succeeded with return value: {job_return.return_value}. Saving job result...")
@@ -46,15 +60,16 @@ class AverageResult(Callback):
                 "params": params,
                 "result": job_return.return_value,
                 "hostname": hostname,
-                "timestamp": timestamp
+                "timestamp": timestamp,
+                "status":"succeed",
             }
 
             self.save_to_json(self.results_file, result_data)
             self.log.info(f"Job {job_num} result has been successfully saved to {self.results_file}.\n")
 
+
         else:
             self.log.error(f"Job {job_num} failed with error: {job_return._return_value}")
-
             job = rq.get_current_job()
             job_data = {
                 "job_num": job_num,
@@ -71,13 +86,26 @@ class AverageResult(Callback):
 
             self.save_to_json(self.failed_jobs_file, job_data)
             self.log.info(f"Job {job_num} has failed and the details have been saved to {self.failed_jobs_file}.\n")
+            
+            if "Permission" in str(job_return._return_value):
+                kill_rq_worker_by_name()
+            # result_data = {
+            #     "job_num": job_num,
+            #     "params": params,
+            #     "result": job_return._return_value,
+            #     "hostname": hostname,
+            #     "timestamp": timestamp,
+            #     "status": "failed"
+            # }
+            # self.save_to_json(self.results_file, result_data)
 
 
-    def on_multirun_end(self, config: DictConfig, **kwargs: Any) -> None:
+    def on_multirun_end(self, config: DictConfig, **kwargs: Any) -> None:   
+        project = (OmegaConf.select(config, "hydra.sweep.dir")).replace("/", "__")
         base_path = Path(__file__).parents[2]
 
         try:
-            average_results(base_path / self.output_dir)
+            average_results(project, base_path / self.output_dir)
 
         except Exception as e:
             self.log.error(f"Error occurred while averaging the results: {e}")
@@ -97,6 +125,7 @@ class AverageResult(Callback):
             data = {} 
             
         return data
+
 
     @staticmethod
     def dump_data(file: Union[Path, str], data: dict) -> None:
@@ -120,7 +149,7 @@ class AverageResult(Callback):
             self.dump_data(file, all_data)
 
 
-def average_results(file_path: Union[Path, str] = None) -> None:
+def average_results(project: Optional[str]=None, file_path: Union[Path, str] = None) -> None:
 
     if not file_path:
         file_path = get_args().path
@@ -156,6 +185,8 @@ def average_results(file_path: Union[Path, str] = None) -> None:
             results[k].sort(key=lambda x: x[1])
 
         for param_values, job_list in results.items():
+            
+            assert len(job_list) == len(test_scene_set), "Missing jobs."
             total_value = sum(value for _, _, value in job_list)
             avg_value = total_value / len(job_list)
 
@@ -171,20 +202,49 @@ def average_results(file_path: Union[Path, str] = None) -> None:
 
     df = pd.DataFrame(averaged_results, columns=['job_num', *param_names, 'test_scene', 'value', 'avg_value', 'metric'])
 
-    for col in ['metric']:
-        df.loc[df[col].duplicated(), col] = ''
+    # for col in ['metric']:
+    #     df.loc[df[col].duplicated(), col] = ''
 
     for col in [*param_names]:
         df.loc[df.index % len(test_scene_set) != 0, col] = ''
 
-    for col in ['avg_value']:
-        df.loc[df[col].duplicated(), col] = np.nan
+    # for col in ['avg_value']:
+    #     df.loc[df[col].duplicated(), col] = np.nan
 
     output_file = Path(file_path) / "averaged_results.csv"
     df.to_csv(output_file, index=False)
-    
     print(f"Averaged results saved to {output_file}")
+    
+    if project:
+        name = f"averaged_result_{int(time.time())}"
+        run = wandb.init(project=project, name=name, dir=Path.cwd(), group='average_result', entity='UCVision')
+        result_artifact = wandb.Artifact(name, type="result")
+        
+        for metric_name, metric_df in df.groupby("metric"):
+            metric_df = metric_df.iloc[:, :-1]
+            result_table = wandb.Table(dataframe=metric_df)
+
+            result_artifact.add(result_table, f"{metric_name}_average")
+            run.log({f"{metric_name}_average": result_table})
+        
+        assert os.path.exists(output_file), f"The output file {output_file} does not exist."
+        result_artifact.add_file(output_file)
+    
+        run.log_artifact(result_artifact)
+        run.finish()
+        print(f"Averaged results uploaded to wandb.")
+    
     return
+
+
+    # for process in psutil.process_iter(['pid', 'name', 'cmdline']):
+    #     try:
+    #         if 'rq:worker' in process.info['cmdline']:
+    #             print(f"Killing rq:worker process with PID: {process.info['pid']}")
+    #             process.terminate() 
+    #             process.wait(timeout=5)
+    #     except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.TimeoutExpired) as e:
+    #         print(f"Failed to kill process with PID {process.info['pid']}: {e}")
 
 
 def get_args():
