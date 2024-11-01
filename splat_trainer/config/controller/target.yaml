@@ -14,5 +14,5 @@ trainer:
     prune_alpha: 0.1
 
     # threshold (of screen width) for pruning large points
-    max_scale: 0.25
+    max_scale: 0.2
   

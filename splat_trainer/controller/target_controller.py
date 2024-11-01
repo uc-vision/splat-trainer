@@ -50,7 +50,7 @@ class TargetConfig(ControllerConfig):
   prune_alpha:float = 0.01
 
   # maximum screen-space size for a floater point (otherwise pruned)
-  max_scale:float = 0.5
+  max_scale:float = 0.2
   target_schedule:VaryingFloat = Between(0, 0.6, SmoothStep(0.0, 1.0))
 
 
@@ -114,8 +114,8 @@ class TargetController(Controller):
 
     n = self.points.split_score.shape[0]
     prune_mask = (take_n(self.points.prune_cost, n_prune, descending=False) 
-                  | (~torch.isfinite(self.points.prune_cost)))
-                  # | (self.points.max_scale > self.config.max_scale))
+                  | (~torch.isfinite(self.points.prune_cost))
+                  | (self.points.max_scale > self.config.max_scale))
 
     # number of split points is directly set to achieve the target count 
     # (and compensate for pruned points)
@@ -172,11 +172,11 @@ class TargetController(Controller):
     # points.prune_cost[idx] = torch.maximum(points.prune_cost[idx], prune_cost) 
 
     image_size = max(rendering.camera.image_size)
-    near_points = rendering.point_depth.squeeze(1) < rendering.point_depth.quantile(0.5)
+    far_points = rendering.point_depth.squeeze(1) > rendering.point_depth.quantile(0.75)
 
-    # measure scale of near points in image
+    # measure scale of far points in image
     image_scale = rendering.point_scale.max(1).values / image_size
-    image_scale[near_points] = 0.
+    image_scale[far_points] = 0.
 
     points.max_scale[idx] = torch.maximum(points.max_scale[idx], image_scale)
 

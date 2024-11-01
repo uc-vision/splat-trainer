@@ -20,7 +20,7 @@ trainer:
         lr: 0.05
 
       feature:
-        lr: 0.5
+        lr: 1.0
         type: vector
 
 
@@ -40,6 +40,6 @@ trainer:
     per_image: True
 
     lr_image_feature: 0.1
-    lr_nn: 0.0002
+    lr_nn: ${log_decay:0.0004, 0.1}
 
 
