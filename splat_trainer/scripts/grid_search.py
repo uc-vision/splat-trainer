@@ -22,7 +22,7 @@ def find_dataset_config(name:str, test_datasets:DictConfig):
 
 OmegaConf.register_new_resolver("sanitize", lambda x: x.replace("/", "__"))
 OmegaConf.register_new_resolver(
-    "extract",
+    "run_name",
     lambda x: "; ".join([
         f"{(item.split('=')[0]).split('.')[-1]}={item.split('=')[1]}" 
         if bool(re.match(r'^-?\d+(\.\d+)?$', item.split('=')[1])) or item.split('=')[1] in ['True', 'False', 'true', 'false'] 
@@ -31,6 +31,21 @@ OmegaConf.register_new_resolver(
     ]) if x else ""
 )
 OmegaConf.register_new_resolver("format", lambda x: f"{x:04d}")
+OmegaConf.register_new_resolver(
+    "project_name", 
+    lambda x: "__".join([
+        f"{(item.split('=')[0]).split('.')[-1]}" 
+        for item in x if 'test_scene' not in item
+    ]) if x else ""
+)
+OmegaConf.register_new_resolver(
+    "group_name",
+    lambda x: "; ".join([
+        f"{(item.split('=')[0]).split('.')[-1]}={item.split('=')[1]}" 
+        for item in x if 'test_scene' not in item
+    ]) if x else ""
+    
+)
 
 
 

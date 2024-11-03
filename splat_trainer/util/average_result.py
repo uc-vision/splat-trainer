@@ -202,22 +202,12 @@ def average_results(project: Optional[str]=None, file_path: Union[Path, str] = N
 
     df = pd.DataFrame(averaged_results, columns=['job_num', *param_names, 'test_scene', 'value', 'avg_value', 'metric'])
 
-    # for col in ['metric']:
-    #     df.loc[df[col].duplicated(), col] = ''
-
     for col in [*param_names]:
         df.loc[df.index % len(test_scene_set) != 0, col] = ''
-
-    # for col in ['avg_value']:
-    #     df.loc[df[col].duplicated(), col] = np.nan
-
-    output_file = Path(file_path) / "averaged_results.csv"
-    df.to_csv(output_file, index=False)
-    print(f"Averaged results saved to {output_file}")
     
     if project:
         name = f"averaged_result_{int(time.time())}"
-        run = wandb.init(project=project, name=name, dir=Path.cwd(), group='average_result', entity='UCVision')
+        run = wandb.init(project=project, name=name, dir=Path.cwd(), group='metric_average', entity='UCVision')
         result_artifact = wandb.Artifact(name, type="result")
         
         for metric_name, metric_df in df.groupby("metric"):
@@ -233,6 +223,16 @@ def average_results(project: Optional[str]=None, file_path: Union[Path, str] = N
         run.log_artifact(result_artifact)
         run.finish()
         print(f"Averaged results uploaded to wandb.")
+        
+    for col in ['metric']:
+        df.loc[df[col].duplicated(), col] = ''
+    
+    for col in ['avg_value']:
+        df.loc[df[col].duplicated(), col] = np.nan
+        
+    output_file = Path(file_path) / "averaged_results.csv"
+    df.to_csv(output_file, index=False)
+    print(f"Averaged results saved to {output_file}")
     
     return
 

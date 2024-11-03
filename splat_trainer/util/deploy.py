@@ -43,17 +43,17 @@ def deploy_group(group_name: str, hosts:List[str], connect_kwargs, args):
           if len(worker_pids) > count or count > args.max_num_worker:
             for worker_pid in worker_pids:
               kill_command = f"kill -9 {worker_pid}"
-              c.run(kill_command)
+              # kill_command = "pkill -f rq:worker"
+              c.run(kill_command, warn=True)
               print(f"Killed existing RQ worker with PID {worker_pid.strip()} on {host}")
 
           if count == args.max_num_worker:
             return Machine(host, msg=f"RQ worker already exists on {host}")
-
         worker_name = f'{host}_{str(uuid.uuid4())}'
         command = """
-          export TORCH_EXTENSIONS_DIR=~/.cache/torch_extensions/py310_cu121_{group_name}
+          export TORCH_EXTENSIONS_DIR=~/.cache/torch_extensions/py311_cu121_{group_name}
           source ~/.bashrc
-          conda activate splat-trainer-py10
+          conda activate splat-trainer
           cd ~/splat-trainer
           mkdir -p ./log
           rq worker high --url {redis_url} \\

@@ -54,8 +54,8 @@ hydra:
       # trainer.initial_point_scale: 0.2, 0.3, 0.4
       # test_scene: scan_21, scan_1457_west, treehill, kitchen, counter, flowers, bonsai, scan_23, room
 
-project: ${sanitize:${hydra:sweep.dir}}
-run_name: ${format:${hydra:job.num}}__${extract:${hydra:overrides.task}}
+project: ${sanitize:${hydra:sweep.dir}}__${project_name:${hydra:overrides.task}}
+run_name: ${format:${hydra:job.num}}__${run_name:${hydra:overrides.task}}
 
 wait_exit: False
 debug: False
