@@ -90,6 +90,7 @@ class TrainConfig:
 
   save_checkpoints: bool = False
   save_output: bool = True
+  evaluate_first: bool = False
 
   disable_realtime_viewer: bool = True
   port: int = 8080
@@ -135,7 +136,7 @@ class Trainer:
     device = torch.device(config.device)
     camera_info = dataset.view_info().to(device)
 
-    dataset_cloud = dataset.pointcloud() if config.load_dataset_cloud else None
+    dataset_cloud:Optional[PointCloud] = dataset.pointcloud() if config.load_dataset_cloud else None
     points = None
 
     if dataset_cloud is not None:
@@ -158,7 +159,7 @@ class Trainer:
     
       if points is not None:
         print(f"Adding {random_points.batch_size[0]} random points")
-        points = points.concat(random_points)
+        points = torch.cat([points, random_points], dim=0)
       else:
         print(f"Using {random_points.batch_size[0]} random points")
         points = random_points
@@ -304,7 +305,7 @@ class Trainer:
     pbar = tqdm(total=len(data), desc=f"rendering {name}", leave=False)
     for i, (filename, camera_params, image_idx, source_image) in enumerate(self.iter_data(data)):
 
-      config = replace(self.config.raster_config, compute_split_heuristics=True, 
+      config = replace(self.config.raster_config, compute_point_heuristics=True, 
                         antialias=self.config.antialias,
                        blur_cov=self.blur_cov)
       
@@ -371,7 +372,6 @@ class Trainer:
 
     self.scene.log(self.logger, self.step)
 
-
     return {**train, **val}
   
 
@@ -411,7 +411,7 @@ class Trainer:
 
 
   def reg_loss(self, rendering:Rendering) -> Tuple[torch.Tensor, dict]:
-    scale_term = (rendering.point_scale / rendering.camera.focal_length[0])
+    scale_term = (rendering.point_scale / rendering.camera.focal_length[0]).pow(2)
     aspect_term = (rendering.point_scale.max(-1).values / rendering.point_scale.min(-1).values)
     opacity_term = rendering.point_opacity
 
@@ -450,7 +450,7 @@ class Trainer:
   def training_step(self, filename:str, camera_params:CameraParams, image_idx:int, image:torch.Tensor, timer:CudaTimer) -> dict:
 
     with timer:
-      config = replace(self.config.raster_config, compute_split_heuristics=True, 
+      config = replace(self.config.raster_config, compute_point_heuristics=True, 
                        antialias=self.config.antialias,
                        blur_cov=self.blur_cov)  
       
@@ -477,13 +477,17 @@ class Trainer:
 
     self.pbar = tqdm(total=self.config.steps - self.step, desc="training")
     densify_metrics = dict(n = self.scene.num_points)
-    next_densify = next_multiple(self.step, self.config.densify_interval(self.t))
+    next_densify = next_multiple(self.step, eval_varying(self.config.densify_interval, self.t))
 
     metrics = {}
     eval_metrics = {}
     
     iter_train = self.iter_train()
     step_timer = CudaTimer()
+
+    if self.config.evaluate_first:
+      eval_metrics = self.evaluate()
+
 
     while self.step < self.config.steps:
 
@@ -506,6 +510,7 @@ class Trainer:
 
           self.log_values("train", dict(blur_cov=self.blur_cov))
           torch.cuda.empty_cache()
+
 
       with torch.enable_grad():
         with step_timer:
@@ -538,9 +543,14 @@ class Trainer:
                   render=sum([timer.ellapsed() for timer in self.render_timers]) / self.config.log_interval
                 ))
 
-    eval_metrics = self.evaluate()
-    if self.config.save_output:
-      self.write_checkpoint()
+        finished = self.step >= self.config.steps
+        if ((self.step % self.config.eval_steps) == 0) or finished:
+          eval_metrics = self.evaluate()
+          if (finished or self.config.save_checkpoints) and self.config.save_output:
+            self.write_checkpoint()
+
+          torch.cuda.empty_cache()          
+
 
     self.pbar.set_postfix(**metrics, **eval_metrics)        
     self.pbar.close()

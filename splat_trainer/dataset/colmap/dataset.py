@@ -59,10 +59,11 @@ class COLMAPDataset(Dataset):
 
       proj = np.array([fx, fy, cx, cy])  
       
+      w, h = camera.width, camera.height
       self.projections.append(CameraProjection(torch.tensor(proj, dtype=torch.float32), (w, h)))
 
       camera_idx[k] = i
-      print(f"Camera {k}@{camera.width}x{camera.height} fx={fx:.2f} fy={fy:.2f} cx={cx:.2f} cy={cy:.2f}")
+      print(f"Camera {k}@{w}x{h} fx={fx:.2f} fy={fy:.2f} cx={cx:.2f} cy={cy:.2f}")
 
 
     def image_info(image:pycolmap.Image) -> Tuple[np.array, str, int]:

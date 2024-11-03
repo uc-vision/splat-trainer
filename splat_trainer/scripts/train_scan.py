@@ -46,6 +46,11 @@ def cfg_from_args():
   training_group.add_argument("--no_viewer", action="store_true", help="Disable realtime viewer")
 
 
+  # Rendering group
+  rendering_group = parser.add_argument_group("Rendering")
+  rendering_group.add_argument("--antialias", action="store_true", help="Use antialiasing")
+
+
   # Output group
   output_group = parser.add_argument_group("Output")
   output_group.add_argument("--project", type=str, required=True, help="Project name")
@@ -117,9 +122,11 @@ def cfg_from_args():
   if args.bilateral:
     overrides.append("color_corrector=bilateral")
 
-
   if args.no_viewer:
     overrides.append("trainer.disable_realtime_viewer=true")
+
+  if args.antialias:
+    overrides.append("trainer.antialias=true")
 
   # Output group
   if args.wandb is not None:
