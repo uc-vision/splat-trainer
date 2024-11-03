@@ -110,7 +110,7 @@ class TargetController(Controller):
     # prune_rate = (config.prune_rate * config.densify_interval/100)
     n_prune = math.ceil(config.prune_rate * n * (1 - t))
 
-    
+
 
     n = self.points.split_score.shape[0]
     prune_mask = (take_n(self.points.prune_cost, n_prune, descending=False) 

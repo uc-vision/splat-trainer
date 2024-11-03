@@ -1,10 +1,10 @@
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, replace, field
 from functools import partial
 import heapq
 import json
 import math
 from pathlib import Path
-from typing import Callable, Tuple
+from typing import Callable, Tuple, List
 
 from tqdm import tqdm 
 from termcolor import colored
@@ -83,6 +83,7 @@ class TrainConfig:
   scale_reg: VaryingFloat = 0.1
   opacity_reg: VaryingFloat = 0.01
   aspect_reg: VaryingFloat = 0.01
+  reg_loss_weight: List[int] = field(default_factory=lambda: [1, 1, 1])
 
   blur_cov: float
   antialias: bool = True
@@ -310,6 +311,8 @@ class Trainer:
 
       l1 = torch.nn.functional.l1_loss(image, source_image)
 
+      # ssim = self.compute_ssim(image, source_image, self.config.ssim_levels)
+
       radius_hist = radius_hist.append(rendering.point_radii.log() / math.log(10.0), trim=False)
       image_id = filename.replace("/", "_")
 
@@ -320,18 +323,22 @@ class Trainer:
       add_worst = heapq.heappush if len(worst) < worst_count else heapq.heappushpop
       add_worst(worst, (-psnr.item(), l1.item(), rendering.detach(), source_image, image_id))
       
+      # eval = dict(filename=filename, psnr = psnr.item(), l1 = l1.item(), ssim = ssim.item())
       eval = dict(filename=filename, psnr = psnr.item(), l1 = l1.item())
+      
       rows.append(eval)
       
       pbar.update(1)
       pbar.set_postfix(psnr=f"{psnr.item():.2f}", l1=f"{l1.item():.4f}")
 
+    # if self.step == self.config.steps:
     for i, (neg_psnr, l1, rendering, source_image, filename) in enumerate(worst):
       self.log_rendering(f"worst_{name}/{i}", filename, rendering, source_image,
-                         -neg_psnr, l1, log_image=True)
+                        -neg_psnr, l1, log_image=True)
 
     self.logger.log_evaluations(f"eval_{name}/evals", rows, step=self.step)
     totals = transpose_rows(rows)
+    # mean_l1, mean_psnr, mean_ssim = np.mean(totals['l1']), np.mean(totals['psnr']), np.mean(totals['ssim'])
     mean_l1, mean_psnr = np.mean(totals['l1']), np.mean(totals['psnr'])
 
     self.log_value(f"eval_{name}/psnr", mean_psnr) 
@@ -340,7 +347,11 @@ class Trainer:
     self.log_histogram(f"eval_{name}/psnr_hist", torch.tensor(totals['psnr']))
     self.log_histogram(f"eval_{name}/radius_hist", radius_hist)
 
-    return {f"{name}_psnr": float(mean_psnr)}
+    return {
+            f"{name}_psnr": float(mean_psnr),
+            f"{name}_l1": float(mean_l1),
+            # f"{name}_ssim": float(mean_ssim)
+            }
 
 
   def evaluate_trained(self, rendering, source_image, image_idx):
@@ -415,6 +426,8 @@ class Trainer:
       aspect_reg    =  aspect_term.mean() * eval_varying(self.config.aspect_reg, self.t),
     )
 
+    regs = {k:regs[k] for k, flag in zip(regs.keys(), self.config.reg_loss_weight) if flag == 1}
+
     return sum(regs.values()), {k:v.item() for k, v in regs.items()}
 
   def losses(self, rendering:Rendering, image:torch.Tensor):
@@ -432,11 +445,11 @@ class Trainer:
       loss += ssim * self.config.ssim_weight 
       metrics["ssim"] = ssim.item()
 
-
-    reg_loss, reg_losses = self.reg_loss(rendering)
-    metrics.update(reg_losses)
-    metrics["reg"] = reg_loss.item()
-    loss += reg_loss 
+    if self.config.reg_loss_weight != [0, 0, 0]:
+      reg_loss, reg_losses = self.reg_loss(rendering)
+      metrics.update(reg_losses)
+      metrics["reg"] = reg_loss.item()
+      loss += reg_loss 
 
     return loss, metrics
 

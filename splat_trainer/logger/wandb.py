@@ -18,13 +18,15 @@ class WandbLogger(Logger):
   @beartype
   def __init__(self, project:str | None, 
                entity:str | None, 
-               name:str | None=None):
+               name:str | None=None,
+               group:str | None=None):
     
     dir = Path.cwd()
     wandb.require("core")
 
     self.run = wandb.init(project=project, 
                           name=name, 
+                          group=group,
                           dir=dir, 
                           entity=entity,
                           settings=wandb.Settings(start_method='thread'))
