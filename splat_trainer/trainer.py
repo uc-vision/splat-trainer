@@ -84,7 +84,7 @@ class TrainConfig:
   opacity_reg: VaryingFloat = 0.01
   aspect_reg: VaryingFloat = 0.01
 
-  vis_quantile: float = 0.75 # quantile of visibility to consider significant for view similarity
+  vis_quantile: float = 0.1 # quantile of visibility to consider significant for view similarity
 
   blur_cov: float
   antialias: bool = True
@@ -112,18 +112,18 @@ class Evaluation:
     
   @cached_property
   def psnr(self):
-    return compute_psnr(self.image, self.source_image)
+    return compute_psnr(self.image, self.source_image).item()
   
   @cached_property
   def l1(self):
-    return torch.nn.functional.l1_loss(self.image, self.source_image)
+    return torch.nn.functional.l1_loss(self.image, self.source_image).item()
   
   @cached_property
   def ssim(self):
     ref = self.source_image.unsqueeze(0).permute(0, 3, 1, 2).to(memory_format=torch.channels_last)
     pred = self.image.unsqueeze(0).permute(0, 3, 1, 2).to(memory_format=torch.channels_last)
 
-    return fused_ssim(pred, ref, padding="valid")
+    return fused_ssim(pred, ref, padding="valid").item()
 
   @cached_property
   def metrics(self):
@@ -326,7 +326,7 @@ class Trainer:
   @beartype
   def evaluate_image(self, filename:str, camera_params:CameraParams, image_idx:int, source_image:torch.Tensor, 
                      correct_image:Optional[ColorCorrect] = None):
-    config = replace(self.config.raster_config, compute_point_heuristics=True,
+    config = replace(self.config.raster_config, compute_visibility=True,
                       antialias=self.config.antialias, blur_cov=self.blur_cov)
     
     rendering = self.scene.render(camera_params, config, image_idx, render_median_depth=True).detach()
@@ -336,10 +336,10 @@ class Trainer:
 
     return Evaluation(filename, rendering, source_image)
 
-  def vis_vector(self, rendering:Rendering, quantile:float=0.75):
+  def vis_vector(self, rendering:Rendering):
     """ Return most significant visible points (up to quantile) """
-    mask = rendering.point_visibility < (rendering.point_visibility.sum() * quantile)
-    return torch.sparse_coo_tensor(rendering.points_in_view[mask], 
+    mask = rendering.point_visibility <= torch.quantile(rendering.point_visibility, self.config.vis_quantile)
+    return torch.sparse_coo_tensor(rendering.points_in_view[mask].unsqueeze(0), 
                                    rendering.point_visibility[mask], (self.scene.num_points,))
 
   def evaluate_dataset(self, name, data, 
@@ -365,10 +365,10 @@ class Trainer:
         self.log_eval(f"{name}_images/{eval.image_id}", eval, log_source=self.step == 0)
 
       add_worst = heapq.heappush if len(worst) < worst_count else heapq.heappushpop
-      add_worst(worst, (-eval.metrics['psnr'].item(), eval))    
+      add_worst(worst, (-eval.metrics['psnr'], eval))    
       rows[eval.filename] = eval.metrics
 
-      visibility.append(self.vis_vector(eval.rendering, self.config.vis_quantile))
+      visibility.append(self.vis_vector(eval.rendering))
       
       pbar.update(1)
       pbar.set_postfix(**{k:f"{v:.3f}" for k, v in eval.metrics.items()})
@@ -377,15 +377,15 @@ class Trainer:
       self.log_eval(f"worst_{name}/{i}", eval, log_source=True)
 
     self.logger.log_evaluations(f"eval_{name}/evals", rows, step=self.step)
-    totals = transpose_rows(rows.values())
+    totals = transpose_rows(list(rows.values()))
+
     for k, v in totals.items():
       self.log_value(f"eval_{name}/{k}", np.mean(v))
       self.log_histogram(f"eval_{name}/{k}_hist", torch.tensor(v))
 
-
     visibility = torch.stack(visibility, dim=0)
 
-    return {f"{name}_psnr": float(totals['psnr'].mean())}
+    return {f"{name}_psnr": float(np.mean(totals['psnr']))}
 
 
   def evaluate_trained(self, rendering, source_image, image_idx):
@@ -461,7 +461,12 @@ class Trainer:
       aspect_reg    =  aspect_term.mean() * eval_varying(self.config.aspect_reg, self.t),
     )
 
-    return sum(regs.values()), {k:v.item() for k, v in regs.items()}
+    # include total as "reg"
+    metrics = {k:v.item() for k, v in regs.items()} 
+    total = sum(regs.values())
+
+    metrics["reg"] = total.item()
+    return total, metrics
 
   def losses(self, rendering:Rendering, image:torch.Tensor):
     metrics = {}
@@ -474,14 +479,13 @@ class Trainer:
 
 
     if self.config.ssim_weight > 0:  
-      ssim_loss, ssim = self.compute_ssim_loss(rendering.image, image, self.config.ssim_levels)
+      ssim_loss, ssim_metric = self.compute_ssim_loss(rendering.image, image, self.config.ssim_levels)
       loss += ssim_loss * self.config.ssim_weight 
-      metrics["ssim"] = ssim.item()
+      metrics["ssim"] = ssim_metric
 
 
     reg_loss, reg_losses = self.reg_loss(rendering)
     metrics.update(reg_losses)
-    metrics["reg"] = reg_loss.item()
     loss += reg_loss 
 
     return loss, metrics

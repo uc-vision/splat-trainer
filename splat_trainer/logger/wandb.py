@@ -58,7 +58,10 @@ class WandbLogger(Logger):
     
   @beartype
   def log_evaluations(self, name, rows:Dict[str, Dict], step):
-    table = wandb.Table(columns=list(rows[0].keys()))
+    first_row = next(iter(rows.values()))
+    columns = list(first_row.keys())
+
+    table = wandb.Table(columns=["filename"] + columns)
     for k, row in rows.items():
       table.add_data(k, *row.values())
                         
