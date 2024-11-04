@@ -37,7 +37,7 @@ from splat_trainer.logger.histogram import Histogram
 from splat_trainer.scene.sh_scene import  GaussianSceneConfig
 from splat_trainer.util.colorize import colorize, get_cv_colormap
 from splat_trainer.util.containers import transpose_rows
-from splat_trainer.util.misc import CudaTimer, next_multiple, strided_indexes
+from splat_trainer.util.misc import CudaTimer, cluster_points, next_multiple, sinkhorn, strided_indexes
 
 from splat_trainer.controller import ControllerConfig
 from splat_trainer.color_corrector import CorrectorConfig, Corrector
@@ -84,7 +84,7 @@ class TrainConfig:
   opacity_reg: VaryingFloat = 0.01
   aspect_reg: VaryingFloat = 0.01
 
-  vis_quantile: float = 0.1 # quantile of visibility to consider significant for view similarity
+  vis_clusters: int = 1024 # number of point clusters to use for view similarity
 
   blur_cov: float
   antialias: bool = True
@@ -301,6 +301,10 @@ class Trainer:
     return self.logger.log_image(name, image, caption=caption, step=self.step)
   
 
+  def log_colormapped(self, name, values):
+    colorized = colorize(self.color_map, values)
+    self.logger.log_image(name, colorized, step=self.step, compressed=False)
+
   def log_value(self, name, value):
     return self.logger.log_value(name, value, step=self.step) 
 
@@ -336,11 +340,16 @@ class Trainer:
 
     return Evaluation(filename, rendering, source_image)
 
-  def vis_vector(self, rendering:Rendering):
-    """ Return most significant visible points (up to quantile) """
-    mask = rendering.point_visibility <= torch.quantile(rendering.point_visibility, self.config.vis_quantile)
-    return torch.sparse_coo_tensor(rendering.points_in_view[mask].unsqueeze(0), 
-                                   rendering.point_visibility[mask], (self.scene.num_points,))
+  @torch.compile
+  def vis_vector(self, rendering:Rendering, cluster:torch.Tensor):
+    idx, vis = rendering.visible
+    vector = torch.zeros(cluster.shape, device=self.device)
+
+    # use clustering to reduce number of points
+    cluster_vis = torch.scatter_add(vector, 0, cluster[idx], vis)
+    return cluster_vis
+
+
 
   def evaluate_dataset(self, name, data, 
                        correct_image:Optional[ColorCorrect] = None, 
@@ -353,6 +362,10 @@ class Trainer:
 
     worst = []
     log_indexes = strided_indexes(log_count, len(data)) 
+
+    
+    clusters = cluster_points(position = self.scene.points['position'], 
+                                  num_clusters = min(self.config.vis_clusters, self.scene.num_points))
 
     visibility = []
 
@@ -368,7 +381,7 @@ class Trainer:
       add_worst(worst, (-eval.metrics['psnr'], eval))    
       rows[eval.filename] = eval.metrics
 
-      visibility.append(self.vis_vector(eval.rendering))
+      visibility.append(self.vis_vector(eval.rendering, clusters))
       
       pbar.update(1)
       pbar.set_postfix(**{k:f"{v:.3f}" for k, v in eval.metrics.items()})
@@ -383,7 +396,13 @@ class Trainer:
       self.log_value(f"eval_{name}/{k}", np.mean(v))
       self.log_histogram(f"eval_{name}/{k}_hist", torch.tensor(v))
 
-    visibility = torch.stack(visibility, dim=0)
+    visibility = torch.stack(visibility, dim=0)   
+
+    self.view_overlaps = (visibility @ visibility.T).to_dense().fill_diagonal_(0.0)
+    self.view_overlaps = sinkhorn(self.view_overlaps, 10)
+
+    avg_max = self.view_overlaps.max(dim=1).values.median()
+    self.log_colormapped(f"eval_{name}/view_overlaps", self.view_overlaps / avg_max)
 
     return {f"{name}_psnr": float(np.mean(totals['psnr']))}
 
@@ -416,7 +435,7 @@ class Trainer:
 
   def iter_train(self):
     while True:
-      train = self.iter_data(self.dataset.train())
+      train = self.iter_data(self.dataset.train(shuffle=True))
       yield from train
 
   

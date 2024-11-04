@@ -97,7 +97,7 @@ class COLMAPDataset(Dataset):
 
     return f"COLMAPDataset({self.base_path} {', '.join(args)})"
 
-  def train(self, shuffle=True) -> Iterator[CameraView]:
+  def train(self, shuffle=False) -> Iterator[CameraView]:
     return Images(self.train_cameras, shuffle=shuffle)
   
   def val(self) -> Iterator[CameraView]:

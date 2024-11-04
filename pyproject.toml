@@ -1,6 +1,6 @@
 [project]
 name = "splat-trainer"  
-version = "0.1.6"  
+version = "0.2.0"  
 description = "Gaussian Splatting scene reconstruction with taichi-splatting"  
 readme = "README.md" 
 requires-python = ">=3.10"
@@ -11,7 +11,7 @@ maintainers = [
 ]
 
 dependencies = [
-  'taichi-splatting >= 0.25.0',
+  'taichi-splatting >= 0.26.0',
   'tqdm',
   'plyfile',
   'pypcd4',

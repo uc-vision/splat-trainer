@@ -82,13 +82,13 @@ class WandbLogger(Logger):
 
 
   @beartype
-  def log_image(self, name:str, image:torch.Tensor, caption:str | None = None, step:int = 0):
+  def log_image(self, name:str, image:torch.Tensor, compressed:bool = True, caption:str | None = None, step:int = 0):
     
     def log():
       nonlocal image, step
       
       image = (image * 255).to(torch.uint8).cpu().numpy()
-      image = wandb.Image(image, mode="RGB", caption=caption, file_type="jpg")
+      image = wandb.Image(image, mode="RGB", caption=caption, file_type="jpg" if compressed else "png")
       self.run.log({name : image}, step=step)
 
     self.queue.put(log)

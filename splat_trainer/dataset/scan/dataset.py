@@ -89,7 +89,7 @@ class ScanDataset(Dataset):
 
     return f"ScanDataset({self.scan_file} {', '.join(args)})"
 
-  def train(self, shuffle=True) -> Iterator[CameraView]:
+  def train(self, shuffle=False) -> Iterator[CameraView]:
     images = PreloadedImages(self.train_cameras, shuffle=shuffle)
     return images
     # images = PreloadedImages(self.train_cameras)
