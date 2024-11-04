@@ -57,10 +57,13 @@ class WandbLogger(Logger):
     self.run.config.update(config)
     
   @beartype
-  def log_evaluations(self, name, rows:List[Dict], step):
-    table = wandb.Table(columns=list(rows[0].keys()))
-    for row in rows:
-      table.add_data(*row.values())
+  def log_evaluations(self, name, rows:Dict[str, Dict], step):
+    first_row = next(iter(rows.values()))
+    columns = list(first_row.keys())
+
+    table = wandb.Table(columns=["filename"] + columns)
+    for k, row in rows.items():
+      table.add_data(k, *row.values())
                         
     self.log_data({name:table}, step=step)
 
@@ -79,13 +82,13 @@ class WandbLogger(Logger):
 
 
   @beartype
-  def log_image(self, name:str, image:torch.Tensor, caption:str | None = None, step:int = 0):
+  def log_image(self, name:str, image:torch.Tensor, compressed:bool = True, caption:str | None = None, step:int = 0):
     
     def log():
       nonlocal image, step
       
       image = (image * 255).to(torch.uint8).cpu().numpy()
-      image = wandb.Image(image, mode="RGB", caption=caption, file_type="jpg")
+      image = wandb.Image(image, mode="RGB", caption=caption, file_type="jpg" if compressed else "png")
       self.run.log({name : image}, step=step)
 
     self.queue.put(log)

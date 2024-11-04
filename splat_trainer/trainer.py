@@ -1,5 +1,5 @@
 from dataclasses import dataclass, replace
-from functools import partial
+from functools import cached_property, partial
 import heapq
 import json
 import math
@@ -37,7 +37,7 @@ from splat_trainer.logger.histogram import Histogram
 from splat_trainer.scene.sh_scene import  GaussianSceneConfig
 from splat_trainer.util.colorize import colorize, get_cv_colormap
 from splat_trainer.util.containers import transpose_rows
-from splat_trainer.util.misc import CudaTimer, next_multiple, strided_indexes
+from splat_trainer.util.misc import CudaTimer, cluster_points, next_multiple, sinkhorn, strided_indexes
 
 from splat_trainer.controller import ControllerConfig
 from splat_trainer.color_corrector import CorrectorConfig, Corrector
@@ -84,14 +84,54 @@ class TrainConfig:
   opacity_reg: VaryingFloat = 0.01
   aspect_reg: VaryingFloat = 0.01
 
+  vis_clusters: int = 1024 # number of point clusters to use for view similarity
+
   blur_cov: float
   antialias: bool = True
 
   save_checkpoints: bool = False
   save_output: bool = True
-  evaluate_first: bool = False
+
+@dataclass(frozen=True)
+class Evaluation:
+  filename:str
+  rendering:Rendering
+  source_image:torch.Tensor
+
+  @property
+  def image_id(self):
+    return self.filename.replace('/', '_')
+
+  @property
+  def log_radii(self):
+    return self.rendering.point_radii.log() / math.log(10.0)
+  
+  @property
+  def image(self):
+    return self.rendering.image
+    
+  @cached_property
+  def psnr(self):
+    return compute_psnr(self.image, self.source_image).item()
+  
+  @cached_property
+  def l1(self):
+    return torch.nn.functional.l1_loss(self.image, self.source_image).item()
+  
+  @cached_property
+  def ssim(self):
+    ref = self.source_image.unsqueeze(0).permute(0, 3, 1, 2).to(memory_format=torch.channels_last)
+    pred = self.image.unsqueeze(0).permute(0, 3, 1, 2).to(memory_format=torch.channels_last)
+
+    return fused_ssim(pred, ref, padding="valid").item()
+
+  @cached_property
+  def metrics(self):
+    return dict(psnr=self.psnr, l1=self.l1, ssim=self.ssim)
 
   
+  
+
   
 class Trainer:
   def __init__(self, config:TrainConfig,
@@ -124,6 +164,8 @@ class Trainer:
     self.ssim = partial(fused_ssim, padding="valid")
     self.pbar = None
 
+    self.view_overlaps: Optional[torch.Tensor] = None
+
 
   @staticmethod
   def get_initial_points(config:TrainConfig, dataset:Dataset) -> PointCloud:
@@ -150,7 +192,6 @@ class Trainer:
     if config.add_initial_points or dataset_cloud is None:
       near, _ = camera_info.depth_range
       random_points = random_cloud(camera_info, config.initial_points)
-    
       if points is not None:
         print(f"Adding {random_points.batch_size[0]} random points")
         points = torch.cat([points, random_points], dim=0)
@@ -260,6 +301,10 @@ class Trainer:
     return self.logger.log_image(name, image, caption=caption, step=self.step)
   
 
+  def log_colormapped(self, name, values):
+    colorized = colorize(self.color_map, values)
+    self.logger.log_image(name, colorized, step=self.step, compressed=False)
+
   def log_value(self, name, value):
     return self.logger.log_value(name, value, step=self.step) 
 
@@ -270,18 +315,41 @@ class Trainer:
     return self.logger.log_histogram(name, values, step=self.step)
 
 
-  def log_rendering(self, name:str, filename:str, rendering:Rendering, image:torch.Tensor,
-                     psnr:float, l1:float, log_image:bool=True):
-    self.log_image(f"{name}/render", rendering.image, 
-                    caption=f"{filename} PSNR={psnr:.2f} L1={l1:.2f} step={self.step}")
+  def log_eval(self, name:str, eval:Evaluation, log_source:bool=True):
+    self.log_image(f"{name}/render", eval.rendering.image, 
+                    caption=f"{eval.filename} PSNR={eval.psnr:.2f} L1={eval.l1:.2f} ssim={eval.ssim:.2f} step={self.step}")
     self.log_image(f"{name}/depth", 
-        colorize(self.color_map, rendering.ndc_depth), caption=filename)
-    
-    if log_image:
-      self.log_image(f"{name}/image", image, caption=filename)
+        colorize(self.color_map, eval.rendering.ndc_median_depth), caption=eval.filename)
+
+    if log_source:
+      self.log_image(f"{name}/image", eval.source_image, caption=eval.filename)
 
   # Rendering, Source Image -> Corrected Image
   ColorCorrect = Callable[[Rendering, torch.Tensor], torch.Tensor]
+
+  @beartype
+  def evaluate_image(self, filename:str, camera_params:CameraParams, image_idx:int, source_image:torch.Tensor, 
+                     correct_image:Optional[ColorCorrect] = None):
+    config = replace(self.config.raster_config, compute_visibility=True,
+                      antialias=self.config.antialias, blur_cov=self.blur_cov)
+    
+    rendering = self.scene.render(camera_params, config, image_idx, render_median_depth=True).detach()
+    if correct_image is not None:
+      image = correct_image(rendering, source_image, image_idx)
+      rendering = replace(rendering, image=image)
+
+    return Evaluation(filename, rendering, source_image)
+
+  @torch.compile
+  def vis_vector(self, rendering:Rendering, cluster:torch.Tensor):
+    idx, vis = rendering.visible
+    vector = torch.zeros(cluster.shape, device=self.device)
+
+    # use clustering to reduce number of points
+    cluster_vis = torch.scatter_add(vector, 0, cluster[idx], vis)
+    return cluster_vis
+
+
 
   def evaluate_dataset(self, name, data, 
                        correct_image:Optional[ColorCorrect] = None, 
@@ -289,58 +357,54 @@ class Trainer:
     if len(data) == 0:
       return {}
 
-    rows = []
+    rows = {}
     radius_hist = Histogram.empty(range=(-1, 3), num_bins=20, device=self.device) 
 
     worst = []
-
     log_indexes = strided_indexes(log_count, len(data)) 
 
+    
+    clusters = cluster_points(position = self.scene.points['position'], 
+                                  num_clusters = min(self.config.vis_clusters, self.scene.num_points))
+
+    visibility = []
+
     pbar = tqdm(total=len(data), desc=f"rendering {name}", leave=False)
-    for i, (filename, camera_params, image_idx, source_image) in enumerate(self.iter_data(data)):
-
-      config = replace(self.config.raster_config, compute_point_heuristics=True, 
-                        antialias=self.config.antialias,
-                       blur_cov=self.blur_cov)
-      
-      rendering = self.scene.render(camera_params, config, image_idx, render_depth=True)
-      image = correct_image(rendering, source_image, image_idx) if correct_image is not None else rendering.image
-
-      psnr = compute_psnr(image, source_image)
-
-      l1 = torch.nn.functional.l1_loss(image, source_image)
-
-      radius_hist = radius_hist.append(rendering.point_radii.log() / math.log(10.0), trim=False)
-      image_id = filename.replace("/", "_")
+    for i, image_data in enumerate(self.iter_data(data)):
+      eval = self.evaluate_image(*image_data, correct_image=correct_image)
+      radius_hist = radius_hist.append(eval.log_radii, trim=False)
 
       if i in log_indexes:
-        self.log_rendering(f"{name}_images/{image_id}", filename, rendering, source_image, 
-                           psnr.item(), l1.item(), log_image=self.step == 0)
+        self.log_eval(f"{name}_images/{eval.image_id}", eval, log_source=self.step == 0)
 
       add_worst = heapq.heappush if len(worst) < worst_count else heapq.heappushpop
-      add_worst(worst, (-psnr.item(), l1.item(), rendering.detach(), source_image, image_id))
-      
-      eval = dict(filename=filename, psnr = psnr.item(), l1 = l1.item())
-      rows.append(eval)
+      add_worst(worst, (-eval.metrics['psnr'], eval))    
+      rows[eval.filename] = eval.metrics
+
+      visibility.append(self.vis_vector(eval.rendering, clusters))
       
       pbar.update(1)
-      pbar.set_postfix(psnr=f"{psnr.item():.2f}", l1=f"{l1.item():.4f}")
+      pbar.set_postfix(**{k:f"{v:.3f}" for k, v in eval.metrics.items()})
 
-    for i, (neg_psnr, l1, rendering, source_image, filename) in enumerate(worst):
-      self.log_rendering(f"worst_{name}/{i}", filename, rendering, source_image,
-                         -neg_psnr, l1, log_image=True)
+    for i, (_, eval) in enumerate(worst):
+      self.log_eval(f"worst_{name}/{i}", eval, log_source=True)
 
     self.logger.log_evaluations(f"eval_{name}/evals", rows, step=self.step)
-    totals = transpose_rows(rows)
-    mean_l1, mean_psnr = np.mean(totals['l1']), np.mean(totals['psnr'])
+    totals = transpose_rows(list(rows.values()))
 
-    self.log_value(f"eval_{name}/psnr", mean_psnr) 
-    self.log_value(f"eval_{name}/l1", mean_l1) 
+    for k, v in totals.items():
+      self.log_value(f"eval_{name}/{k}", np.mean(v))
+      self.log_histogram(f"eval_{name}/{k}_hist", torch.tensor(v))
 
-    self.log_histogram(f"eval_{name}/psnr_hist", torch.tensor(totals['psnr']))
-    self.log_histogram(f"eval_{name}/radius_hist", radius_hist)
+    visibility = torch.stack(visibility, dim=0)   
 
-    return {f"{name}_psnr": float(mean_psnr)}
+    self.view_overlaps = (visibility @ visibility.T).to_dense().fill_diagonal_(0.0)
+    self.view_overlaps = sinkhorn(self.view_overlaps, 10)
+
+    avg_max = self.view_overlaps.max(dim=1).values.median()
+    self.log_colormapped(f"eval_{name}/view_overlaps", self.view_overlaps / avg_max)
+
+    return {f"{name}_psnr": float(np.mean(totals['psnr']))}
 
 
   def evaluate_trained(self, rendering, source_image, image_idx):
@@ -371,7 +435,7 @@ class Trainer:
 
   def iter_train(self):
     while True:
-      train = self.iter_data(self.dataset.train())
+      train = self.iter_data(self.dataset.train(shuffle=True))
       yield from train
 
   
@@ -388,11 +452,12 @@ class Trainer:
 
 
 
-  def compute_ssim(self, pred:torch.Tensor, ref:torch.Tensor, levels:int=4):
+  def compute_ssim_loss(self, pred:torch.Tensor, ref:torch.Tensor, levels:int=4):
       ref = ref.unsqueeze(0).permute(0, 3, 1, 2).to(memory_format=torch.channels_last)
       pred = pred.unsqueeze(0).permute(0, 3, 1, 2).to(memory_format=torch.channels_last)
 
-      loss = 1.0 - self.ssim(pred, ref)
+      ssim = self.ssim(pred, ref)
+      loss = 1.0 - ssim
 
       for i in range(1, levels):
         pred = F.avg_pool2d(pred, kernel_size=2, stride=2)
@@ -400,7 +465,7 @@ class Trainer:
 
         loss += (1.0 - self.ssim(pred, ref)) 
 
-      return loss / levels
+      return loss / levels, ssim.item()
   
 
 
@@ -415,7 +480,12 @@ class Trainer:
       aspect_reg    =  aspect_term.mean() * eval_varying(self.config.aspect_reg, self.t),
     )
 
-    return sum(regs.values()), {k:v.item() for k, v in regs.items()}
+    # include total as "reg"
+    metrics = {k:v.item() for k, v in regs.items()} 
+    total = sum(regs.values())
+
+    metrics["reg"] = total.item()
+    return total, metrics
 
   def losses(self, rendering:Rendering, image:torch.Tensor):
     metrics = {}
@@ -428,14 +498,13 @@ class Trainer:
 
 
     if self.config.ssim_weight > 0:  
-      ssim = self.compute_ssim(rendering.image, image, self.config.ssim_levels)
-      loss += ssim * self.config.ssim_weight 
-      metrics["ssim"] = ssim.item()
+      ssim_loss, ssim_metric = self.compute_ssim_loss(rendering.image, image, self.config.ssim_levels)
+      loss += ssim_loss * self.config.ssim_weight 
+      metrics["ssim"] = ssim_metric
 
 
     reg_loss, reg_losses = self.reg_loss(rendering)
     metrics.update(reg_losses)
-    metrics["reg"] = reg_loss.item()
     loss += reg_loss 
 
     return loss, metrics
@@ -479,8 +548,7 @@ class Trainer:
     iter_train = self.iter_train()
     step_timer = CudaTimer()
 
-    if self.config.evaluate_first:
-      eval_metrics = self.evaluate()
+    eval_metrics = self.evaluate()
 
 
     while self.step < self.config.steps:
