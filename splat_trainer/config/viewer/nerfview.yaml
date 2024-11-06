@@ -1,0 +1,5 @@
+
+trainer:
+  viewer:  
+    _target_: splat_trainer.viewer.NerfviewConfig
+    port: 8080

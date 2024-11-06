@@ -1,4 +1,4 @@
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from typing import Tuple
 import time
 
@@ -11,47 +11,35 @@ from splat_trainer.dataset import Dataset
 from splat_trainer.scene import GaussianScene
 
 
+@dataclass(frozen=True)
+class NerfviewConfig:
+  port: int = 8080
 
-def viewer_enabled(f):
-  def wrapper(self, *args, **kwargs):
-    if not self.config.disable_realtime_viewer:
-      return f(self, *args, **kwargs)
-  return wrapper
-
+  def create_viewer(self, dataset: Dataset, scene: GaussianScene):
+      return Viewer(self, dataset, scene)
 
 class Viewer():
-  def __init__(self, config: 'TrainConfig', dataset: Dataset, scene: GaussianScene):
+  def __init__(self, config: NerfviewConfig, dataset: Dataset, scene: GaussianScene):
     self.config = config
     
-    if not config.disable_realtime_viewer:
-      self.device = config.device
-      self.dataset = dataset
-      self.scene = scene
-      self.tic = None
-      self.server = viser.ViserServer(port=self.config.port, verbose=False)
-      self.viewer = nerfview.Viewer(
-        server=self.server,
-        render_fn=self._viewer_render_fn,
-        mode="training",)
+    self.device = config.device
+    self.dataset = dataset
+    self.scene = scene
+    self.tic = None
+    self.server = viser.ViserServer(port=self.config.port, verbose=False)
+    self.viewer = nerfview.Viewer(
+      server=self.server,
+      render_fn=self._viewer_render_fn,
+      mode="training",)
 
 
-  @viewer_enabled
-  def aquire_lock(self):
-    while self.viewer.state.status == "paused":
-      time.sleep(0.01)
-    self.viewer.lock.acquire()
-    self.tic = time.time()
 
 
-  @viewer_enabled
-  def release_lock(self):
-    self.viewer.lock.release()
-      
-
-  @viewer_enabled
   def update(self, step: int):
     image = self.dataset.all_cameras[0].image
     num_train_steps_per_sec = self.config.log_interval / (time.time() - self.tic)
+
+    
     num_train_rays_per_step = image.shape[0] * image.shape[1] * image.shape[2]
     num_train_rays_per_sec = num_train_rays_per_step * num_train_steps_per_sec
 
@@ -62,12 +50,11 @@ class Viewer():
   def _viewer_render_fn(self, camera_state: nerfview.CameraState, img_wh: Tuple[int, int]):
     c2w = camera_state.c2w
     K = camera_state.get_K(img_wh)
-    c2w = torch.from_numpy(c2w).float().to(self.device)
-    K = torch.from_numpy(K).float().to(self.device)
-    projection = torch.tensor([K[0,0], K[1,1], K[0,2], K[1,2]], device=self.device)
+    fx, fy, cx, cy = K[0,0], K[1,1], K[0,2], K[1,2]
+
     near, far = self.dataset.depth_range()
-    camera_params = CameraParams(projection=projection,
-                                T_camera_world=c2w,
+    camera_params = CameraParams(projection=torch.tensor([fx, fy, cx, cy], device=self.device),
+                                T_camera_world=torch.from_numpy(c2w).float().to(self.device),
                                 near_plane=near,
                                 far_plane=far,
                                 image_size=img_wh)

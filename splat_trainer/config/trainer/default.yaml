@@ -11,7 +11,6 @@ trainer:
 
   save_checkpoints: False
   save_output: True
-  evaluate_first: False
 
   # Initialisation from a point cloud
   num_neighbors: 5
@@ -48,8 +47,7 @@ trainer:
   raster_config: 
     _target_: taichi_splatting.RasterConfig
 
-  disable_realtime_viewer: False
-  port: 8080
+
 
 
 
