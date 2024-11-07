@@ -50,9 +50,9 @@ class Viewer():
 
   @viewer_enabled
   def update(self, step: int):
-    image = self.dataset.all_cameras[0].image
+    image_size = self.dataset.image_sizes()[0] # assume all images share the same size
     num_train_steps_per_sec = self.config.log_interval / (time.time() - self.tic)
-    num_train_rays_per_step = image.shape[0] * image.shape[1] * image.shape[2]
+    num_train_rays_per_step = image_size[0] * image_size[1]
     num_train_rays_per_sec = num_train_rays_per_step * num_train_steps_per_sec
 
     self.viewer.state.num_train_rays_per_sec = num_train_rays_per_sec
@@ -72,7 +72,7 @@ class Viewer():
                                 far_plane=far,
                                 image_size=img_wh)
 
-    config = replace(self.config.raster_config, compute_split_heuristics=True,
+    config = replace(self.config.raster_config, compute_point_heuristics=True,
                     antialias=self.config.antialias,
                     blur_cov=self.config.blur_cov)
     rendering = self.scene.render(camera_params, config, 0)
