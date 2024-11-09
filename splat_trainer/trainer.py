@@ -4,6 +4,7 @@ import heapq
 import json
 import math
 from pathlib import Path
+import time
 from typing import Callable, Tuple
 
 from tqdm import tqdm 
@@ -148,7 +149,6 @@ class Trainer:
     config = replace(self.config.raster_config, compute_point_heuristics=True,
                     antialias=self.config.antialias,
                     blur_cov=self.config.blur_cov)
-
     rendering = self.scene.render(camera_params, config, 0)
     return rendering.image.detach().cpu().numpy()
 
@@ -512,6 +512,9 @@ class Trainer:
 
 
     while self.step < self.config.steps:
+      if not self.config.disable_realtime_viewer:
+        while self.viewer.status == "paused":
+          time.sleep(0.01)
 
       if self.step - next_densify > 0:
         self.controller.log_histograms(self.logger, self.step)
@@ -539,7 +542,8 @@ class Trainer:
 
       torch.cuda.empty_cache()
 
-      self.viewer.update(self.step, True)
+      if not self.config.disable_realtime_viewer:
+        self.viewer.update(self.step, True)
 
       if self.step % self.config.log_interval  == 0:
         steps = transpose_rows(steps)

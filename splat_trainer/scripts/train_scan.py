@@ -6,6 +6,7 @@ from omegaconf import OmegaConf
 from termcolor import colored
 from splat_trainer.logger.logger import Logger
 from splat_trainer import config
+import time
 
 import torch
 import os
@@ -181,6 +182,11 @@ def train_with_config(cfg) -> dict | str:
     trainer = Trainer.initialize(train_config, dataset, logger)
 
     result = trainer.train()
+    
+    if not train_config.disable_realtime_viewer:
+      print("Viewer running... Ctrl+C to exit.")
+      time.sleep(1000000)
+      
     if cfg.wait_exit:
       input("Press Enter to continue...")
 
