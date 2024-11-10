@@ -46,10 +46,6 @@ def main():
   print(f"Loading checkpoint {checkpoint}")
   
   state_dict = torch.load(checkpoint, weights_only=True)
-
-  # if 'glo_features' in state_dict['scene']['color_model']:
-  #   state_dict['scene']['color_model']['image_features'] = state_dict['scene']['color_model'].pop('glo_features')
-
   scene = train_config.scene.from_state_dict(state_dict['scene'], dataset.view_info().camera_table)
   
   
