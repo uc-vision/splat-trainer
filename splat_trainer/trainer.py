@@ -1,4 +1,5 @@
 from dataclasses import dataclass, replace
+from enum import Enum
 from functools import cached_property, partial
 import heapq
 import json
@@ -16,8 +17,11 @@ import torch
 
 from fused_ssim import fused_ssim
 import torch.nn.functional as F
+
+from pydispatch import Dispatcher
  
 from splat_trainer.controller.controller import Controller
+from splat_trainer.logger.logger import CompositeLogger
 from splat_trainer.scene.scene import GaussianScene
 from splat_trainer.config import VaryingFloat, VaryingInt, eval_varying
 from splat_trainer.util.pointcloud import PointCloud
@@ -42,6 +46,7 @@ from splat_trainer.util.misc import CudaTimer, cluster_points, next_multiple, si
 from splat_trainer.controller import ControllerConfig
 from splat_trainer.color_corrector import CorrectorConfig, Corrector
 
+from splat_trainer.viewer import ViewerConfig
 
 
 @beartype
@@ -53,6 +58,7 @@ class TrainConfig:
   scene: GaussianSceneConfig
   color_corrector: CorrectorConfig
   controller: ControllerConfig
+  viewer: ViewerConfig
 
   load_model: Optional[str] = None
 
@@ -86,8 +92,8 @@ class TrainConfig:
 
   vis_clusters: int = 1024 # number of point clusters to use for view similarity
 
-  blur_cov: float
-  antialias: bool = True
+  antialias:bool = False
+  blur_cov:float = 0.3
 
   save_checkpoints: bool = False
   save_output: bool = True
@@ -129,22 +135,25 @@ class Evaluation:
   def metrics(self):
     return dict(psnr=self.psnr, l1=self.l1, ssim=self.ssim)
 
-  disable_realtime_viewer: bool = True
-  port: int = 8080
+  
+
+class TrainerState(Enum):
+  Stopped = 0
+  Training = 1
+  Paused = 2
 
   
   
+class Trainer(Dispatcher):
+  _events_ = ["on_update"]
 
-  
-class Trainer:
   def __init__(self, config:TrainConfig,
                 scene:GaussianScene, 
                 color_corrector: Corrector,
                 controller:Controller,
-                dataset:Dataset,  
-              
-              logger:Logger,
-              step = 0,
+                dataset:Dataset,              
+                logger:Logger,
+                step = 0
       ):
 
     self.device = torch.device(config.device)
@@ -156,9 +165,10 @@ class Trainer:
     self.camera_info = dataset.view_info().to(self.device)
 
     self.config = config
+    self.logger = CompositeLogger(logger)
 
-    self.logger = logger
     self.step = step
+    self.state = TrainerState.Stopped
 
     self.last_checkpoint = None
     self.render_timers = [CudaTimer() for _ in range(self.config.log_interval)]
@@ -168,6 +178,10 @@ class Trainer:
     self.pbar = None
 
     self.view_overlaps: Optional[torch.Tensor] = None
+
+  
+  def add_logger(self, logger:Logger):
+    self.logger.add_logger(logger)
 
 
   @staticmethod
@@ -274,15 +288,15 @@ class Trainer:
   def camera_table(self):
     return self.camera_info.camera_table
   
-  @property
-  def blur_cov(self):
-    return  self.config.blur_cov if not self.config.antialias else 0.0
   
   @property
   def t(self):
-    return self.step / self.config.steps
+    return self.step / self.total_steps
   
-
+  @property
+  def total_steps(self):
+    return self.config.steps
+  
   def __repr__(self):
     return f"Trainer(step={self.step}, scene={self.scene} controller={self.controller})"
 
@@ -331,12 +345,19 @@ class Trainer:
   ColorCorrect = Callable[[Rendering, torch.Tensor], torch.Tensor]
 
   @beartype
+  def render(self, camera_params:CameraParams, image_idx:Optional[int]=None, **options):
+    return self.scene.render(camera_params, image_idx, 
+      compute_visibility=True, **options, 
+      antialias=self.config.antialias,
+      blur_cov=0.0 if self.config.antialias is True else self.config.blur_cov)
+
+
+  @beartype
   def evaluate_image(self, filename:str, camera_params:CameraParams, image_idx:int, source_image:torch.Tensor, 
                      correct_image:Optional[ColorCorrect] = None):
-    config = replace(self.config.raster_config, compute_visibility=True,
-                      antialias=self.config.antialias, blur_cov=self.blur_cov)
-    
-    rendering = self.scene.render(camera_params, config, image_idx, render_median_depth=True).detach()
+    rendering = self.render(camera_params, image_idx, 
+        compute_visibility=True, render_median_depth=True).detach()
+
     if correct_image is not None:
       image = correct_image(rendering, source_image, image_idx)
       rendering = replace(rendering, image=image)
@@ -365,7 +386,6 @@ class Trainer:
 
     worst = []
     log_indexes = strided_indexes(log_count, len(data)) 
-
     
     clusters = cluster_points(position = self.scene.points['position'], 
                                   num_clusters = min(self.config.vis_clusters, self.scene.num_points))
@@ -418,7 +438,6 @@ class Trainer:
 
 
   def evaluate(self):
-
     train = self.evaluate_dataset("train", self.dataset.train(shuffle=False), 
         correct_image=self.evaluate_trained,
         log_count=self.config.num_logged_images, 
@@ -432,7 +451,6 @@ class Trainer:
       log_count=self.config.num_logged_images, worst_count=self.config.log_worst_images)
 
     self.scene.log(self.logger, self.step)
-
     return {**train, **val}
   
 
@@ -442,7 +460,6 @@ class Trainer:
       yield from train
 
   
-
   def iter_data(self, iter):
     for filename, image, image_idx in iter:
       image = image.to(self.device, non_blocking=True) 
@@ -451,8 +468,6 @@ class Trainer:
       camera_params = self.camera_params(image_idx, image)
 
       yield filename, camera_params, image_idx, image
-
-
 
 
   def compute_ssim_loss(self, pred:torch.Tensor, ref:torch.Tensor, levels:int=4):
@@ -515,12 +530,8 @@ class Trainer:
 
   def training_step(self, filename:str, camera_params:CameraParams, image_idx:int, image:torch.Tensor, timer:CudaTimer) -> dict:
 
-    with timer:
-      config = replace(self.config.raster_config, compute_point_heuristics=True, 
-                       antialias=self.config.antialias,
-                       blur_cov=self.blur_cov)  
-      
-      rendering = self.scene.render(camera_params, config, image_idx)
+    with timer:    
+      rendering = self.scene.render(camera_params, image_idx, compute_point_heuristics=True)
       rendering = replace(rendering, image=self.color_corrector.correct(rendering, image_idx))
 
       loss, losses = self.losses(rendering, image)
@@ -528,7 +539,6 @@ class Trainer:
 
       metrics_scene = self.scene.step(rendering, self.t)
       metrics_cc = self.color_corrector.step(self.t)
-
 
     with torch.no_grad():
       metrics =  self.controller.step(rendering, self.t)
@@ -538,10 +548,20 @@ class Trainer:
     self.step += 1
     return dict(**losses, **metrics, **metrics_scene, **metrics_cc)
 
+
+  def is_training(self):
+    return self.state in (TrainerState.Training, TrainerState.Paused)
+  
+  def set_paused(self, paused:bool):
+    assert self.is_training()
+    self.state = TrainerState.Paused if paused else TrainerState.Training
+    self.pbar.set_description_str(self.state.name)    
+
   
   def train(self):
+    self.state = TrainerState.Training
+    self.pbar = tqdm(total=self.config.steps - self.step, desc=self.state.name)
 
-    self.pbar = tqdm(total=self.config.steps - self.step, desc="training")
     densify_metrics = dict(n = self.scene.num_points)
     next_densify = next_multiple(self.step, eval_varying(self.config.densify_interval, self.t))
 
@@ -555,7 +575,8 @@ class Trainer:
 
 
     while self.step < self.config.steps:
-
+      self.on_update.emit()
+      
       if self.step - next_densify > 0:
         self.controller.log_histograms(self.logger, self.step)
 
@@ -613,17 +634,17 @@ class Trainer:
 
           torch.cuda.empty_cache()          
 
+    self.state = TrainerState.Stopped
 
     self.pbar.set_postfix(**metrics, **eval_metrics)        
     self.pbar.close()
+
 
     return eval_metrics
     
 
   def close(self):
-    if self.pbar is not None:
-      self.pbar.close()
-
+    self.logger.close()
 
 def compute_psnr(a, b):
   return 10 * torch.log10(1 / torch.nn.functional.mse_loss(a, b))  

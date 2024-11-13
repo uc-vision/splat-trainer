@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from functools import cached_property
 from pathlib import Path
 from typing import Optional
 from beartype import beartype
@@ -16,7 +17,16 @@ from splat_trainer.util.pointcloud import PointCloud
 
 import pycolmap
 
+@dataclass
+class CameraImage:
+  filename:str
+  image:torch.Tensor
+  image_id:int
 
+  @property
+  def image_size(self) -> Tuple[int, int]:
+    h, w =  self.image.shape[:2]
+    return (w, h)
 
 class COLMAPDataset(Dataset):
   def __init__(self, base_path:str,
@@ -33,36 +43,39 @@ class COLMAPDataset(Dataset):
     self.resize_longest = resize_longest
     self.camera_depth_range = depth_range
 
+    self.image_dir = image_dir
     self.base_path = base_path
+
     model_path = Path(base_path) / model_dir
 
     self.reconstruction = pycolmap.Reconstruction(str(model_path))
     self.projections:List[CameraProjection] = []
-    camera_idx = {}
+    id_to_camera_idx = {}
 
-    assert resize_longest is None or image_scale is None, "Specify either resize_longest or image_scale"
+    assert resize_longest is None or image_scale is None, "Specify either resize_longest or image_scale (not both)"
 
+    for i, (k, camera) in enumerate(self.reconstruction.cameras.items()): 
+      assert camera.camera_type == "PINHOLE", "Only PINHOLE cameras are supported for now"   
 
-    for i, (k, camera) in enumerate(self.reconstruction.cameras.items()):
-
-      if image_scale is not None:
-        camera.rescale(image_scale)
-      elif resize_longest is not None:
-        w, h = camera.width, camera.height
-        scale = resize_longest / max(w, h)
-        camera.rescale(round(w * scale), round(h * scale))
-      
+      w, h = camera.width, camera.height
+      if resize_longest is not None:
+        image_scale = resize_longest / max(w, h)
+              
       fx = camera.focal_length_x
       fy = camera.focal_length_y
       cx = camera.principal_point_x
       cy = camera.principal_point_y
 
       proj = np.array([fx, fy, cx, cy])  
+
+      if image_scale is not None:
+        proj *= image_scale
+        (w, h) = (round(w * image_scale), round(h * image_scale))
       
       w, h = camera.width, camera.height
       self.projections.append(CameraProjection(torch.tensor(proj, dtype=torch.float32), (w, h)))
 
-      camera_idx[k] = i
+      id_to_camera_idx[k] = i
       print(f"Camera {k}@{w}x{h} fx={fx:.2f} fy={fy:.2f} cx={cx:.2f} cy={cy:.2f}")
 
 
@@ -70,20 +83,15 @@ class COLMAPDataset(Dataset):
       camera_t_world = np.eye(4)
       camera_t_world[:3, :4] =  image.cam_from_world.matrix()    
 
-      return (camera_t_world, image.name, camera_idx[image.camera_id])
+      return (camera_t_world, image.name, id_to_camera_idx[image.camera_id])
     
     self.num_cameras = len(self.reconstruction.images)
     self.camera_t_world, self.image_names, self.camera_idx = zip(
       *[image_info(image) for image in self.reconstruction.images.values()])
     
-    images = load_images(list(self.image_names), Path(base_path) / image_dir, 
-                         image_scale=image_scale, resize_longest=resize_longest)
-    
-    self.all_cameras = [CameraImage(filename, torch.from_numpy(image).pin_memory(), i) 
-               for i, (filename, image) in enumerate(zip(self.image_names, images))]  
-  
+
     # Evenly distribute validation images
-    self.train_cameras, self.val_cameras = split_stride(self.all_cameras, val_stride)
+    self.train_idx, self.val_idx = split_stride(np.arange(len(self.all_cameras)), val_stride)
 
   def __repr__(self) -> str:
     args = []
@@ -94,8 +102,25 @@ class COLMAPDataset(Dataset):
       args += [f"resize_longest={self.resize_longest}"]
         
     args += [f"near={self.camera_depth_range[0]:.3f}", f"far={self.camera_depth_range[1]:.3f}"]
-
     return f"COLMAPDataset({self.base_path} {', '.join(args)})"
+  
+  
+  @cached_property
+  def all_cameras(self) -> List[CameraImage]:
+    images = load_images(list(self.image_names), Path(self.base_path) / self.image_dir, 
+                         image_scale=self.image_scale, resize_longest=self.resize_longest)
+    
+    cameras = [CameraImage(filename, torch.from_numpy(image).pin_memory(), i) 
+               for i, (filename, image) in enumerate(zip(self.image_names, images))]  
+    return cameras
+  
+  @cached_property
+  def train_cameras(self) -> List[CameraImage]:
+    return [self.all_cameras[i] for i in self.train_idx]
+
+  @cached_property
+  def val_cameras(self) -> List[CameraImage]:
+    return [self.all_cameras[i] for i in self.val_idx]
 
   def train(self, shuffle=False) -> Iterator[CameraView]:
     return Images(self.train_cameras, shuffle=shuffle)
@@ -148,16 +173,7 @@ class COLMAPDataset(Dataset):
     return [export_camera(i, info) for i, info in enumerate(camera_info)]
 
 
-@dataclass
-class CameraImage:
-  filename:str
-  image:torch.Tensor
-  image_id:int
 
-  @property
-  def image_size(self) -> Tuple[int, int]:
-    h, w =  self.image.shape[:2]
-    return (w, h)
 
 class Images(torch.utils.data.Dataset):
   @beartype

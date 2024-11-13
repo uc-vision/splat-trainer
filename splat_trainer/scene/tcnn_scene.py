@@ -1,14 +1,14 @@
 
-from dataclasses import  dataclass, replace
+from dataclasses import  dataclass
 from pathlib import Path
-from typing import Dict, Tuple
+from typing import Dict, Optional
 from beartype import beartype
-from omegaconf import DictConfig, OmegaConf
+from omegaconf import DictConfig
 
 import torch
 import torch.nn.functional as F
 
-from splat_trainer.camera_table.camera_table import ViewTable, camera_scene_extents
+from splat_trainer.camera_table.camera_table import ViewTable, camera_scene_extents, camera_similarity
 from splat_trainer.config import VaryingFloat,  eval_varyings
 from splat_trainer.logger.logger import Logger
 from splat_trainer.scene.color_model import ColorModel
@@ -18,13 +18,13 @@ from splat_trainer.gaussians.split import point_basis, split_gaussians_uniform
 
 
 from taichi_splatting.optim import ParameterClass, SparseAdam
-from taichi_splatting import Gaussians3D, RasterConfig, Rendering
+from taichi_splatting import Gaussians3D, Rendering
 
 from taichi_splatting.renderer import render_projected, project_to_image
 from taichi_splatting.perspective import CameraParams
 
 
-from splat_trainer.scene.util import parameters_from_gaussians
+from splat_trainer.scene.util import parameters_from_gaussians, pop_raster_config
 from splat_trainer.util.pointcloud import PointCloud
 
 @beartype
@@ -43,11 +43,11 @@ class TCNNConfig(GaussianSceneConfig):
 
   layers:int             = 2
 
-  per_image:bool = True
-
-
   beta1:float = 0.9
   beta2:float = 0.999
+
+  antialias:bool = False
+  blur_cov:float = 0.3
 
 
 
@@ -93,8 +93,7 @@ class TCNNScene(GaussianScene):
     self.points = points
 
     self.camera_table = camera_table
-
-    num_glo_embeddings = camera_table.num_images if config.per_image else camera_table.num_cameras
+    num_glo_embeddings = camera_table.num_images
 
     self.color_model = ColorModel(
       num_glo_embeddings, 
@@ -190,18 +189,28 @@ class TCNNScene(GaussianScene):
 
   def evaluate_colors(self, indexes, cam_idx, camera_position):
     return self.color_model(self.points.feature[indexes], self.points.position[indexes], camera_position, cam_idx)
+  
+
 
   @beartype
-  def render(self, camera_params:CameraParams, config:RasterConfig, 
-             image_idx:int, **options) -> Rendering:
+  def render(self, camera_params:CameraParams, 
+             image_idx:Optional[int] = None, **options) -> Rendering:
     
-    idx = image_idx if self.config.per_image else self.camera_table.camera_id(image_idx)
+    raster_config = pop_raster_config(options)
+    gaussians2d, depthvars, indexes = project_to_image(self.gaussians, camera_params, raster_config)
 
-    gaussians2d, depthvars, indexes = project_to_image(self.gaussians, camera_params, config)
-    features = self.evaluate_colors(indexes, idx, camera_params.camera_position)
+    if image_idx is not None:
+      glo_feature = self.color_model.lookup_camera(image_idx)
+    else:
+      # Compute interpolated glo features for a new camera
+      similarity = F.softmax(camera_similarity(self.camera_table, camera_params.camera_position))
+      glo_feature = torch.sum(similarity * self.color_model.glo_features, dim=0)
 
-    return render_projected(indexes, gaussians2d, features, depthvars, 
-            camera_params, config, **options)
+    colour = self.color_model.evaluate_with_features(self.points.feature, self.points.position, 
+                                                        camera_params.camera_position, glo_feature)
+
+    return render_projected(indexes, gaussians2d, colour, depthvars, 
+                            camera_params, raster_config, **options)
 
 
     

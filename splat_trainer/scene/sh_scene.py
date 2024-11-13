@@ -1,10 +1,10 @@
 
-from dataclasses import  dataclass, replace
+from dataclasses import  dataclass
 import math
 from pathlib import Path
 from typing import Dict
 from beartype import beartype
-from omegaconf import DictConfig, OmegaConf
+from omegaconf import DictConfig
 
 import torch
 import torch.nn.functional as F
@@ -15,11 +15,11 @@ from splat_trainer.logger.logger import Logger
 from splat_trainer.scene.io import write_gaussians
 from splat_trainer.scene.scene import GaussianSceneConfig, GaussianScene
 from splat_trainer.gaussians.split import  point_basis, split_gaussians_uniform
-from splat_trainer.scene.util import parameters_from_gaussians
+from splat_trainer.scene.util import parameters_from_gaussians, pop_raster_config
 from splat_trainer.util.misc import   rgb_to_sh
 
 from taichi_splatting.optim.parameter_class import ParameterClass
-from taichi_splatting import Gaussians3D, RasterConfig, render_gaussians, Rendering
+from taichi_splatting import Gaussians3D, render_gaussians, Rendering
 from taichi_splatting.perspective import CameraParams
 from taichi_splatting.optim.sparse_adam import SparseAdam
 
@@ -152,13 +152,12 @@ class SHScene(GaussianScene):
       points = self.points.tensors.select('position', 'rotation', 'log_scaling', 'alpha_logit', 'feature')
       return Gaussians3D.from_tensordict(points)
 
-  def render(self, camera_params:CameraParams, config:RasterConfig, cam_idx:int, 
-             **options) -> Rendering:
-    
-    
+  def render(self, camera_params:CameraParams, cam_idx:int, **options) -> Rendering:
+
+    raster_config = pop_raster_config(options)  
     return render_gaussians(self.gaussians, 
                      use_sh        = True,
-                     config        = config,
+                     config        = raster_config,
                      camera_params = camera_params,
                      **options)
   

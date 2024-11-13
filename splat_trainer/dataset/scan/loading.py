@@ -13,6 +13,7 @@ from camera_geometry.camera_models.camera import optimal_undistorted
 
 from beartype import beartype
 import numpy as np
+from tqdm import tqdm
 
 from splat_trainer.camera_table.camera_table import CameraRigTable
 from splat_trainer.dataset import CameraView
@@ -76,7 +77,7 @@ def concat_lists(xs):
 
 
 @beartype
-def preload_images(scan:FrameSet, undistorted:Dict[str, Camera]) -> List[CameraImage]:
+def preload_images(scan:FrameSet, undistorted:Dict[str, Camera], progress=tqdm) -> List[CameraImage]:
   undistortions = {k:Undistortion(camera, undistorted[k]) 
     for k, camera in scan.cameras.items() }
 
@@ -100,7 +101,7 @@ def preload_images(scan:FrameSet, undistorted:Dict[str, Camera]) -> List[CameraI
         filename=image_file
     )
 
-  frames = load_frames_with(scan, undistortions, load)
+  frames = load_frames_with(scan, undistortions, load, progress=progress)
   return concat_lists(frames)
 
 class PreloadedImages(torch.utils.data.Dataset):

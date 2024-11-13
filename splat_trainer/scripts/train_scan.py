@@ -43,7 +43,7 @@ def cfg_from_args():
   training_group.add_argument("--sh", action="store_true", help="Use spherical harmonics scene")
   training_group.add_argument("--bilateral", action="store_true", help="Use bilateral color correction")
 
-  training_group.add_argument("--no_viewer", action="store_true", help="Disable realtime viewer")
+  training_group.add_argument("--vis", action="store_true", help="Enable web viewer")
 
 
   # Rendering group
@@ -122,8 +122,8 @@ def cfg_from_args():
   if args.bilateral:
     overrides.append("color_corrector=bilateral")
 
-  if args.no_viewer:
-    overrides.append("trainer.disable_realtime_viewer=true")
+  if args.vis:
+    overrides.append("viewer=splatview")
 
   if args.antialias:
     overrides.append("trainer.antialias=true")

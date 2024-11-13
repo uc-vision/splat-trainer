@@ -18,6 +18,5 @@ project: ???
 run_name: ???
 base_path: ???
 
-wait_exit: False
 debug: False
 

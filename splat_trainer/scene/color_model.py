@@ -111,24 +111,26 @@ class ColorModel(torch.nn.Module):
     # Initialize image features with small standard deviation
     nn.init.normal_(self.glo_features, std=0.5)
 
-
-  def forward(self, point_features:torch.Tensor, positions:torch.Tensor, cam_pos:torch.Tensor, cam_idx:int):
-
-    glo_feature = self.glo_features[cam_idx].unsqueeze(0)
-    glo_feature = glo_feature.expand(positions.shape[0], -1)
-
+  def evaluate_with_features(self, point_features:torch.Tensor, positions:torch.Tensor, cam_pos:torch.Tensor, glo_feature:torch.Tensor):
+    glo_feature = glo_feature.unsqueeze(0).expand(positions.shape[0], -1)
     feature = torch.cat([point_features, glo_feature], dim=1)
-
+    
     if self.affine_model is not None:
       affine_feature = self.affine_model(feature)
       log_scale, shift = torch.chunk(affine_feature, 2, dim=1)
       feature = torch.exp(log_scale.to(torch.float32)) * feature + shift
 
-
     dir = F.normalize(positions.detach() - cam_pos, dim=1)
 
     feature = torch.cat([dir, feature], dim=1)
     return self.color_model(feature).to(torch.float32)
+  
+  def lookup_camera(self, cam_idx:int):
+    return self.glo_features[cam_idx]
+
+  def forward(self, point_features:torch.Tensor, positions:torch.Tensor, cam_pos:torch.Tensor, cam_idx:int):
+    return self.evaluate_with_features(point_features, positions, cam_pos, glo_feature=self.glo_features[cam_idx])
+
   
   def optimizer(self, lr_nn:VaryingFloat, lr_image_features:VaryingFloat):
     lr_nn = eval_varying(lr_nn, 0.)

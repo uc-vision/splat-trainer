@@ -1,5 +1,5 @@
 from abc import ABCMeta, abstractmethod
-from typing import Dict, Tuple
+from typing import Dict, Optional, Tuple
 import torch
 
 from taichi_splatting import Gaussians3D, RasterConfig, Rendering
@@ -17,7 +17,7 @@ class GaussianScene(metaclass=ABCMeta):
     raise NotImplementedError
   
   @abstractmethod
-  def render(self, camera_params:CameraParams, config:RasterConfig, cam_idx:torch.Tensor, **options) -> Rendering:
+  def render(self, camera_params:CameraParams, cam_idx:Optional[int], **options) -> Rendering:
     raise NotImplementedError
 
   @abstractmethod

@@ -52,17 +52,14 @@ def load_image(filename:Path, image_scale:Optional[float]=1.0, resize_longest:Op
   assert filename.is_file(), f"load_image: file {filename} does not exist"
 
   image = cv2.imread(str(filename), cv2.IMREAD_COLOR)
-
-  if image_scale is not None:
-    h, w, _ = image.shape
-    dsize = (int(w * image_scale), int(h * image_scale))
-    image = cv2.resize(image, dsize=dsize, fx=image_scale, fy=image_scale, interpolation=cv2.INTER_AREA)
+  h, w, _ = image.shape
 
   if resize_longest is not None:
-    h, w, _ = image.shape
-    scale = resize_longest / max(w, h)
-    dsize = (round(w * scale), round(h * scale))
-    image = cv2.resize(image, dsize=dsize, interpolation=cv2.INTER_AREA)
+    image_scale = resize_longest / max(w, h)
+
+  if image_scale is not None:
+    dsize = (round(w * image_scale), round(h * image_scale))
+    image = cv2.resize(image, dsize=dsize, fx=image_scale, fy=image_scale, interpolation=cv2.INTER_AREA)
 
   image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
 

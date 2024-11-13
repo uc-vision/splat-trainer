@@ -1,3 +1,4 @@
+from functools import cached_property
 import os
 from pathlib import Path
 from typing import List, Optional
@@ -9,6 +10,7 @@ import torch
 
 
 import numpy as np
+from tqdm import tqdm
 from splat_trainer.camera_table.camera_table import CameraRigTable, ViewTable, camera_json
 from splat_trainer.dataset.dataset import CameraProjection, CameraView, Dataset
 from splat_trainer.util.misc import split_stride
@@ -52,6 +54,8 @@ class ScanDataset(Dataset):
     self.resize_longest = resize_longest
 
     scan = FrameSet.load_file(Path(scan_file))
+    self.loaded_scan = scan
+
     self.camera_depth_range = tuple(depth_range)
 
     cameras = {k: optimal_undistorted(camera, alpha=0)
@@ -64,17 +68,15 @@ class ScanDataset(Dataset):
     elif image_scale is not None:
       cameras = {k: camera.scale_image(image_scale) for k, camera in cameras.items()}
 
-
     print("Undistorted cameras:")
     for k, camera in cameras.items():
         print(k, camera)
-
-    print("Loading images...")
-    self.all_cameras = preload_images(scan, cameras)
+  
+    self.cameras = cameras
     self.scan = scan.copy(cameras=cameras)
 
     # Evenly distribute validation images
-    self.train_cameras, self.val_cameras = split_stride(self.all_cameras, val_stride)
+    self.train_idx, self.val_idx = split_stride(np.arange(scan.num_frames * len(cameras)), val_stride)
     
   def __repr__(self) -> str:
     args = [] 
@@ -89,11 +91,23 @@ class ScanDataset(Dataset):
 
     return f"ScanDataset({self.scan_file} {', '.join(args)})"
 
+  @cached_property
+  def images(self) -> PreloadedImages:
+    print("Loading images...")
+    return preload_images(self.loaded_scan, self.cameras, progress=tqdm)
+
+  @cached_property
+  def train_cameras(self) -> List[CameraImage]:
+    return [self.images[i] for i in self.train_idx]
+
+  @cached_property
+  def val_cameras(self) -> List[CameraImage]:
+    return [self.images[i] for i in self.val_idx]
+
   def train(self, shuffle=False) -> Iterator[CameraView]:
     images = PreloadedImages(self.train_cameras, shuffle=shuffle)
     return images
-    # images = PreloadedImages(self.train_cameras)
-    # return torch.utils.data.DataLoader(images, batch_size=1, shuffle=shuffle, pin_memory=True, num_workers=2)
+
     
   def val(self) -> Iterator[CameraView]:
     images = PreloadedImages(self.val_cameras)

@@ -86,6 +86,12 @@ class ViewTable(nn.Module, metaclass=abc.ABCMeta):
   @property
   def all_images(self):
     return torch.arange(0, self.num_images, device=self.device)
+  
+  @property
+  def camera_poses(self) -> PoseTable:
+    camera_t_world, _ = self(self.all_images)
+    return camera_t_world
+  
 
 @beartype
 def camera_scene_extents(cameras:ViewTable):
@@ -102,6 +108,22 @@ def camera_scene_extents(cameras:ViewTable):
     return avg_cam_center.reshape(3), (diagonal * 1.1).item()
 
 
+@beartype
+def pose_adjacency(poses1:torch.Tensor, poses2:torch.Tensor) -> torch.Tensor:
+  """ Compute adjacency matrix between all camera poses in the table."""
+
+  dir_similarity = torch.dot(poses1[..., :3, 2], poses2[..., :3, 2].unsqueeze(0), dim=1)
+  distance = torch.norm(poses1[..., :3, 3] - poses2[..., :3, 3].unsqueeze(0), dim=1)
+  
+  return dir_similarity * distance
+
+
+@beartype
+def camera_similarity(camera_table:ViewTable, pose:torch.Tensor) -> torch.Tensor:
+  """ Compute similarity between a camera pose and all camera poses in the table."""
+  poses = camera_table.camera_poses
+  return pose_adjacency(poses, pose.unsqueeze(0))
+  
 
 class CameraRigTable(ViewTable):
   def __init__(self, rig_t_world:torch.Tensor,   # (N, 4, 4) - poses for the whole camera rig
