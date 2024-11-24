@@ -349,8 +349,7 @@ class Trainer(Dispatcher):
   @beartype
   def render(self, camera_params:CameraParams, image_idx:Optional[int]=None, **options):
 
-    return self.scene.render(camera_params, image_idx, 
-      compute_visibility=True, **options, 
+    return self.scene.render(camera_params, image_idx,  **options, 
       antialias=self.config.antialias,
       blur_cov=0.0 if self.config.antialias is True else self.config.blur_cov)
 
@@ -358,7 +357,7 @@ class Trainer(Dispatcher):
   @beartype
   def evaluate_image(self, filename:str, camera_params:CameraParams, image_idx:int, source_image:torch.Tensor, 
                      correct_image:Optional[ColorCorrect] = None):
-    rendering = self.render(camera_params, image_idx, render_median_depth=True).detach()
+    rendering = self.render(camera_params, image_idx, render_median_depth=True, compute_visibility=True).detach()
 
     if correct_image is not None:
       image = correct_image(rendering, source_image, image_idx)
@@ -615,21 +614,15 @@ class Trainer(Dispatcher):
         self.log_values("train", means)
 
         # skip first step as it will include compiling kernels
-        if self.step > self.config.log_interval:
-          torch.cuda.synchronize()
+        # if self.step > self.config.log_interval:
+        #   torch.cuda.synchronize()
 
-          self.log_values("timer", 
-                  dict(step_ms=step_timer.ellapsed() / self.config.log_interval,
-                  render=sum([timer.ellapsed() for timer in self.render_timers]) / self.config.log_interval
-                ))
+        #   self.log_values("timer", 
+        #           dict(step_ms=step_timer.ellapsed() / self.config.log_interval,
+        #           render=sum([timer.ellapsed() for timer in self.render_timers]) / self.config.log_interval
+        #         ))
 
-        # finished = self.step >= self.config.steps
-        # if ((self.step % self.config.eval_steps) == 0) or finished:
-        #   eval_metrics = self.evaluate()
-        #   if (finished or self.config.save_checkpoints) and self.config.save_output:
-        #     self.write_checkpoint()
-
-          torch.cuda.empty_cache()          
+        #   torch.cuda.empty_cache()          
 
     self.state = TrainerState.Stopped
 

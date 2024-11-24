@@ -26,33 +26,50 @@ sh_coeffs = {
 
 
 class ProjectSH(torch.nn.Module):
-  def __init__(self, out_features: int, sh_degree: int):
+  def __init__(self, out_features: int, sh_degree: int, hidden: int, layers: int = 1, norm = nn.Identity):
     super().__init__()
 
     self.get_coeffs = sh_coeffs[sh_degree]
-    self.linear = nn.Linear((sh_degree + 1) ** 2, out_features)
+    self.mlp = BasicMLP((sh_degree + 1)**2, out_features, hidden, layers, norm=norm)
 
-  def forward(self, x):
-    coeffs = self.get_coeffs(dir).to(dtype=x.dtype)
-    return self.linear(coeffs)
+  def forward(self, dir):
+    coeffs = self.get_coeffs(dir).to(dtype=dir.dtype)
+    return self.mlp(coeffs)
 
 
 class DirectionalMLP(torch.nn.Module):
   def __init__(self, inputs: int, outputs: int, hidden: int, layers: int, 
-               norm = nn.Identity, activation = torch.nn.ReLU, output_activation = nn.Identity, sh_degree: int = 2):
+               norm = nn.Identity, activation = torch.nn.ReLU, output_activation = nn.Identity, sh_degree: int = 3):
     super().__init__()
 
     self.get_coeffs = sh_coeffs[sh_degree]
     sh_size = (sh_degree + 1) ** 2
-
     self.mlp = BasicMLP(inputs + sh_size, outputs, hidden, layers, norm, activation, output_activation)
 
   def forward(self, dir, x):
     coeffs = self.get_coeffs(dir).to(dtype=x.dtype)
     x = torch.cat([coeffs, x], dim=1)
-
+    
     return self.mlp(x)
 
+
+class AffineMLP(torch.nn.Module):
+  def __init__(self, inputs: int, outputs: int, hidden: int, layers: int, 
+               norm = nn.Identity, activation = torch.nn.ReLU, output_activation = nn.Identity, sh_degree: int = 3):
+    super().__init__()
+
+    self.get_coeffs = sh_coeffs[sh_degree]
+
+    self.mlp = BasicMLP(inputs, outputs, hidden, layers, norm, activation, output_activation)
+    self.encode_dir = ProjectSH(inputs * 2, sh_degree, hidden=hidden, norm=norm)
+
+    self.norm_feature = norm(inputs)
+
+  def forward(self, dir, x):
+    dir_enc = self.encode_dir(dir)
+    a, b = torch.split(dir_enc, dir_enc.shape[1] // 2, dim=1)
+
+    return self.mlp(self.norm_feature(x * a + b))
 
 
 class BasicMLP(torch.nn.Module):

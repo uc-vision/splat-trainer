@@ -97,9 +97,11 @@ class TCNNScene(GaussianScene):
       hidden_features=config.hidden_features, 
       layers=config.layers).to(self.device)
     
+    print(self.color_model)
+    
     self.color_opt = self.color_model.optimizer(config.lr_nn)
 
-    self.color_model = torch.compile(self.color_model, options=dict(max_autotune=True), dynamic=True)
+    # self.color_model = torch.compile(self.color_model) #, options=dict(max_autotune=True), dynamic=True)
 
     self.color_table = GLOTable(num_glo_embeddings, config.image_features).to(self.device)
     self.glo_opt = self.color_table.optimizer(config.lr_image_feature)
@@ -228,8 +230,8 @@ class TCNNScene(GaussianScene):
     # else:
     #   glo_feature = self.interpolated_glo_feature(camera_params.T_camera_world)
 
-    with torch.autocast(device_type=self.device.type, dtype=torch.bfloat16):
-      colour = self.color_model(self.points.feature[indexes], self.points.position[indexes], 
+    # with torch.autocast(device_type=self.device.type, dtype=torch.float16):
+    colour = self.color_model(self.points.feature[indexes], self.points.position[indexes], 
                                                         camera_params.camera_position, glo_feature)
 
     return render_projected(indexes, gaussians2d, colour, depthvars, 

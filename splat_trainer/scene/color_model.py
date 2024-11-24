@@ -1,3 +1,4 @@
+from functools import partial
 import math
 from typing import Tuple
 import torch
@@ -6,14 +7,15 @@ import torch.nn as nn
 from taichi_splatting.perspective import (CameraParams)
 
 from splat_trainer.config import Varying, VaryingFloat, eval_varying, schedule_groups, schedule_lr
-from splat_trainer.scene.mlp.models import DirectionalMLP
+from splat_trainer.scene.mlp.tcnn_mlp import directional_mlp
+from splat_trainer.scene.mlp.torch_mlp import AffineMLP, DirectionalMLP
+
 
 
 class GLOTable(torch.nn.Module):
   def __init__(self, n:int, glo_features:int):
     super().__init__()
     self.embeddings = nn.Embedding(n, glo_features, sparse=True)
-
 
   def interpolated(self, weights:torch.Tensor):
     assert weights.shape[0] == self.embeddings.num_embeddings
@@ -57,11 +59,12 @@ class ColorModel(torch.nn.Module):
     self.feature_size = glo_features + point_features
     
     
-    self.color_model = DirectionalMLP( 
+    self.color_model = directional_mlp( 
         inputs=self.feature_size, outputs=color_channels,
         layers=layers, 
         hidden=hidden_features,
-        sh_degree=sh_degree
+        sh_degree=sh_degree,
+        #norm=partial(nn.LayerNorm, elementwise_affine=False),
     )
 
   def forward(self, point_features:torch.Tensor, # N, point_features
@@ -74,7 +77,7 @@ class ColorModel(torch.nn.Module):
     feature = torch.cat([point_features, glo_feature], dim=1)
 
     dir = F.normalize(positions.detach() - cam_pos.unsqueeze(0), dim=1)
-    return self.color_model(dir, feature).to(torch.float32)
+    return self.color_model(torch.cat([dir, feature], dim=1)).to(torch.float32)
   
 
   def optimizer(self, lr_nn:VaryingFloat):

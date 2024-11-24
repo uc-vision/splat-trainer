@@ -71,7 +71,7 @@ class CudaTimer:
   def ellapsed(self):
     return self.start.elapsed_time(self.end)
   
-@torch.compile
+@torch.compile(dynamic=True)
 def cluster_points(position:torch.Tensor, num_clusters:int) -> torch.Tensor:
   cluster_indices = torch.randperm(position.shape[0])[:num_clusters]
 
