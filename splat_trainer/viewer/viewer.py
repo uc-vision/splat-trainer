@@ -16,10 +16,12 @@ class Viewer(metaclass=ABCMeta):
   
   @abstractmethod
   def wait_for_exit(self):
+    """ Run while there are still clients connected """
     raise NotImplementedError()
 
   @abstractmethod
   def spin(self):
+    """ Run and update the viewer indefinitely """
     raise NotImplementedError()
 
 

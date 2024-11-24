@@ -1,5 +1,5 @@
 from abc import ABCMeta, abstractmethod
-from typing import Dict, Tuple
+from typing import Any, Dict, Tuple
 
 import torch
 from taichi_splatting import Rendering
@@ -11,6 +11,9 @@ class CorrectorConfig(metaclass=ABCMeta):
   def make_corrector(self, num_images:int, device:torch.device) -> 'Corrector':
     raise NotImplementedError
 
+  @abstractmethod
+  def from_state_dict(self, state_dict:dict, device:torch.device) -> 'Corrector':
+    raise NotImplementedError
 
 class Corrector(metaclass=ABCMeta):
 
@@ -24,3 +27,10 @@ class Corrector(metaclass=ABCMeta):
     raise NotImplementedError
   
 
+  @abstractmethod
+  def state_dict(self) -> Dict[str, Any]:
+    raise NotImplementedError
+
+  @abstractmethod
+  def state_dict(self) -> Dict[str, Any]:
+    raise NotImplementedError

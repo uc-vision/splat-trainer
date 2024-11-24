@@ -20,6 +20,8 @@ import torch.nn.functional as F
 
 from pydispatch import Dispatcher
  
+from splat_trainer.camera_table.camera_table import camera_json
+from splat_trainer.color_corrector.nil_corrector import NilCorrector
 from splat_trainer.controller.controller import Controller
 from splat_trainer.logger.logger import CompositeLogger
 from splat_trainer.scene.scene import GaussianScene
@@ -46,8 +48,6 @@ from splat_trainer.util.misc import CudaTimer, cluster_points, next_multiple, si
 from splat_trainer.controller import ControllerConfig
 from splat_trainer.color_corrector import CorrectorConfig, Corrector
 
-from splat_trainer.viewer import ViewerConfig
-
 
 @beartype
 @dataclass(kw_only=True, frozen=True)
@@ -58,7 +58,6 @@ class TrainConfig:
   scene: GaussianSceneConfig
   color_corrector: CorrectorConfig
   controller: ControllerConfig
-  viewer: ViewerConfig
 
   load_model: Optional[str] = None
 
@@ -97,6 +96,8 @@ class TrainConfig:
 
   save_checkpoints: bool = False
   save_output: bool = True
+
+  evaluate_first: bool = False
 
 @dataclass(frozen=True)
 class Evaluation:
@@ -142,8 +143,6 @@ class TrainerState(Enum):
   Training = 1
   Paused = 2
 
-  
-  
 class Trainer(Dispatcher):
   _events_ = ["on_update"]
 
@@ -162,7 +161,7 @@ class Trainer(Dispatcher):
     self.color_corrector = color_corrector
     self.dataset = dataset
 
-    self.camera_info = dataset.view_info().to(self.device)
+    self.camera_table = dataset.camera_table().to(self.device)
 
     self.config = config
     self.logger = CompositeLogger(logger)
@@ -187,14 +186,15 @@ class Trainer(Dispatcher):
   @staticmethod
   def get_initial_points(config:TrainConfig, dataset:Dataset) -> PointCloud:
     device = torch.device(config.device)
-    camera_info = dataset.view_info().to(device)
+    camera_table = dataset.camera_table().to(device)
+    cameras = camera_table.cameras
 
     dataset_cloud:Optional[PointCloud] = dataset.pointcloud() if config.load_dataset_cloud else None
     points = None
 
     if dataset_cloud is not None:
       points = dataset_cloud.to(device)
-      points = crop_cloud(camera_info, points)
+      points = crop_cloud(cameras, points)
 
       if points.batch_size[0] == 0:
         raise ValueError("No points visible in dataset images, check input data!")
@@ -207,8 +207,7 @@ class Trainer(Dispatcher):
         points = points[random_indices]
       
     if config.add_initial_points or dataset_cloud is None:
-      near, _ = camera_info.depth_range
-      random_points = random_cloud(camera_info, config.initial_points)
+      random_points = random_cloud(cameras, config.initial_points)
       if points is not None:
         print(f"Adding {random_points.batch_size[0]} random points")
         points = torch.cat([points, random_points], dim=0)
@@ -223,7 +222,7 @@ class Trainer(Dispatcher):
   def initialize(config:TrainConfig, dataset:Dataset, logger:Logger):
 
     device = torch.device(config.device)
-    camera_info = dataset.view_info().to(device)
+    camera_table = dataset.camera_table()
 
     print(f"Initializing points from {dataset}")
 
@@ -233,10 +232,10 @@ class Trainer(Dispatcher):
                                           initial_alpha=config.initial_alpha,
                                           num_neighbors=config.num_neighbors)
 
-    scene = config.scene.from_color_gaussians(initial_gaussians, camera_info.camera_table, device)
+    scene = config.scene.from_color_gaussians(initial_gaussians, camera_table, device)
     controller = config.controller.make_controller(scene)
 
-    num_images = len(dataset.all_cameras)
+    num_images = camera_table.num_images
     color_corrector = config.color_corrector.make_corrector(num_images, config.device)
 
     if config.save_output:
@@ -244,15 +243,30 @@ class Trainer(Dispatcher):
 
       initial_points.save_ply(output_path / "input.ply")
       with open(output_path / "cameras.json", "w") as f:
-        json.dump(dataset.camera_json(camera_info.camera_table), f)
+        json.dump(camera_json(camera_table), f)
 
     return Trainer(config, scene, color_corrector, controller, dataset, logger)
       
+  @staticmethod
+  def from_state_dict(config:TrainConfig, dataset:Dataset, logger:Logger, state_dict:dict):
+    camera_table = dataset.camera_table()
+
+    scene = config.scene.from_state_dict(state_dict['scene'], camera_table)
+    controller = config.controller.from_state_dict(state_dict['controller'], scene)
+
+    if 'color_corrector' in state_dict:
+      color_corrector = config.color_corrector.from_state_dict(state_dict['color_corrector'])
+    else:
+      color_corrector = NilCorrector(config.device)
+
+    return Trainer(config, scene, color_corrector, controller, dataset, logger, step=state_dict['step'])
+
 
   def state_dict(self):
     return dict(step=self.step, 
                 scene=self.scene.state_dict(), 
-                controller=self.controller.state_dict())
+                controller=self.controller.state_dict(),
+                color_corrector=self.color_corrector.state_dict())
   
 
   @property
@@ -264,31 +278,19 @@ class Trainer(Dispatcher):
     iteration_path.mkdir(parents=True, exist_ok=True)
 
     self.scene.write_to(iteration_path)
-    
-    camera_json = self.dataset.camera_json(self.camera_table)
-    with open(iteration_path / "cameras.json", "w") as f:
-      json.dump(camera_json, f)
 
-    path = self.output_path / "checkpoint" / f"checkpoint_{self.step}.pt"
+    checkpoint_path = self.output_path / "checkpoint"
+    checkpoint_path.mkdir(parents=True, exist_ok=True)
+    
+    with open(checkpoint_path / "cameras.json", "w") as f:
+      json.dump(camera_json(self.camera_table), f)
+
+    path = checkpoint_path / f"checkpoint_{self.step}.pt"
     path.parent.mkdir(parents=True, exist_ok=True)
     checkpoint = self.state_dict()
     torch.save(checkpoint, path)
 
 
-  @staticmethod
-  def from_state_dict(config:TrainConfig, dataset:Dataset, logger:Logger, state_dict:dict):
-
-    scene = config.scene.from_state_dict(state_dict['scene'], dataset.view_info().camera_table)
-    controller = config.controller.from_state_dict(state_dict['controller'], scene)
-
-    return Trainer(config, scene, controller, dataset, logger, step=state_dict['step'])
-    
-    
-  @property
-  def camera_table(self):
-    return self.camera_info.camera_table
-  
-  
   @property
   def t(self):
     return self.step / self.total_steps
@@ -301,14 +303,14 @@ class Trainer(Dispatcher):
     return f"Trainer(step={self.step}, scene={self.scene} controller={self.controller})"
 
 
-  def camera_params(self, cam_idx:torch.Tensor, image:torch.Tensor):
-        near, far = self.dataset.depth_range()
-        camera_t_world, projection = self.camera_table.lookup(cam_idx)
+  def camera_params(self, cam_idx:torch.Tensor):
+    camera = self.camera_table[cam_idx]
+    near, far = camera.depth_range
 
-        return CameraParams(
-            T_camera_world=camera_t_world,
-            projection=projection,
-            image_size=(image.shape[1], image.shape[0]),
+    return CameraParams(
+            T_camera_world=camera.camera_t_world,
+            projection=camera.projection.intrinsics,
+            image_size=camera.size_tuple,
             near_plane=near,
             far_plane=far,
         ).to(self.device, dtype=torch.float32)
@@ -346,6 +348,7 @@ class Trainer(Dispatcher):
 
   @beartype
   def render(self, camera_params:CameraParams, image_idx:Optional[int]=None, **options):
+
     return self.scene.render(camera_params, image_idx, 
       compute_visibility=True, **options, 
       antialias=self.config.antialias,
@@ -355,8 +358,7 @@ class Trainer(Dispatcher):
   @beartype
   def evaluate_image(self, filename:str, camera_params:CameraParams, image_idx:int, source_image:torch.Tensor, 
                      correct_image:Optional[ColorCorrect] = None):
-    rendering = self.render(camera_params, image_idx, 
-        compute_visibility=True, render_median_depth=True).detach()
+    rendering = self.render(camera_params, image_idx, render_median_depth=True).detach()
 
     if correct_image is not None:
       image = correct_image(rendering, source_image, image_idx)
@@ -465,7 +467,7 @@ class Trainer(Dispatcher):
       image = image.to(self.device, non_blocking=True) 
       
       image = image.to(dtype=torch.float) / 255.0
-      camera_params = self.camera_params(image_idx, image)
+      camera_params = self.camera_params(image_idx)
 
       yield filename, camera_params, image_idx, image
 
@@ -571,11 +573,9 @@ class Trainer(Dispatcher):
     iter_train = self.iter_train()
     step_timer = CudaTimer()
 
-    eval_metrics = self.evaluate()
-
 
     while self.step < self.config.steps:
-      self.on_update.emit()
+      self.emit("on_update")
       
       if self.step - next_densify > 0:
         self.controller.log_histograms(self.logger, self.step)
@@ -591,8 +591,6 @@ class Trainer(Dispatcher):
           if self.config.save_checkpoints and self.config.save_output:
             self.write_checkpoint()
 
-
-          self.log_values("train", dict(blur_cov=self.blur_cov))
           torch.cuda.empty_cache()
 
 
@@ -603,8 +601,7 @@ class Trainer(Dispatcher):
 
       torch.cuda.empty_cache()
 
-      self.viewer.update(self.step)
-
+      
       if self.step % self.config.log_interval  == 0:
         steps = transpose_rows(steps)
 
@@ -626,11 +623,11 @@ class Trainer(Dispatcher):
                   render=sum([timer.ellapsed() for timer in self.render_timers]) / self.config.log_interval
                 ))
 
-        finished = self.step >= self.config.steps
-        if ((self.step % self.config.eval_steps) == 0) or finished:
-          eval_metrics = self.evaluate()
-          if (finished or self.config.save_checkpoints) and self.config.save_output:
-            self.write_checkpoint()
+        # finished = self.step >= self.config.steps
+        # if ((self.step % self.config.eval_steps) == 0) or finished:
+        #   eval_metrics = self.evaluate()
+        #   if (finished or self.config.save_checkpoints) and self.config.save_output:
+        #     self.write_checkpoint()
 
           torch.cuda.empty_cache()          
 

@@ -1,4 +1,4 @@
-from argparse import ArgumentParser
+from argparse import ArgumentParser, Namespace
 import os
 from pathlib import Path
 from time import time
@@ -8,6 +8,7 @@ import hydra
 
 import numpy as np
 from omegaconf import DictConfig, OmegaConf
+from taichi_splatting import TaichiQueue
 from splat_trainer.trainer import Trainer
 import torch
 
@@ -34,13 +35,24 @@ def find_checkpoint(path:Path, checkpoint:Optional[int]=None):
   return checkpoint_dict[n]
 
 
-def init_from_checkpoint(config, splat_path:Path, step:Optional[int]=None):
+def load_checkpoint(splat_path:Path, step:Optional[int]=None):
+  if splat_path.is_dir():
+    workspace_path = splat_path
+    checkpoint = find_checkpoint(workspace_path, step)
+  else:
+    assert splat_path.is_file(), f"Checkpoint {splat_path} not found"
 
-  checkpoint = find_checkpoint(splat_path, step)
+    workspace_path = splat_path.parent.parent
+    checkpoint = splat_path
+
+  
   print(f"Loading checkpoint {checkpoint}")
-
   state_dict = torch.load(checkpoint, weights_only=True)
 
+  return state_dict, workspace_path
+
+
+def init_from_checkpoint(config, state_dict):
   dataset = hydra.utils.instantiate(config.dataset)  
   train_config = hydra.utils.instantiate(config.trainer)
 
@@ -70,13 +82,12 @@ def with_trainer(f, args):
   torch.set_printoptions(precision=4, sci_mode=False)
   np.set_printoptions(precision=4, suppress=True)
 
-  ti.init(arch=ti.cuda, debug=args.debug)
+  TaichiQueue.init(arch=ti.cuda, debug=args.debug, threaded=False)
 
   add_resolvers()
 
-  args.splat_path = args.splat_path.absolute()
-  config = OmegaConf.load(args.splat_path / "config.yaml")
-
+  state_dict, workspace_path = load_checkpoint(args.splat_path, args.step)
+  config = OmegaConf.load(workspace_path / "config.yaml")
 
   run_path, args.run = setup_project(config.project, args.run or config.run_name, config.base_path)
   os.chdir(str(run_path))
@@ -99,7 +110,7 @@ def with_trainer(f, args):
     dataset.resize_longest = int(dataset.resize_longest * resize_longest)
 
   print(OmegaConf.to_yaml(config))
-  trainer = init_from_checkpoint(config, args.splat_path, args.step)
+  trainer = init_from_checkpoint(config, state_dict)
   print(trainer)
 
   try:
@@ -135,46 +146,47 @@ def evaluate():
   with_trainer(f, args)
 
 
+def add_viewer_args(parser:ArgumentParser):
+  parser.add_argument("--eval", action="store_true", help="Evaluate the model before visualizing")
+  parser.add_argument("--port", type=int, default=8000, help="Port to run the web viewer on")
+  parser.add_argument("--host", type=str, default="0.0.0.0", help="Host to run the web viewer on")
+
+def start_with_viewer(trainer:Trainer, args:Namespace):
+  config = SplatviewConfig(port=args.port, host=args.host)
+  viewer = config.create_viewer(trainer)
+
+  if args.eval:
+    result = trainer.evaluate()
+    print(result)
+
+  return viewer
 
 def visualize():
   parser = arguments()
-  parser.add_argument("--eval", action="store_true", help="Evaluate the model before visualizing")
-
-  parser.add_argument("--port", type=int, default=8000, help="Port to run the web viewer on")
-  parser.add_argument("--host", type=str, default="localhost", help="Host to run the web viewer on")
+  add_viewer_args(parser)
 
   args = parser.parse_args()
     
   def f(trainer):
 
-    config = SplatviewConfig(port=args.port, host=args.host)
-    viewer = config.create_viewer(trainer)
-
-    if args.eval:
-      result = trainer.evaluate()
-      print(result)
-
+    viewer = start_with_viewer(trainer, args)
     viewer.spin()
 
   with_trainer(f, args)
-
     
 def resume():
   parser = arguments()
-  parser.add_argument("--vis", action="store_true", help="Run the web viewer")
-  parser.add_argument("--port", type=int, default=8000, help="Port to run the web viewer on")
-  parser.add_argument("--host", type=str, default="localhost", help="Host to run the web viewer on")
+  add_viewer_args(parser)
   args = parser.parse_args()
 
   def f(trainer):
 
     if args.vis:
-      config = SplatviewConfig(port=args.port, host=args.host)
-      viewer = config.create_viewer(trainer)
+      viewer = start_with_viewer(trainer, args)
 
     trainer.train()
 
-    if args.vis:
+    if viewer is not None:
       viewer.spin()
 
   with_trainer(f, args)
@@ -182,4 +194,4 @@ def resume():
 
 
 if __name__ == "__main__":
-  evaluate()
+  resume()

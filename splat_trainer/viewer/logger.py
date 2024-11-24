@@ -25,9 +25,9 @@ def format_value(value: Any) -> str:
     else:
       return f"{value}"
 
-class ViewLogger(Logger):
+class StatsLogger(Logger):
   def __init__(self):
-    self.sections = {}
+    self.current = {}
 
   def log_config(self, config:dict):
     self.sections["config"] = ms.code_block(pprint.pformat(config))

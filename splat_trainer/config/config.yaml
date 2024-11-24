@@ -8,7 +8,7 @@ defaults:
   - scene: tcnn
   - color_corrector: nil
   - trainer: default
-
+  - viewer: none
 hydra:
   job: 
     chdir: True

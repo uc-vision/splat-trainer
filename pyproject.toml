@@ -21,6 +21,9 @@ dependencies = [
   'roma>=1.4',
   'tabulate',
   'fused-ssim',
+
+  'python-dispatch',
+  'markdown_strings',
   
   'opencv-python',
   'pycolmap',

@@ -4,6 +4,7 @@ from functools import partial
 import time
 from typing import Any
 
+from beartype import beartype
 import splatview
 from termcolor import colored
 import torch
@@ -12,22 +13,23 @@ import viser
 from taichi_splatting.perspective import CameraParams
 
 from splat_trainer.trainer import Trainer, TrainerState
-from splat_trainer.viewer import ViewConfig
 
-from .logger import ViewLogger
+from .viewer import ViewerConfig, Viewer
+from .logger import StatsLogger
 
 
 @dataclass(frozen=True)
-class SplatviewConfig(ViewConfig):
+class SplatviewConfig(ViewerConfig):
   port: int = 8080
   host: str = "0.0.0.0"
 
-  def create_viewer(self, trainer: Trainer):
+  @beartype
+  def create_viewer(self, trainer: Trainer) -> 'SplatviewViewer':
       return SplatviewViewer(self, trainer)
 
 
-class SplatviewViewer():
-  def __init__(self, config: SplatviewConfig, trainer: Trainer, enable_training: bool):
+class SplatviewViewer(Viewer):
+  def __init__(self, config: SplatviewConfig, trainer: Trainer, enable_training: bool = False):
     self.config = config  
     self.trainer = trainer
 
@@ -35,10 +37,12 @@ class SplatviewViewer():
     address = f'http://{self.config.host}:{self.config.port}'
     print(f"Running viewer on: {colored(address, 'light_magenta')}")
 
-    self.logger = ViewLogger()
+    # up_direction = 
+
+    self.logger = StatsLogger()
 
     trainer.add_logger(self.logger)
-    trainer.on_update.bind(self.update)
+    trainer.bind(on_update=self.update)
     self.create_ui(enable_training)
 
     self.viewer = splatview.Viewer(
@@ -82,7 +86,7 @@ class SplatviewViewer():
 
   def update(self):
     with self.server.atomic():
-      self.logger_folder.update(self.server, self.logger.sections)
+      self.logger_folder.update(self.server, self.logger.current)
       self.update_training()
 
     while self.trainer.state == TrainerState.Paused:
@@ -96,14 +100,22 @@ class SplatviewViewer():
     while True:
       self.viewer.update()
       time.sleep(0.1)
-    
+
+  def wait_for_exit(self):
+    print(f"Waiting for {self.viewer.num_clients} clients to exit...")
+    while self.viewer.num_clients > 0:
+      self.viewer.update()
+      time.sleep(0.1)
+
+  @beartype
+  @torch.no_grad()
   def render_fn(self, camera: splatview.Camera):
 
-    projection = [*camera.focal_length, *camera.principal_point]
-    near, far = camera.depth_range()
+    projection = camera.projection
+    near, far = self.trainer.depth_range
 
-    camera_params = CameraParams(projection=torch.tensor(projection, device=self.device),
-                                T_camera_world=torch.from_numpy(camera.T_camera_world).to(self.device),
+    camera_params = CameraParams(projection=torch.tensor(projection, device=self.trainer.device),
+                                T_camera_world=torch.from_numpy(camera.camera_t_world).to(self.trainer.device),
                                 near_plane=near,
                                 far_plane=far,
                                 image_size=camera.image_size)

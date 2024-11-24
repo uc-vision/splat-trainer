@@ -3,12 +3,15 @@ from pathlib import Path
 import hydra
 import numpy as np
 from omegaconf import OmegaConf
+from taichi_splatting import TaichiQueue
 from termcolor import colored
 from splat_trainer.logger.logger import Logger
 from splat_trainer import config
 
 import torch
 import os
+
+from splat_trainer.viewer.viewer import Viewer
 
 config.add_resolvers()
 
@@ -158,7 +161,6 @@ def train_with_config(cfg) -> dict | str:
   torch.set_printoptions(precision=4, sci_mode=False)
   np.set_printoptions(precision=4, suppress=True)
 
-  # print(config.pretty(cfg))
   output_path = Path.cwd()
   print(f"Output path {colored(output_path, 'light_green')}")
 
@@ -167,23 +169,23 @@ def train_with_config(cfg) -> dict | str:
 
   logger:Logger = hydra.utils.instantiate(cfg.logger)
   logger.log_config(OmegaConf.to_container(cfg, resolve=True))
-  # logger = hydra.utils.instantiate(cfg.logger) 
 
   trainer = None
   result = None
 
   try:
-    ti.init(arch=ti.cuda, debug=cfg.debug, device_memory_GB=0.1)
+    TaichiQueue.init(arch=ti.cuda, debug=cfg.debug, device_memory_GB=0.1, threaded=False)
     
     train_config = hydra.utils.instantiate(cfg.trainer, _convert_="object")
     dataset = hydra.utils.instantiate(cfg.dataset)
-    
+  
     trainer = Trainer.initialize(train_config, dataset, logger)
+    viewer:Viewer = hydra.utils.instantiate(cfg.viewer).create_viewer(trainer)
 
     result = trainer.train()
-    if cfg.wait_exit:
-      input("Press Enter to continue...")
 
+    # allow viewer to run if enabled
+    viewer.spin()
   except KeyboardInterrupt:
     pass
 

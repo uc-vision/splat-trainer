@@ -62,7 +62,7 @@ class CompositeLogger(Logger):
 
   def log_image(self, name:str, image:torch.Tensor, step:int, compressed:bool = True, caption:str | None = None):
     for logger in self.loggers:
-      logger.log_image(name, image, step, compressed, caption)
+      logger.log_image(name, image, step=step, compressed=compressed, caption=caption)
 
   def log_cloud(self, name_str, points:PointCloud, step:int):
     for logger in self.loggers:

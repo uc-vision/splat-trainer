@@ -16,12 +16,12 @@ def pop_raster_config(options:Dict[str, Any]) -> RasterConfig:
   for k, v in options.items():
     if k in keys:
       raster_options[k] = v
-      del options[k]
+    
+  for k in raster_options:
+    del options[k]
 
   return RasterConfig(**raster_options)
 
-
-  
 
 
 

@@ -8,9 +8,9 @@ from beartype.typing import Iterator, Tuple, List
 import torch
 
 import numpy as np
-from splat_trainer.camera_table.camera_table import ViewTable, MultiCameraTable, camera_json
+from splat_trainer.camera_table.camera_table import Projections, MultiCameraTable
 from splat_trainer.dataset.colmap.loading import load_images
-from splat_trainer.dataset.dataset import CameraProjection, CameraView, Dataset
+from splat_trainer.dataset.dataset import  CameraView, Dataset
 
 from splat_trainer.util.misc import split_stride
 from splat_trainer.util.pointcloud import PointCloud
@@ -27,6 +27,40 @@ class CameraImage:
   def image_size(self) -> Tuple[int, int]:
     h, w =  self.image.shape[:2]
     return (w, h)
+  
+
+def colmap_projection(camera:pycolmap.Camera, image_scale:Optional[float]=None, 
+                      resize_longest:Optional[int]=None, depth_range:Tuple[float, float] = (0.1, 100.0)) -> Projections:
+  assert camera.model == pycolmap.CameraModelId.PINHOLE, f"Only PINHOLE cameras are supported for now, got {camera.model}"   
+
+  w, h = camera.width, camera.height
+  if resize_longest is not None:
+    image_scale = resize_longest / max(w, h)
+          
+  fx = camera.focal_length_x
+  fy = camera.focal_length_y
+  cx = camera.principal_point_x
+  cy = camera.principal_point_y
+
+  proj = np.array([fx, fy, cx, cy])  
+
+  if image_scale is not None:
+    proj *= image_scale
+    (w, h) = (round(w * image_scale), round(h * image_scale))
+  
+  w, h = camera.width, camera.height
+
+  return Projections(
+    intrinsics=torch.tensor(proj, dtype=torch.float32), 
+    image_size=torch.tensor((w, h), dtype=torch.int32),
+    depth_range=torch.tensor(depth_range, dtype=torch.float32)
+  )
+
+def print_projections(projections:List[Projections]):
+  for i, p in enumerate(projections):
+    fx, fy, cx, cy = p.intrinsics
+    w, h = p.image_size
+    print(f"Camera {i}@{w}x{h} fx={fx:.2f} fy={fy:.2f} cx={cx:.2f} cy={cy:.2f}")
 
 class COLMAPDataset(Dataset):
   def __init__(self, base_path:str,
@@ -49,35 +83,18 @@ class COLMAPDataset(Dataset):
     model_path = Path(base_path) / model_dir
 
     self.reconstruction = pycolmap.Reconstruction(str(model_path))
-    self.projections:List[CameraProjection] = []
     id_to_camera_idx = {}
 
     assert resize_longest is None or image_scale is None, "Specify either resize_longest or image_scale (not both)"
+    projections = []
 
     for i, (k, camera) in enumerate(self.reconstruction.cameras.items()): 
-      assert camera.camera_type == "PINHOLE", "Only PINHOLE cameras are supported for now"   
-
-      w, h = camera.width, camera.height
-      if resize_longest is not None:
-        image_scale = resize_longest / max(w, h)
-              
-      fx = camera.focal_length_x
-      fy = camera.focal_length_y
-      cx = camera.principal_point_x
-      cy = camera.principal_point_y
-
-      proj = np.array([fx, fy, cx, cy])  
-
-      if image_scale is not None:
-        proj *= image_scale
-        (w, h) = (round(w * image_scale), round(h * image_scale))
-      
-      w, h = camera.width, camera.height
-      self.projections.append(CameraProjection(torch.tensor(proj, dtype=torch.float32), (w, h)))
-
+      proj = colmap_projection(camera, image_scale, resize_longest, depth_range)
+      projections.append(proj)
       id_to_camera_idx[k] = i
-      print(f"Camera {k}@{w}x{h} fx={fx:.2f} fy={fy:.2f} cx={cx:.2f} cy={cy:.2f}")
 
+    self.projections = torch.stack(projections)
+    print_projections(self.projections)
 
     def image_info(image:pycolmap.Image) -> Tuple[np.array, str, int]:
       camera_t_world = np.eye(4)
@@ -89,9 +106,8 @@ class COLMAPDataset(Dataset):
     self.camera_t_world, self.image_names, self.camera_idx = zip(
       *[image_info(image) for image in self.reconstruction.images.values()])
     
-
     # Evenly distribute validation images
-    self.train_idx, self.val_idx = split_stride(np.arange(len(self.all_cameras)), val_stride)
+    self.train_idx, self.val_idx = split_stride(np.arange(self.num_cameras), val_stride)
 
   def __repr__(self) -> str:
     args = []
@@ -106,7 +122,7 @@ class COLMAPDataset(Dataset):
   
   
   @cached_property
-  def all_cameras(self) -> List[CameraImage]:
+  def camera_images(self) -> List[CameraImage]:
     images = load_images(list(self.image_names), Path(self.base_path) / self.image_dir, 
                          image_scale=self.image_scale, resize_longest=self.resize_longest)
     
@@ -116,11 +132,11 @@ class COLMAPDataset(Dataset):
   
   @cached_property
   def train_cameras(self) -> List[CameraImage]:
-    return [self.all_cameras[i] for i in self.train_idx]
+    return [self.camera_images[i] for i in self.train_idx]
 
   @cached_property
   def val_cameras(self) -> List[CameraImage]:
-    return [self.all_cameras[i] for i in self.val_idx]
+    return [self.camera_images[i] for i in self.val_idx]
 
   def train(self, shuffle=False) -> Iterator[CameraView]:
     return Images(self.train_cameras, shuffle=shuffle)
@@ -129,22 +145,13 @@ class COLMAPDataset(Dataset):
     return Images(self.val_cameras)
 
 
-  def view_table(self) -> MultiCameraTable:
-    projections = [p.projection for p in self.projections]
+  def camera_table(self) -> MultiCameraTable:
     return MultiCameraTable(
       camera_t_world = torch.tensor(np.array(self.camera_t_world), dtype=torch.float32),
-      projection = torch.tensor(np.array(projections), dtype=torch.float32),
+      projection = self.projections,
       camera_idx = torch.tensor(self.camera_idx, dtype=torch.long))
   
 
-  def unique_projections(self) -> List[CameraProjection]:
-    return list(set(self.projections))
-  
-  def depth_range(self) -> Tuple[float, float]:
-    return tuple(self.camera_depth_range)
-
-  def image_sizes(self) -> torch.Tensor:
-    return torch.tensor([image.image_size for image in self.all_cameras], dtype=torch.int32)
 
   def pointcloud(self) -> PointCloud:  
     xyz = np.array([p.xyz for p in self.reconstruction.points3D.values()])
@@ -154,24 +161,6 @@ class COLMAPDataset(Dataset):
                       torch.tensor(colors, dtype=torch.float32) / 255.0,
                       batch_size=(len(xyz),))
     
-
-
-  def camera_json(self, camera_table:ViewTable):
-
-    def export_camera(i, info):
-      image:CameraImage = self.all_cameras[i]
-      h, w, _ = image.image.shape
-
-      return {
-        "img_name": image.filename,
-        "width": w,
-        "height" : h,
-        **info
-      }
-
-    camera_info = camera_json(camera_table)
-    return [export_camera(i, info) for i, info in enumerate(camera_info)]
-
 
 
 

@@ -1,3 +1,4 @@
+from beartype import beartype
 from beartype.typing import Tuple
 import torch
 import torch.nn.functional as F
@@ -45,19 +46,19 @@ def transform33(transform, points):
   transformed = transform.reshape([1, 3, 3]) @ points
   return transformed[..., 0].reshape(-1, 3)
 
-
+@beartype
 def expand_proj(transform:torch.Tensor, batch_dims=1):
   # expand 3x3 to 4x4 by padding 
-  dims = transform.shape[:batch_dims]
+  batch_shape = transform.shape[:batch_dims]
 
   if transform.shape[batch_dims:] == (3, 3):
-    expanded = torch.zeros((*batch_dims, 4, 4), dtype=transform.dtype, device=transform.device)
+    expanded = torch.zeros((*batch_shape, 4, 4), dtype=transform.dtype, device=transform.device)
 
     expanded[..., :3, :3] = transform
     expanded[..., 3, 3] = 1.0
     return expanded
   elif transform.shape[batch_dims:] == (4,):
-    expanded = torch.zeros((*dims, 4, 4), dtype=transform.dtype, device=transform.device)
+    expanded = torch.zeros((*batch_shape, 4, 4), dtype=transform.dtype, device=transform.device)
 
     fx, fy, cx, cy = transform.unbind(-1)
     expanded[..., 0, 0] = fx
