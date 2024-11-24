@@ -8,7 +8,7 @@ import hydra
 import numpy as np
 from omegaconf import DictConfig, OmegaConf
 from splat_trainer.trainer import Trainer
-
+from taichi_splatting import TaichiQueue
 import torch
 
 import taichi as ti
@@ -81,7 +81,7 @@ def with_trainer(f, args):
   torch.set_printoptions(precision=4, sci_mode=False)
   np.set_printoptions(precision=4, suppress=True)
 
-  ti.init(arch=ti.cuda, debug=args.debug)
+  TaichiQueue.init(arch=ti.cuda, debug=args.debug)
 
   add_resolvers()
 

@@ -7,6 +7,8 @@ from termcolor import colored
 from splat_trainer.logger.logger import Logger
 from splat_trainer import config
 
+from taichi_splatting import TaichiQueue
+
 import torch
 import os
 
@@ -169,7 +171,7 @@ def train_with_config(cfg) -> dict | str:
   result = None
 
   try:
-    ti.init(arch=ti.cuda, debug=cfg.debug, device_memory_GB=0.1)
+    TaichiQueue.init(arch=ti.cuda, debug=cfg.debug, device_memory_GB=0.1)
     
     train_config = hydra.utils.instantiate(cfg.trainer, _convert_="object")
     dataset = hydra.utils.instantiate(cfg.dataset)
