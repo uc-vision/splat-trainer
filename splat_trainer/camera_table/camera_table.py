@@ -105,7 +105,7 @@ class Cameras:
   # Convenience properties for retrieving single camera values
   @property
   def depth_range(self) -> Tuple[float, float]:
-    assert len(self.batch_size) == 0, "depth_range returns (near, far) for a single camera"
+    assert len(self.batch_size) == 0, f"depth_range returns (near, far) for a single camera, got batch size: {self.batch_size}"
     return tuple(self.projection.depth_range.cpu().tolist())
 
   @property

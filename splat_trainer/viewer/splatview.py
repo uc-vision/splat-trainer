@@ -35,8 +35,8 @@ class SplatviewConfig(ViewerConfig):
   host: str = "0.0.0.0"
 
   @beartype
-  def create_viewer(self, trainer: Trainer) -> 'SplatviewViewer':
-      return SplatviewViewer(self, trainer)
+  def create_viewer(self, trainer: Trainer, enable_training: bool = False) -> 'SplatviewViewer':
+      return SplatviewViewer(self, trainer, enable_training)
 
 
 def to_splatview_camera(camera: Cameras) -> splatview.Camera:
@@ -82,6 +82,9 @@ class SplatviewViewer(Viewer):
         self.training = self.server.gui.add_markdown(self.progress_text)
         self.progress = self.server.gui.add_progress_bar(self.trainer.t * 100.)
 
+        self.paused_checkbox = self.server.gui.add_checkbox("Paused", initial_value=self.trainer.state == TrainerState.Paused, disabled=not enable_training)
+        self.paused_checkbox.on_update(self.on_pause_train)
+
       with self.server.gui.add_folder("Camera") as self.camera_folder:
         self.camera_slider = self.server.gui.add_slider("Camera", 0, self.trainer.camera_table.num_images - 1, step=1, initial_value=0)
         self.camera_slider.on_update(self.on_set_camera)
@@ -95,11 +98,6 @@ class SplatviewViewer(Viewer):
         self.zoom_slider = self.server.gui.add_slider("Zoom", min=0.1, max=10, step=0.1, initial_value=1.0)
         self.zoom_slider.on_update(self.on_set_zoom)
 
-      with self.server.gui.add_folder("Training", visible=enable_training) as self.training_folder:    
-        self.pause_train_button = self.server.gui.add_button("Pause")
-        self.pause_train_button.on_click(partial(self.on_pause_train, True))
-        self.resume_train_button = self.server.gui.add_button("Resume")
-        self.resume_train_button.on_click(partial(self.on_pause_train, False))
           
 
   @property
@@ -110,15 +108,11 @@ class SplatviewViewer(Viewer):
     self.training.content = self.progress_text
     self.progress.value = self.trainer.t * 100.
 
-    self.resume_train_button.visible = self.trainer.state == TrainerState.Paused
-    self.pause_train_button.visible = self.trainer.state == TrainerState.Training
-
+    self.paused_checkbox.value = self.trainer.state == TrainerState.Paused
     
   @with_traceback
-  def on_pause_train(self, pause: bool):
-
-    self.trainer.set_paused(pause)
-    self.update_training()
+  def on_pause_train(self, event: viser.GuiEvent[viser.GuiCheckboxHandle]):
+    self.trainer.set_paused(event.target.value)
 
   @property
   def current_camera_idx(self) -> int:

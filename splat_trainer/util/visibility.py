@@ -31,8 +31,8 @@ def project_points(transform, xyz):
   return (xy / depth), depth
 
 
-def projection(camera_table:CameraTable):
-  cam_t_world, image_t_cam = camera_table(torch.arange(len(camera_table), device=camera_table.device))
+def projection(cameras:Cameras):
+  cam_t_world, image_t_cam = cameras.camera_t_world, cameras.projection.matrix
   return expand_proj(image_t_cam) @ cam_t_world
 
 
@@ -59,7 +59,7 @@ def random_ndc(n, depth_range:Tuple[Number, Number], device=None) -> torch.Tenso
 @beartype
 def random_points(cameras:Cameras, count:int) -> torch.Tensor:
     
-    depth_range = cameras.depth_range
+    depth_range = cameras[0].depth_range
 
     world_t_image  = torch.inverse(projection(cameras))
     device  = world_t_image.device
