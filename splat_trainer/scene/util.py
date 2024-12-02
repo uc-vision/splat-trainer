@@ -1,8 +1,7 @@
 from typing import Dict, Tuple, Any
 from taichi_splatting import Gaussians3D, RasterConfig, Rendering
 
-from taichi_splatting.optim.parameter_class import ParameterClass
-from taichi_splatting.optim.sparse_adam import SparseAdam
+from taichi_splatting.optim import SparseAdam, ParameterClass
 
 from tensordict import TensorDict
 import torch

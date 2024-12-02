@@ -222,7 +222,8 @@ class Trainer(Dispatcher):
   def initialize(config:TrainConfig, dataset:Dataset, logger:Logger):
 
     device = torch.device(config.device)
-    camera_table = dataset.camera_table()
+    camera_table = dataset.camera_table().to(device)
+
 
     print(f"Initializing points from {dataset}")
 
@@ -249,17 +250,34 @@ class Trainer(Dispatcher):
       
   @staticmethod
   def from_state_dict(config:TrainConfig, dataset:Dataset, logger:Logger, state_dict:dict):
-    camera_table = dataset.camera_table()
+    device = torch.device(config.device)
+    camera_table = dataset.camera_table().to(device)
 
     scene = config.scene.from_state_dict(state_dict['scene'], camera_table)
     controller = config.controller.from_state_dict(state_dict['controller'], scene)
 
     if 'color_corrector' in state_dict:
-      color_corrector = config.color_corrector.from_state_dict(state_dict['color_corrector'])
+      color_corrector = config.color_corrector.from_state_dict(state_dict['color_corrector'], device=config.device)
     else:
       color_corrector = NilCorrector(config.device)
 
     return Trainer(config, scene, color_corrector, controller, dataset, logger, step=state_dict['step'])
+
+
+  def warmup(self):
+    # workaround various issues with thread safety (e.g. Dynamo) by running a few steps
+    # before training properly
+    with torch.enable_grad(): 
+      for _ in tqdm(range(10), desc="Warmup"):
+        image_idx = np.random.randint(0, self.camera_table.num_images)
+        camera_params = self.camera_params(image_idx)
+
+        rendering = self.render(camera_params, image_idx, compute_point_heuristics=True)
+        rendering = replace(rendering, image=self.color_corrector.correct(rendering, image_idx))
+
+        loss, losses = self.losses(rendering, torch.zeros_like(rendering.image, device=self.device))
+        loss.backward()
+    
 
 
   def state_dict(self):
@@ -350,14 +368,14 @@ class Trainer(Dispatcher):
   def render(self, camera_params:CameraParams, image_idx:Optional[int]=None, **options):
 
     return self.scene.render(camera_params, image_idx,  **options, 
-      antialias=self.config.antialias,
+      antialias=self.config.antialias, compute_visibility=True,
       blur_cov=0.0 if self.config.antialias is True else self.config.blur_cov)
 
 
   @beartype
   def evaluate_image(self, filename:str, camera_params:CameraParams, image_idx:int, source_image:torch.Tensor, 
                      correct_image:Optional[ColorCorrect] = None):
-    rendering = self.render(camera_params, image_idx, render_median_depth=True, compute_visibility=True).detach()
+    rendering = self.render(camera_params, image_idx, render_median_depth=True).detach()
 
     if correct_image is not None:
       image = correct_image(rendering, source_image, image_idx)
@@ -532,7 +550,7 @@ class Trainer(Dispatcher):
   def training_step(self, filename:str, camera_params:CameraParams, image_idx:int, image:torch.Tensor, timer:CudaTimer) -> dict:
 
     with timer:    
-      rendering = self.scene.render(camera_params, image_idx, compute_point_heuristics=True)
+      rendering = self.render(camera_params, image_idx, compute_point_heuristics=True)
       rendering = replace(rendering, image=self.color_corrector.correct(rendering, image_idx))
 
       loss, losses = self.losses(rendering, image)
@@ -559,6 +577,14 @@ class Trainer(Dispatcher):
     self.pbar.set_description_str(self.state.name)    
 
   
+  def eval_checkpoints(self, save:bool=True):
+      eval_metrics = self.evaluate()
+      if save and self.config.save_output:
+        self.write_checkpoint()
+
+      torch.cuda.empty_cache()
+      return eval_metrics
+
   def train(self):
     self.state = TrainerState.Training
     self.pbar = tqdm(total=self.config.steps - self.step, desc=self.state.name)
@@ -586,11 +612,7 @@ class Trainer(Dispatcher):
         next_densify += eval_varying(self.config.densify_interval, self.t)
 
       if self.step % self.config.eval_steps == 0:
-          eval_metrics = self.evaluate()
-          if self.config.save_checkpoints and self.config.save_output:
-            self.write_checkpoint()
-
-          torch.cuda.empty_cache()
+        eval_metrics = self.eval_checkpoints(self.config.save_checkpoints)
 
 
       with torch.enable_grad():
@@ -613,17 +635,7 @@ class Trainer(Dispatcher):
         self.pbar.set_postfix(**metrics, **eval_metrics, **densify_pbar)        
         self.log_values("train", means)
 
-        # skip first step as it will include compiling kernels
-        # if self.step > self.config.log_interval:
-        #   torch.cuda.synchronize()
-
-        #   self.log_values("timer", 
-        #           dict(step_ms=step_timer.ellapsed() / self.config.log_interval,
-        #           render=sum([timer.ellapsed() for timer in self.render_timers]) / self.config.log_interval
-        #         ))
-
-        #   torch.cuda.empty_cache()          
-
+    eval_metrics = self.eval_checkpoints(True)  # always save final checkpoint unless saving is disabled
     self.state = TrainerState.Stopped
 
     self.pbar.set_postfix(**metrics, **eval_metrics)        

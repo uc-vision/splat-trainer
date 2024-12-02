@@ -77,9 +77,7 @@ class PointCloud:
       raise ValueError(f"Unknown file type {filename.suffix}")
     
 
-
-  def save_ply(self, filename:str | Path):
-    filename = Path(filename)
+  def as_ply(self) -> plyfile.PlyData:
     vertex = np.zeros(self.points.shape[0], dtype=[
       ('x', 'f4'), ('y', 'f4'), ('z', 'f4'),
       ('red', 'u1'), ('green', 'u1'), ('blue', 'u1')
@@ -91,5 +89,22 @@ class PointCloud:
     for i, name in enumerate(['red', 'green', 'blue']):
       vertex[name] = (self.colors[:, i].cpu().numpy() * 255).astype(np.uint8)
 
-    ply = plyfile.PlyData([plyfile.PlyElement.describe(vertex, 'vertex')], text=True)
+    return plyfile.PlyData([plyfile.PlyElement.describe(vertex, 'vertex')], text=True)
+
+
+  def save_ply(self, filename:str | Path):
+    filename = Path(filename)
+    ply = self.as_ply()
     ply.write(filename)
+
+
+  def as_pcd(self) -> pypcd4.PointCloud:
+    fields = ("x", "y", "z", "red", "green", "blue")
+    types = (np.float32, np.float32, np.float32, np.uint8, np.uint8, np.uint8)
+
+    return pypcd4.PointCloud.from_points(self.points.cpu().numpy(), fields, types)
+
+  def save_pcd(self, filename:str | Path) -> None:
+    filename = Path(filename)
+    pc = self.as_pcd()
+    pc.save(filename)

@@ -18,10 +18,9 @@ from splat_trainer.gaussians.split import  point_basis, split_gaussians_uniform
 from splat_trainer.scene.util import parameters_from_gaussians, pop_raster_config
 from splat_trainer.util.misc import   rgb_to_sh
 
-from taichi_splatting.optim.parameter_class import ParameterClass
 from taichi_splatting import Gaussians3D, render_gaussians, Rendering
 from taichi_splatting.perspective import CameraParams
-from taichi_splatting.optim.sparse_adam import SparseAdam
+from taichi_splatting.optim import SparseAdam, ParameterClass
 
 
 @beartype

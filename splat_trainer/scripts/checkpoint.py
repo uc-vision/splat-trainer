@@ -82,12 +82,15 @@ def with_trainer(f, args):
   torch.set_printoptions(precision=4, sci_mode=False)
   np.set_printoptions(precision=4, suppress=True)
 
-  TaichiQueue.init(arch=ti.cuda, debug=args.debug, threaded=False)
+  TaichiQueue.init(arch=ti.cuda, debug=args.debug, threaded=True)
 
   add_resolvers()
 
   state_dict, workspace_path = load_checkpoint(args.splat_path, args.step)
   config = OmegaConf.load(workspace_path / "config.yaml")
+
+  if not args.enable_logging:
+    config.logger = OmegaConf.create({"_target_": "splat_trainer.logger.NullLogger"})
 
   run_path, args.run = setup_project(config.project, args.run or config.run_name, config.base_path)
   os.chdir(str(run_path))
@@ -131,7 +134,8 @@ def arguments():
 
   parser.add_argument("--scale_images", type=float, default=None, help="Scale images relative to training size")
   parser.add_argument("--run", type=str, default=None, help="Name for this run")
-
+  parser.add_argument("--enable_logging", action="store_true", help="Enable logging")
+  
   parser.add_argument("--override", type=str, nargs="*", help="Override config values")
   return parser
 
@@ -151,9 +155,11 @@ def add_viewer_args(parser:ArgumentParser):
   parser.add_argument("--port", type=int, default=8000, help="Port to run the web viewer on")
   parser.add_argument("--host", type=str, default="0.0.0.0", help="Host to run the web viewer on")
 
-def start_with_viewer(trainer:Trainer, args:Namespace):
+def start_with_viewer(trainer:Trainer, args:Namespace, enable_training: bool = False):
+  trainer.warmup()
+
   config = SplatviewConfig(port=args.port, host=args.host)
-  viewer = config.create_viewer(trainer)
+  viewer = config.create_viewer(trainer, enable_training)
 
   if args.eval:
     result = trainer.evaluate()
@@ -182,7 +188,7 @@ def resume():
   def f(trainer):
 
     if args.vis:
-      viewer = start_with_viewer(trainer, args)
+      viewer = start_with_viewer(trainer, args, enable_training=True)
 
     trainer.train()
 

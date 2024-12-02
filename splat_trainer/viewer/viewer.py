@@ -6,7 +6,7 @@ if typing.TYPE_CHECKING:
 
 class ViewerConfig(metaclass=ABCMeta):
   @abstractmethod
-  def create_viewer(self, trainer: 'Trainer') -> 'Viewer':
+  def create_viewer(self, trainer: 'Trainer', enable_training: bool = False) -> 'Viewer':
     raise NotImplementedError()
   
 class Viewer(metaclass=ABCMeta):
@@ -26,7 +26,7 @@ class Viewer(metaclass=ABCMeta):
 
 
 class NilViewerConfig(ViewerConfig):
-  def create_viewer(self, trainer: 'Trainer'):
+  def create_viewer(self, trainer: 'Trainer', enable_training: bool = False):
     return NilViewer()
 
 class NilViewer(Viewer):

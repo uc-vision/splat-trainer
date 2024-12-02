@@ -26,7 +26,7 @@ sh_coeffs = {
 
 
 class ProjectSH(torch.nn.Module):
-  def __init__(self, out_features: int, sh_degree: int, hidden: int, layers: int = 1, norm = nn.Identity):
+  def __init__(self, out_features: int, sh_degree: int, hidden: int, layers: int = 0, norm = nn.Identity):
     super().__init__()
 
     self.get_coeffs = sh_coeffs[sh_degree]

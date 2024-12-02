@@ -1,5 +1,6 @@
 from abc import abstractmethod
 import abc
+from functools import cached_property
 from numbers import Number
 from typing import List, Tuple
 
@@ -35,6 +36,23 @@ class Projections:
   def device(self):
     return self.intrinsics.device
   
+  @property
+  def focal_length(self) -> torch.Tensor:
+    return self.intrinsics[..., :2]
+  
+  @property
+  def principal_point(self) -> torch.Tensor:
+    return self.intrinsics[..., 2:]
+  
+  @property
+  def aspect_ratio(self) -> torch.Tensor:
+    return self.image_size[..., 0] / self.image_size[..., 1]
+
+  @property
+  def fov(self) -> torch.Tensor:
+    f = self.focal_length
+    return 2.0 * torch.atan(0.5 * self.image_size / f)
+  
 
 @tensorclass
 class Cameras:
@@ -52,11 +70,29 @@ class Cameras:
   
   @property
   def centers(self) -> torch.Tensor:
-    return self.camera_t_world[..., :3, 3]
+    return -self.camera_t_world[..., :3, 3] 
   
   @property
   def rotations(self) -> torch.Tensor:
-    return self.camera_t_world[..., :3, :3]
+    return self.camera_t_world[..., :3, :3].transpose(-1, -2)
+  
+  @cached_property
+  def world_t_camera(self) -> torch.Tensor:
+    return torch.inverse(self.camera_t_world)
+    
+
+
+  @property
+  def right(self) -> torch.Tensor:
+    return self.world_t_camera[..., :3, 0]
+  
+  @property
+  def up(self) -> torch.Tensor:
+    return self.world_t_camera[..., :3, 1]
+  
+  @property
+  def forward(self) -> torch.Tensor:
+    return -self.rotations[..., :3, 2]
   
   @property
   def intrinsics(self) -> torch.Tensor:
@@ -86,6 +122,17 @@ class Cameras:
   def size_tuple(self) -> Tuple[int, int]:
     assert len(self.batch_size) == 0, "size_tuple returns (width, height) for a single camera"
     return tuple(self.image_sizes.cpu().tolist())
+  
+
+  @property
+  def near(self) -> float:
+    assert len(self.batch_size) == 0, "near returns a single camera index"
+    return self.projection.depth_range[0].item()
+  
+  @property
+  def far(self) -> float:
+    assert len(self.batch_size) == 0, "far returns a single camera index"
+    return self.projection.depth_range[1].item()
 
 
 class CameraTable(nn.Module, metaclass=abc.ABCMeta):
@@ -168,12 +215,11 @@ def pose_adjacency(poses1:torch.Tensor, poses2:torch.Tensor) -> torch.Tensor:
 
 
 @beartype
-def camera_similarity(camera_table:CameraTable, camera_t_world:torch.Tensor) -> torch.Tensor:
+def camera_similarity(cameras:Cameras, world_t_camera:torch.Tensor) -> torch.Tensor:
   """ Compute similarity between a camera pose and all camera poses in the table."""
-  assert camera_t_world.shape == (4, 4), f"Expected shape (4, 4), got: {camera_t_world.shape}"
+  assert world_t_camera.shape == (4, 4), f"Expected shape (4, 4), got: {world_t_camera.shape}"
 
-  poses = camera_table.camera_poses
-  return pose_adjacency(poses, camera_t_world.unsqueeze(0))
+  return pose_adjacency(cameras.world_t_camera, world_t_camera.unsqueeze(0))
   
 
 class CameraRigTable(CameraTable):

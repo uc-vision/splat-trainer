@@ -174,13 +174,15 @@ def train_with_config(cfg) -> dict | str:
   result = None
 
   try:
-    TaichiQueue.init(arch=ti.cuda, debug=cfg.debug, device_memory_GB=0.1, threaded=False)
+    TaichiQueue.init(arch=ti.cuda, debug=cfg.debug, device_memory_GB=0.1, threaded=True)
     
     train_config = hydra.utils.instantiate(cfg.trainer, _convert_="object")
     dataset = hydra.utils.instantiate(cfg.dataset)
   
     trainer = Trainer.initialize(train_config, dataset, logger)
-    viewer:Viewer = hydra.utils.instantiate(cfg.viewer).create_viewer(trainer)
+    trainer.warmup()
+
+    viewer:Viewer = hydra.utils.instantiate(cfg.viewer).create_viewer(trainer, enable_training=True)
 
     result = trainer.train()
 

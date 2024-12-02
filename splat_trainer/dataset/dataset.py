@@ -1,13 +1,8 @@
 
 from abc import ABCMeta, abstractmethod
 from collections import namedtuple
-from dataclasses import dataclass
-from numbers import Number
-from typing import List, Tuple
 from beartype.typing import Iterator
 
-import numpy as np
-import torch
 
 from splat_trainer.camera_table.camera_table import CameraTable
 from splat_trainer.util.pointcloud import PointCloud

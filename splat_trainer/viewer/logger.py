@@ -30,12 +30,12 @@ class StatsLogger(Logger):
     self.current = {}
 
   def log_config(self, config:dict):
-    self.sections["config"] = ms.code_block(pprint.pformat(config))
+    self.current["config"] = ms.code_block(pprint.pformat(config))
   
   def log_evaluations(self, name:str,  data:Dict[str, Dict], step:int):
     pass
 
-  def log_image(self, name:str, image:torch.Tensor, step:int, caption:str | None = None):
+  def log_image(self, name:str, image:torch.Tensor, step:int, caption:str | None = None, compressed:bool = True):
     pass
 
   def log_cloud(self, name_str, points:PointCloud, step:int):
@@ -43,11 +43,11 @@ class StatsLogger(Logger):
 
   def log_values(self, name:str, data:dict, step:int):
     for key, value in data.items():
-      self.log_value(f"{name}/{key}", format_value(value))
+      self.log_value(f"{name}/{key}", format_value(value), step)
 
   def log_value(self, name:str, value:float, step:int):
     path = name.split("/")
-    insert_dicts(self.sections, path, format_value(value))
+    insert_dicts(self.current, path, format_value(value))
       
       
   def log_histogram(self, name:str, values:torch.Tensor | Histogram, step:int):

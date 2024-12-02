@@ -28,18 +28,18 @@ trainer:
     beta2: 0.999
 
     # TCNN specific
-    image_features: 16
+    image_features: 48
     point_features: 16
 
     hidden_features: 64
     affine_color_model: False
 
-    layers: 3
+    layers: 2
 
     # Per image features (as opposed to per-camera features)
     per_image: True
 
-    lr_image_feature: 0.1
-    lr_nn: ${log_decay:0.0004, 0.1}
+    lr_image_feature: 0.5
+    lr_nn: ${log_decay:0.001, 0.1}
 
 

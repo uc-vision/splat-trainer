@@ -18,7 +18,7 @@ from splat_trainer.gaussians.split import point_basis, split_gaussians_uniform
 
 
 from taichi_splatting.optim import ParameterClass, SparseAdam
-from taichi_splatting import Gaussians3D, Rendering
+from taichi_splatting import Gaussians3D, Rendering, TaichiQueue
 
 from taichi_splatting.renderer import render_projected, project_to_image
 from taichi_splatting.perspective import CameraParams
@@ -95,13 +95,11 @@ class TCNNScene(GaussianScene):
       glo_features=config.image_features, 
       point_features=config.point_features, 
       hidden_features=config.hidden_features, 
-      layers=config.layers).to(self.device)
+      layers=config.layers,
+      sh_degree=5).to(self.device)
     
-    print(self.color_model)
-    
+    self.color_model = torch.compile(self.color_model, options=dict(max_autotune=True), dynamic=True)
     self.color_opt = self.color_model.optimizer(config.lr_nn)
-
-    # self.color_model = torch.compile(self.color_model) #, options=dict(max_autotune=True), dynamic=True)
 
     self.color_table = GLOTable(num_glo_embeddings, config.image_features).to(self.device)
     self.glo_opt = self.color_table.optimizer(config.lr_image_feature)
@@ -132,7 +130,7 @@ class TCNNScene(GaussianScene):
   def step(self, rendering:Rendering, t:float) -> Dict[str, float]:
     vis = rendering.visible_indices
     basis = point_basis(self.points.log_scaling[vis], self.points.rotation[vis]).contiguous()
-    self.points.step(visible_indexes=vis, basis=basis)
+    self.points.step(indexes=vis, basis=basis)
 
     self.color_opt.step()
     self.glo_opt.step()
@@ -199,40 +197,35 @@ class TCNNScene(GaussianScene):
     
   @beartype
   def interpolated_glo_feature(self, camera_t_world:torch.Tensor) -> torch.Tensor:
-    similarity = F.softmax(camera_similarity(self.camera_table, camera_t_world), dim=0)
-    glo_feature = self.color_model.glo_features
-
+    cameras = self.camera_table.cameras
+    similarity = F.softmax(camera_similarity(cameras, camera_t_world), dim=0)
+    
+    image_idx = torch.arange(self.camera_table.num_images, device=self.device)
     if not self.config.per_image:
-      glo_feature = glo_feature[self.camera_table.camera_id(self.camera_table.all_images)]
+      image_idx = self.camera_table.camera_id(image_idx)
 
+    glo_feature = self.color_table(image_idx)
     return torch.sum(similarity.unsqueeze(1) * glo_feature, dim=0)
 
 
-  def eval_colors(self, indexes, camera_position, image_idx):
-    glo_feature = self.lookup_glo_feature(image_idx)
-    return self.color_model(self.points.feature[indexes], self.points.position[indexes], 
-                                                        camera_position, glo_feature)
+  def eval_colors(self, indexes, camera_params, image_idx):
+    if image_idx is not None:
+      glo_feature = self.lookup_glo_feature(image_idx)
+    else:
+      glo_feature = self.interpolated_glo_feature(torch.inverse(camera_params.T_camera_world))
 
+    with torch.autocast(device_type=self.device.type, dtype=torch.float16):
+      return self.color_model(self.points.feature[indexes], self.points.position[indexes], 
+                                                        camera_params.camera_position, glo_feature)
 
   @beartype
-  def render(self, camera_params:CameraParams, 
+  def render(self, camera_params:CameraParams,  
              image_idx:Optional[int] = None, **options) -> Rendering:
-    
+
     raster_config = pop_raster_config(options)
     gaussians2d, depthvars, indexes = project_to_image(self.gaussians, camera_params, raster_config)
 
-    if image_idx is None:
-      image_idx = 0
-
-    glo_feature = self.lookup_glo_feature(image_idx)
-    # if image_idx is not None:
-    #   glo_feature = self.lookup_glo_feature(image_idx)
-    # else:
-    #   glo_feature = self.interpolated_glo_feature(camera_params.T_camera_world)
-
-    # with torch.autocast(device_type=self.device.type, dtype=torch.float16):
-    colour = self.color_model(self.points.feature[indexes], self.points.position[indexes], 
-                                                        camera_params.camera_position, glo_feature)
+    colour = TaichiQueue.run_sync(self.eval_colors, indexes, camera_params, image_idx)
 
     return render_projected(indexes, gaussians2d, colour, depthvars, 
                             camera_params, raster_config, **options)

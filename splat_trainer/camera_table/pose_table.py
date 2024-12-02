@@ -64,11 +64,15 @@ class PoseTable(nn.Module):
     self.q = nn.Parameter(q.to(torch.float32), requires_grad=False)
 
 
-  def forward(self, indices):
-    assert indices.dim() == 1, f"Expected 1D tensor, got: {indices.shape}"
-    assert (indices < self.q.shape[0]).all(), f"Index out of bounds: {indices} >= {self.q.shape[0]}"
+  def forward(self, indices:torch.Tensor | None = None):
+    if indices is None:
+      q, t = F.normalize(self.q, dim=-1), self.t  
+    else:
+      assert indices.dim() == 1, f"Expected 1D tensor, got: {indices.shape}"
+      assert (indices < self.q.shape[0]).all(), f"Index out of bounds: {indices} >= {self.q.shape[0]}"
 
-    q, t = F.normalize(self.q[indices], dim=-1), self.t[indices]
+      q, t = F.normalize(self.q[indices], dim=-1), self.t[indices]
+
     pose = join_rt(roma.unitquat_to_rotmat(q), t)
     return pose
   

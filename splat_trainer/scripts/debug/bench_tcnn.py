@@ -10,10 +10,12 @@ import torch.nn.functional as F
 from tqdm import tqdm
 from torch import nn
 
+from splat_trainer.scene.mlp.torch_mlp import DirectionalMLP
+
 
 
 def torch_model(args):
-  model = MLP(args.inputs, args.outputs, args.hidden, args.layers, 
+  model = DirectionalMLP(args.inputs, args.outputs, args.hidden, args.layers, 
             norm=partial(torch.nn.LayerNorm, elementwise_affine=True) if args.norm else nn.Identity, 
             activation=nn.ReLU, 
             output_activation=nn.Sigmoid,
