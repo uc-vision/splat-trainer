@@ -165,6 +165,14 @@ class Trainer:
     self.pbar = None
 
     self.view_overlaps: Optional[torch.Tensor] = None
+    
+    n = self.scene.num_points
+    k = self.config.steps // self.config.log_interval
+    self.visibility_log = {"depth": torch.zeros((n, k, 1)).to(self.device),
+                           "visibility": torch.zeros((n, k, 1)).to(self.device),
+                           "scale": torch.zeros((n, k, 3)).to(self.device),
+                           "opacity": torch.zeros((n, k, 1)).to(self.device),
+                           "visible_frequency": torch.zeros((n)).to(self.device)}
 
 
   @staticmethod
@@ -508,18 +516,32 @@ class Trainer:
     loss += reg_loss 
 
     return loss, metrics
+  
+  
+  def log_visibility(self, rendering:Rendering):
+    if self.step % self.config.log_interval == 0:
+      vis = rendering.visible_indices
+      k = self.step // self.config.log_interval
+      if vis.numel() > 0:
+        self.visibility_log["depth"][vis, k, :] = rendering.point_depth[rendering.visible_mask]
+        self.visibility_log["visibility"][vis, k, :] = rendering.point_visibility[rendering.visible_mask].unsqueeze(-1)
+      self.visibility_log["scale"][:, k, :] = torch.exp(self.scene.points.tensors['log_scaling'])
+      self.visibility_log["opacity"][:, k, :] = torch.sigmoid(self.scene.points.tensors['alpha_logit'])
+      self.visibility_log["visible_frequency"][vis] += 1
 
 
   def training_step(self, filename:str, camera_params:CameraParams, image_idx:int, image:torch.Tensor, timer:CudaTimer) -> dict:
 
     with timer:
-      config = replace(self.config.raster_config, compute_point_heuristics=True, 
+      config = replace(self.config.raster_config, compute_point_heuristics=True, compute_visibility=True,
                        antialias=self.config.antialias,
                        blur_cov=self.blur_cov)  
       
       rendering = self.scene.render(camera_params, config, image_idx)
       rendering = replace(rendering, image=self.color_corrector.correct(rendering, image_idx))
 
+      self.log_visibility(rendering)
+      
       loss, losses = self.losses(rendering, image)
       loss.backward()
 
@@ -598,7 +620,7 @@ class Trainer:
 
           torch.cuda.empty_cache()          
 
-
+    torch.save(self.visibility_log, "visibility_log.pt")
     self.pbar.set_postfix(**metrics, **eval_metrics)        
     self.pbar.close()
 
