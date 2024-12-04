@@ -552,7 +552,6 @@ class Trainer:
 
 
     while self.step < self.config.steps:
-
       if self.step - next_densify > 0:
         self.controller.log_histograms(self.logger, self.step)
 

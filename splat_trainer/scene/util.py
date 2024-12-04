@@ -2,7 +2,7 @@ from typing import Dict, Tuple
 from taichi_splatting import Gaussians3D, Rendering
 
 from taichi_splatting.optim.parameter_class import ParameterClass
-from taichi_splatting.optim.sparse_adam import SparseAdam
+from taichi_splatting.optim import SparseAdam
 from tensordict import TensorDict
 import torch
 

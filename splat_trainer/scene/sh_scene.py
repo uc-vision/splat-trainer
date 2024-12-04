@@ -21,7 +21,7 @@ from splat_trainer.util.misc import   rgb_to_sh
 from taichi_splatting.optim.parameter_class import ParameterClass
 from taichi_splatting import Gaussians3D, RasterConfig, render_gaussians, Rendering
 from taichi_splatting.perspective import CameraParams
-from taichi_splatting.optim.sparse_adam import SparseAdam
+from taichi_splatting.optim import SparseAdam
 
 
 @beartype
@@ -112,7 +112,7 @@ class SHScene(GaussianScene):
 
     vis = rendering.visible_indices
     basis = point_basis(self.points.log_scaling[vis], self.points.rotation[vis]).contiguous()
-    self.points.step(visible_indexes=vis, basis=basis)
+    self.points.step(indexes=vis, basis=basis)
 
 
     self.points.rotation = torch.nn.Parameter(
