@@ -48,4 +48,7 @@ trainer:
     _target_: taichi_splatting.RasterConfig
 
 
+  optimizer: SparseAdam
+
+
 

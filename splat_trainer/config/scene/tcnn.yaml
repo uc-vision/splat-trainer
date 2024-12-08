@@ -42,4 +42,6 @@ trainer:
     lr_image_feature: 0.1
     lr_nn: ${log_decay:0.0004, 0.1}
 
+    optimizer: ${trainer.optimizer}
+
 

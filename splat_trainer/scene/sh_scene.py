@@ -18,10 +18,10 @@ from splat_trainer.gaussians.split import  point_basis, split_gaussians_uniform
 from splat_trainer.scene.util import parameters_from_gaussians
 from splat_trainer.util.misc import   rgb_to_sh
 
-from taichi_splatting.optim.parameter_class import ParameterClass
+import taichi_splatting.optim as optim
+from taichi_splatting.optim import ParameterClass, VisibilityOptimizer
 from taichi_splatting import Gaussians3D, RasterConfig, render_gaussians, Rendering
 from taichi_splatting.perspective import CameraParams
-from taichi_splatting.optim import SparseAdam
 
 
 @beartype
@@ -39,7 +39,7 @@ class SHConfig(GaussianSceneConfig):
   beta1:float = 0.9
   beta2:float = 0.999
 
-
+  optimizer:str = 'SparseAdam'
 
   def from_color_gaussians(self, gaussians:Gaussians3D, camera_table:ViewTable, device:torch.device):
 
@@ -48,13 +48,13 @@ class SHConfig(GaussianSceneConfig):
 
     gaussians = gaussians.replace(feature=sh_feature).to(device)
 
-    points = parameters_from_gaussians(gaussians, self.parameters, betas=(self.beta1, self.beta2))
+    points = parameters_from_gaussians(gaussians, self.parameters, getattr(optim, self.optimizer), betas=(self.beta1, self.beta2))
     return SHScene(points, self, camera_table)
 
   
   def from_state_dict(self, state:dict, camera_table:ViewTable):
     points = ParameterClass.from_state_dict(state['points'], 
-          optimizer=SparseAdam, betas=(self.beta1, self.beta2))
+          optimizer=getattr(optim, self.optimizer), betas=(self.beta1, self.beta2))
     
     return SHScene(points, self, camera_table)
 
@@ -112,8 +112,13 @@ class SHScene(GaussianScene):
 
     vis = rendering.visible_indices
     basis = point_basis(self.points.log_scaling[vis], self.points.rotation[vis]).contiguous()
-    self.points.step(indexes=vis, basis=basis)
 
+    if isinstance(self.points.optimizer , VisibilityOptimizer):
+      self.points.step(indexes=vis, 
+                        visibility=rendering.point_visibility[rendering.visible_mask], 
+                        basis=basis)
+    else:
+      self.points.step(indexes=vis, basis=basis)
 
     self.points.rotation = torch.nn.Parameter(
       F.normalize(self.points.rotation.detach(), dim=1), requires_grad=True)

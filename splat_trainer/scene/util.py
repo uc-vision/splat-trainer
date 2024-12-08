@@ -2,7 +2,6 @@ from typing import Dict, Tuple
 from taichi_splatting import Gaussians3D, Rendering
 
 from taichi_splatting.optim.parameter_class import ParameterClass
-from taichi_splatting.optim import SparseAdam
 from tensordict import TensorDict
 import torch
 
@@ -35,7 +34,7 @@ def update_depth(points:ParameterClass, rendering:Rendering, depth_ema:float):
 
 
 
-def parameters_from_gaussians(gaussians:Gaussians3D, parameters:Dict[str, float], betas:Tuple[float, float]) -> ParameterClass:
+def parameters_from_gaussians(gaussians:Gaussians3D, parameters:Dict[str, float], optimizer:torch.optim.Optimizer, betas:Tuple[float, float]) -> ParameterClass:
 
     points_dict:TensorDict = gaussians.to_tensordict().update(dict(
       running_depth = torch.zeros(gaussians.batch_size[0], device=gaussians.position.device)))
@@ -46,5 +45,5 @@ def parameters_from_gaussians(gaussians:Gaussians3D, parameters:Dict[str, float]
       
     return ParameterClass(points_dict, 
           parameter_groups=parameters, 
-          optimizer=SparseAdam,
+          optimizer=optimizer,
           betas=betas)   

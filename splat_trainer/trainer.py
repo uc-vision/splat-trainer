@@ -91,6 +91,9 @@ class TrainConfig:
 
   save_checkpoints: bool = False
   save_output: bool = True
+  save_visibility: bool = False
+  
+  optimizer: str = 'SparseAdam'
 
 @dataclass(frozen=True)
 class Evaluation:
@@ -168,11 +171,13 @@ class Trainer:
     
     n = self.scene.num_points
     k = self.config.steps // self.config.log_interval
-    self.visibility_log = {"depth": torch.zeros((n, k, 1)).to(self.device),
-                           "visibility": torch.zeros((n, k, 1)).to(self.device),
-                           "scale": torch.zeros((n, k, 3)).to(self.device),
-                           "opacity": torch.zeros((n, k, 1)).to(self.device),
-                           "visible_frequency": torch.zeros((n)).to(self.device)}
+    
+    if self.config.save_visibility:
+      self.visibility_log = {"depth": torch.zeros((n, k, 1)).to(self.device),
+                            "visibility": torch.zeros((n, k, 1)).to(self.device),
+                            "scale": torch.zeros((n, k, 3)).to(self.device),
+                            "opacity": torch.zeros((n, k, 1)).to(self.device),
+                            "visible_frequency": torch.zeros((n)).to(self.device)}
 
 
   @staticmethod
@@ -540,7 +545,8 @@ class Trainer:
       rendering = self.scene.render(camera_params, config, image_idx)
       rendering = replace(rendering, image=self.color_corrector.correct(rendering, image_idx))
 
-      self.log_visibility(rendering)
+      if self.config.save_visibility:
+        self.log_visibility(rendering)
       
       loss, losses = self.losses(rendering, image)
       loss.backward()
@@ -620,7 +626,8 @@ class Trainer:
 
           torch.cuda.empty_cache()          
 
-    torch.save(self.visibility_log, "visibility_log.pt")
+    if self.config.save_visibility:
+      torch.save(self.visibility_log, "visibility_log.pt")
     self.pbar.set_postfix(**metrics, **eval_metrics)        
     self.pbar.close()
 

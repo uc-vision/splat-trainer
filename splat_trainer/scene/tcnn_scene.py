@@ -16,8 +16,8 @@ from splat_trainer.scene.io import write_gaussians
 from splat_trainer.scene.scene import GaussianSceneConfig, GaussianScene
 from splat_trainer.gaussians.split import point_basis, split_gaussians_uniform
 
-
-from taichi_splatting.optim import ParameterClass, SparseAdam
+import taichi_splatting.optim as optim
+from taichi_splatting.optim import ParameterClass, VisibilityOptimizer
 from taichi_splatting import Gaussians3D, RasterConfig, Rendering
 
 from taichi_splatting.renderer import render_projected, project_to_image
@@ -48,6 +48,8 @@ class TCNNConfig(GaussianSceneConfig):
 
   beta1:float = 0.9
   beta2:float = 0.999
+  
+  optimizer:str = 'SparseAdam'
 
 
 
@@ -61,7 +63,7 @@ class TCNNConfig(GaussianSceneConfig):
 
     gaussians = gaussians.replace(feature=feature).to(device)
     points = parameters_from_gaussians(gaussians, 
-          eval_varyings(self.parameters, 0.), betas=(self.beta1, self.beta2))
+          eval_varyings(self.parameters, 0.), getattr(optim, self.optimizer), betas=(self.beta1, self.beta2))
     
     return TCNNScene(points, self, camera_table)
 
@@ -69,7 +71,7 @@ class TCNNConfig(GaussianSceneConfig):
   def from_state_dict(self, state:dict, camera_table:ViewTable):
 
     points = ParameterClass.from_state_dict(state['points'], 
-          optimizer=SparseAdam, betas=(self.beta1, self.beta2))
+          optimizer=getattr(optim, self.optimizer), betas=(self.beta1, self.beta2))
     
     scene = TCNNScene(points, self, camera_table)
 
@@ -136,7 +138,12 @@ class TCNNScene(GaussianScene):
   
     vis = rendering.visible_indices
     basis = point_basis(self.points.log_scaling[vis], self.points.rotation[vis]).contiguous()
-    self.points.step(visible_indexes=vis, basis=basis)
+    if isinstance(self.points.optimizer , VisibilityOptimizer):
+      self.points.step(indexes=vis, 
+                        visibility=rendering.point_visibility[rendering.visible_mask], 
+                        basis=basis)
+    else:
+      self.points.step(indexes=vis, basis=basis)
 
     self.color_opt.step()
     self.points.rotation = torch.nn.Parameter(

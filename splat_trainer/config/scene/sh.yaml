@@ -27,4 +27,6 @@ trainer:
     sh_ratio: 20.0
     sh_degree: 3
 
+    optimizer: ${trainer.optimizer}
+
 
