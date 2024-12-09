@@ -1,27 +1,26 @@
 
-from dataclasses import  dataclass, replace
+from dataclasses import  dataclass
 import math
 from pathlib import Path
 from typing import Dict
 from beartype import beartype
-from omegaconf import DictConfig, OmegaConf
+from omegaconf import DictConfig
 
 import torch
 import torch.nn.functional as F
 
-from splat_trainer.camera_table.camera_table import ViewTable
+from splat_trainer.camera_table.camera_table import CameraTable
 from splat_trainer.config import eval_varyings
 from splat_trainer.logger.logger import Logger
 from splat_trainer.scene.io import write_gaussians
 from splat_trainer.scene.scene import GaussianSceneConfig, GaussianScene
 from splat_trainer.gaussians.split import  point_basis, split_gaussians_uniform
-from splat_trainer.scene.util import parameters_from_gaussians
+from splat_trainer.scene.util import parameters_from_gaussians, pop_raster_config
 from splat_trainer.util.misc import   rgb_to_sh
 
-from taichi_splatting.optim.parameter_class import ParameterClass
-from taichi_splatting import Gaussians3D, RasterConfig, render_gaussians, Rendering
+from taichi_splatting import Gaussians3D, render_gaussians, Rendering
 from taichi_splatting.perspective import CameraParams
-from taichi_splatting.optim.sparse_adam import SparseAdam
+from taichi_splatting.optim import SparseAdam, ParameterClass
 
 
 @beartype
@@ -41,7 +40,7 @@ class SHConfig(GaussianSceneConfig):
 
 
 
-  def from_color_gaussians(self, gaussians:Gaussians3D, camera_table:ViewTable, device:torch.device):
+  def from_color_gaussians(self, gaussians:Gaussians3D, camera_table:CameraTable, device:torch.device):
 
     sh_feature = torch.zeros(gaussians.batch_size[0], 3, (self.sh_degree + 1)**2)
     sh_feature[:, :, 0] = rgb_to_sh(gaussians.feature)
@@ -52,7 +51,7 @@ class SHConfig(GaussianSceneConfig):
     return SHScene(points, self, camera_table)
 
   
-  def from_state_dict(self, state:dict, camera_table:ViewTable):
+  def from_state_dict(self, state:dict, camera_table:CameraTable):
     points = ParameterClass.from_state_dict(state['points'], 
           optimizer=SparseAdam, betas=(self.beta1, self.beta2))
     
@@ -63,7 +62,7 @@ class SHScene(GaussianScene):
   def __init__(self, 
         points: ParameterClass, 
         config: SHConfig,       
-        camera_table:ViewTable,     
+        camera_table:CameraTable,     
   ):
     
     self.config = config
@@ -152,13 +151,12 @@ class SHScene(GaussianScene):
       points = self.points.tensors.select('position', 'rotation', 'log_scaling', 'alpha_logit', 'feature')
       return Gaussians3D.from_tensordict(points)
 
-  def render(self, camera_params:CameraParams, config:RasterConfig, cam_idx:torch.Tensor, 
-             **options) -> Rendering:
-    
-    
+  def render(self, camera_params:CameraParams, cam_idx:int, **options) -> Rendering:
+
+    raster_config = pop_raster_config(options)  
     return render_gaussians(self.gaussians, 
                      use_sh        = True,
-                     config        = config,
+                     config        = raster_config,
                      camera_params = camera_params,
                      **options)
   

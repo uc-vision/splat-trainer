@@ -13,8 +13,9 @@ from camera_geometry.camera_models.camera import optimal_undistorted
 
 from beartype import beartype
 import numpy as np
+from tqdm import tqdm
 
-from splat_trainer.camera_table.camera_table import CameraRigTable
+from splat_trainer.camera_table.camera_table import CameraRigTable, Projections
 from splat_trainer.dataset import CameraView
 
 @dataclass
@@ -33,8 +34,8 @@ class CameraImage:
       return self.image.shape[1], self.image.shape[0]
 
 
-
-def load_scan(scan_file:str, image_scale:Optional[float]=None, resize_longest:Optional[int]=None) -> Tuple[FrameSet, List[CameraImage]]:
+def load_scan(scan_file:str, image_scale:Optional[float]=None, 
+              resize_longest:Optional[int]=None) -> Tuple[FrameSet, List[CameraImage]]:
     scan = FrameSet.load_file(Path(scan_file))
 
     cameras = {k: optimal_undistorted(camera, alpha=0)
@@ -57,18 +58,27 @@ def load_scan(scan_file:str, image_scale:Optional[float]=None, resize_longest:Op
     return scan.copy(cameras=cameras), all_cameras
 
 
-def camera_rig_table(scan:FrameSet):
+def projections(scan:FrameSet, depth_range:Tuple[float, float]) -> Projections:
+    def to_projection(camera:Camera):
+      return Projections(
+        intrinsics = torch.tensor([*camera.focal_length, *camera.principal_point], dtype=torch.float32),
+        image_size = torch.tensor(camera.image_size, dtype=torch.long),
+        depth_range = torch.tensor(depth_range, dtype=torch.float32))
+
+    return torch.stack([to_projection(camera) for camera in scan.cameras.values()])
+
+def camera_rig_table(scan:FrameSet, depth_range:Tuple[float, float]) -> CameraRigTable:
     camera_t_rig = np.array(
       [camera.camera_t_parent for camera in scan.cameras.values()])
     
     world_t_rig = torch.from_numpy(np.array(scan.rig_poses)).to(torch.float32)
-    projections = np.array([[*camera.focal_length, *camera.principal_point] for camera in scan.cameras.values()])
+    image_names = [image_set[k] for k in scan.camera_names for image_set in scan.image_sets.rgb]
 
     return CameraRigTable(
       rig_t_world=torch.linalg.inv(world_t_rig),
       camera_t_rig=torch.from_numpy(camera_t_rig).to(torch.float32),
-      projection=torch.from_numpy(projections).to(torch.float32))
-
+      projection=projections(scan, depth_range),
+      image_names=image_names)
 
 
 def concat_lists(xs):

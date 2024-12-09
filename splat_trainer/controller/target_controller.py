@@ -165,6 +165,8 @@ class TargetController(Controller):
     points = self.points
 
     # Some alternative update rule
+    # points.split_score[idx] += rendering.split_score
+    # points.prune_cost[idx] +=  rendering.prune_cost
 
     points.split_score[idx] = exp_lerp(self.config.split_alpha, rendering.split_score, points.split_score[idx])    
     points.prune_cost[idx] = exp_lerp(self.config.prune_alpha, rendering.prune_cost, points.prune_cost[idx])
@@ -175,7 +177,7 @@ class TargetController(Controller):
     far_points = rendering.point_depth.squeeze(1) > rendering.point_depth.quantile(0.75)
 
     # measure scale of far points in image
-    image_scale = rendering.point_scale.max(1).values / image_size
+    image_scale = rendering.point_sigma.max(1).values / image_size
     image_scale[far_points] = 0.
 
     points.max_scale[idx] = torch.maximum(points.max_scale[idx], image_scale)

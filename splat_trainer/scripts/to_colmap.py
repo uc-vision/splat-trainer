@@ -1,15 +1,18 @@
 import argparse
 from pathlib import Path
 import traceback
-from typing import Dict, List
+from typing import Dict, List, Optional, Tuple
 import cv2
 import numpy as np
 from termcolor import colored
 from tqdm import tqdm
 
-from splat_trainer.camera_table.camera_table import ViewInfo
+
+from camera_geometry import FrameSet
+from camera_geometry.camera_models import optimal_undistorted
+
 from splat_trainer.dataset.scan.dataset import find_cloud
-from splat_trainer.dataset.scan.loading import CameraImage, camera_rig_table, load_scan
+from splat_trainer.dataset.scan.loading import CameraImage, camera_rig_table, preload_images
 
 import camera_geometry 
 from scipy.spatial.transform import Rotation as R
@@ -19,6 +22,29 @@ from splat_trainer.util.pointcloud import PointCloud
 from splat_trainer.util.visibility import random_cloud
 
 from multiprocessing.pool import ThreadPool
+
+
+def load_scan(scan_file:str, image_scale:Optional[float]=None, resize_longest:Optional[int]=None) -> Tuple[FrameSet, List[CameraImage]]:
+    scan = FrameSet.load_file(Path(scan_file))
+
+    cameras = {k: optimal_undistorted(camera, alpha=0)
+                 for k, camera in scan.cameras.items()}
+
+    assert resize_longest is None or image_scale is None, "Specify either resize_longest or image_scale"
+
+    if resize_longest is not None:
+      cameras = {k: camera.resize_longest(longest=resize_longest) for k, camera in cameras.items()}
+    elif image_scale is not None:
+      cameras = {k: camera.scale_image(image_scale) for k, camera in cameras.items()}
+
+
+    print("Undistorted cameras:")
+    for k, camera in cameras.items():
+        print(k, camera)
+
+    print("Loading images...")
+    all_cameras = preload_images(scan, cameras)
+    return scan.copy(cameras=cameras), all_cameras
 
 
 def parse_args():
@@ -147,13 +173,8 @@ def main():
      camera_table = camera_rig_table(scan)
      image_sizes = torch.tensor([image.image_size for image in cam_images])
 
-     view_info = ViewInfo(
-        camera_table,
-        image_sizes,
-        depth_range=(args.near, args.far))
 
-
-     cloud = random_cloud(view_info, args.random_points)
+     cloud = random_cloud(camera_table, (args.near, args.far), args.random_points)
      print(f"Generated {cloud.count} random points")
 
   else:

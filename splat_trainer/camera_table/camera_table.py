@@ -1,48 +1,166 @@
-
-
 from abc import abstractmethod
 import abc
-from dataclasses import dataclass
+from functools import cached_property
 from numbers import Number
-from typing import Tuple
+from typing import List, Tuple
 
+from tensordict import tensorclass
+from tensordict import TensorDictParams
 import torch
 from torch import nn
-
 
 from splat_trainer.camera_table.pose_table import PoseTable, RigPoseTable
 from splat_trainer.util.transforms import split_rt
 
 from beartype import beartype
 
+@tensorclass
+class Projections:
+  """ Projection parameters for a camera or a batch of cameras."""
+  intrinsics:torch.Tensor      # (..., 4) fx, fy, cx, cy
+  image_size:torch.Tensor      # (..., 2) int
+  depth_range:torch.Tensor     # (..., 2) float
 
-class ViewTable(nn.Module, metaclass=abc.ABCMeta):
+  @property
+  def matrix(self) -> torch.Tensor:
+    fx, fy, cx, cy = self.intrinsics.unbind(-1)
+    m = torch.eye(3, dtype=self.intrinsics.dtype, device=self.intrinsics.device)
+    m = m.unsqueeze(0).expand(self.intrinsics.shape[:-1] + (3, 3)).clone()
+    m[..., 0, 0] = fx
+    m[..., 1, 1] = fy
+    m[..., 0, 2] = cx
+    m[..., 1, 2] = cy
+    return m
+  
+  @property
+  def device(self):
+    return self.intrinsics.device
+  
+  @property
+  def focal_length(self) -> torch.Tensor:
+    return self.intrinsics[..., :2]
+  
+  @property
+  def principal_point(self) -> torch.Tensor:
+    return self.intrinsics[..., 2:]
+  
+  @property
+  def aspect_ratio(self) -> torch.Tensor:
+    return self.image_size[..., 0] / self.image_size[..., 1]
 
-  @abstractmethod
-  def forward(self, image_idx:torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-    raise NotImplementedError
+  @property
+  def fov(self) -> torch.Tensor:
+    f = self.focal_length
+    return 2.0 * torch.atan(0.5 * self.image_size / f)
+  
 
-  @beartype
-  def lookup(self, image_idx:int | torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-    """ Convenience function to get camera pose and projection for a single image index."""
+@tensorclass
+class Cameras:
+  """ Represents either a single camera or a batch of cameras."""
 
-    if isinstance(image_idx, int):
-      image_idx = torch.tensor([image_idx], device=self.device)
+  camera_t_world:torch.Tensor  # (..., 4, 4) float
+  projection:Projections      # (..., ) Projection-
 
-    assert image_idx.shape == (1,), f"Expected singleton tensor, got: {image_idx.shape}"
+  camera_idx: torch.Tensor     # (..., 1) int
+  frame_idx: torch.Tensor      # (..., 1) int
 
-    camera_t_world, proj = self(image_idx) # add batch dimension
-    return camera_t_world.squeeze(0), proj.squeeze(0)
-
+  @property
+  def device(self):
+    return self.camera_t_world.device
+  
+  @property
+  def centers(self) -> torch.Tensor:
+    return -self.camera_t_world[..., :3, 3] 
+  
+  @property
+  def rotations(self) -> torch.Tensor:
+    return self.camera_t_world[..., :3, :3].transpose(-1, -2)
+  
+  @cached_property
+  def world_t_camera(self) -> torch.Tensor:
+    return torch.inverse(self.camera_t_world)
     
 
 
-  def __len__(self):
-    return self.num_images
+  @property
+  def right(self) -> torch.Tensor:
+    return self.world_t_camera[..., :3, 0]
+  
+  @property
+  def up(self) -> torch.Tensor:
+    return self.world_t_camera[..., :3, 1]
+  
+  @property
+  def forward(self) -> torch.Tensor:
+    return -self.rotations[..., :3, 2]
+  
+  @property
+  def intrinsics(self) -> torch.Tensor:
+    return self.projection.intrinsics
+  
+  @property
+  def image_sizes(self) -> torch.Tensor:
+    return self.projection.image_size
+  
+  # Convenience properties for retrieving single camera values
+  @property
+  def depth_range(self) -> Tuple[float, float]:
+    assert len(self.batch_size) == 0, f"depth_range returns (near, far) for a single camera, got batch size: {self.batch_size}"
+    return tuple(self.projection.depth_range.cpu().tolist())
+
+  @property
+  def frame(self) -> int:
+    assert len(self.batch_size) == 0, "frame returns a single frame index"
+    return self.frame_idx.item()
+
+  @property
+  def camera(self) -> int:
+    assert len(self.batch_size) == 0, "camera returns a single camera index"
+    return self.camera_idx.item()
+
+  @property
+  def size_tuple(self) -> Tuple[int, int]:
+    assert len(self.batch_size) == 0, "size_tuple returns (width, height) for a single camera"
+    return tuple(self.image_sizes.cpu().tolist())
+  
+
+  @property
+  def near(self) -> float:
+    assert len(self.batch_size) == 0, "near returns a single camera index"
+    return self.projection.depth_range[0].item()
+  
+  @property
+  def far(self) -> float:
+    assert len(self.batch_size) == 0, "far returns a single camera index"
+    return self.projection.depth_range[1].item()
+
+
+class CameraTable(nn.Module, metaclass=abc.ABCMeta):
+
+  @abstractmethod
+  def forward(self, image_idx: torch.Tensor) -> Cameras:
+    raise NotImplementedError
+  
+  @beartype
+  def __getitem__(self, image_idx:int | torch.Tensor) -> Cameras:
+    if isinstance(image_idx, int):
+      image_idx = torch.tensor([image_idx], device=self.device)
+      return self.forward(image_idx).squeeze(0)
+    else:
+      return self.forward(image_idx)
   
   @property
   @abstractmethod
-  def num_cameras(self) -> int:
+  def image_name(self, image_idx:int) -> str:
+    raise NotImplementedError
+  
+  @property
+  def num_projections(self) -> int:
+    return self.projections.shape[0]
+
+  @property
+  @abstractmethod
+  def projections(self) -> Projections:
     raise NotImplementedError
   
   @property
@@ -54,46 +172,27 @@ class ViewTable(nn.Module, metaclass=abc.ABCMeta):
   @abstractmethod
   def num_images(self) -> int:
     raise NotImplementedError
-  
-  @property
-  @abstractmethod
-  def lookup_projection(self, camera_idx:int) -> torch.Tensor:
-    pass
-  
-  @property
-  @abstractmethod
-  def camera_centers(self) -> torch.Tensor:
-    raise NotImplementedError
-  
+    
+  def __len__(self):
+    return self.num_images
+
   @property
   @abstractmethod
   def device(self):
     raise NotImplementedError
   
+  @property
+  def cameras(self) -> Cameras:
+    return self.forward(torch.arange(self.num_images))
   
-  @property
-  @abstractmethod
-  def frame_id(self, image_idx):
-    """ Returns tuple of frame_id for a given image index/indices."""
-    raise NotImplementedError
-
-  @property
-  @abstractmethod
-  def camera_id(self, image_idx):
-      """ Returns tuple of frame_id for a given image index/indices."""
-      raise NotImplementedError
-  
-  @property
-  def all_images(self):
-    return torch.arange(0, self.num_images, device=self.device)
 
 @beartype
-def camera_scene_extents(cameras:ViewTable):
+def camera_scene_extents(cameras:Cameras) -> Tuple[torch.Tensor, float]:
     """ 
     Compute centroid and diagonal of camera centers.
     """
 
-    cam_centers = cameras.camera_centers.reshape(-1, 3)
+    cam_centers = cameras.centers.reshape(-1, 3)
     avg_cam_center = torch.mean(cam_centers, dim=0, keepdim=True)
 
     distances = torch.norm(cam_centers - avg_cam_center, dim=0, keepdim=True)
@@ -102,172 +201,172 @@ def camera_scene_extents(cameras:ViewTable):
     return avg_cam_center.reshape(3), (diagonal * 1.1).item()
 
 
+@beartype
+def pose_adjacency(poses1:torch.Tensor, poses2:torch.Tensor) -> torch.Tensor:
+  """ Compute adjacency matrix between all camera poses in the table."""
 
-class CameraRigTable(ViewTable):
+  forward1, forward2 = poses1[..., :3, 2], poses2[..., :3, 2]
+  dir_similarity = torch.sum(forward1 * forward2, dim=1)
+
+  pos1, pos2 = poses1[..., :3, 3], poses2[..., :3, 3]  
+  distance = torch.norm(pos1 - pos2, dim=1)
+
+  return dir_similarity * distance
+
+
+@beartype
+def camera_similarity(cameras:Cameras, world_t_camera:torch.Tensor) -> torch.Tensor:
+  """ Compute similarity between a camera pose and all camera poses in the table."""
+  assert world_t_camera.shape == (4, 4), f"Expected shape (4, 4), got: {world_t_camera.shape}"
+
+  return pose_adjacency(cameras.world_t_camera, world_t_camera.unsqueeze(0))
+  
+
+class CameraRigTable(CameraTable):
   def __init__(self, rig_t_world:torch.Tensor,   # (N, 4, 4) - poses for the whole camera rig
                      camera_t_rig:torch.Tensor,  # (C, 4, 4) - camera poses inside the rig
-                     projection:torch.Tensor,   # (C, 4) - camera intrinsics (fx, fy, cx, cy) for each camera in rig
+                     projection:Projections,     # (C) Camera projections (image size and intrinsics)
+                     image_names:List[str]      # (N,)
                     ):
     super().__init__()
 
-    assert projection.shape[0] == camera_t_rig.shape[0], f"Expected equal number of cameras and projections, got: {projection.shape[0]} != {camera_t_rig.shape[0]}"
+    assert projection.shape[0] == camera_t_rig.shape[0], \
+      f"Expected equal number of cameras and projections, got: {projection.shape[0]} != {camera_t_rig.shape[0]}"
 
-    self.camera_projection = torch.nn.Parameter(
-        projection.to(torch.float32), requires_grad=False)
-    self.camera_poses = RigPoseTable(
+    num_cameras, num_frames = camera_t_rig.shape[0], rig_t_world.shape[0]
+    assert len(image_names) == num_cameras * num_frames, \
+        f"Incorrect number of image names, got: {len(image_names)} != {num_cameras * num_frames}"
+
+    self._camera_projection = TensorDictParams(projection.to_tensordict())
+    self._camera_projection.requires_grad_(False)
+
+    self._camera_poses = RigPoseTable(
       rig_t_world=rig_t_world, camera_t_rig=camera_t_rig)
-    
+    self._image_names = image_names
     
   @beartype
-  def forward(self, image_idx:torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:     
+  def forward(self, image_idx:torch.Tensor) -> Cameras:     
     assert image_idx.dim() == 1, f"Expected 1D tensor, got: {image_idx.shape}"
-    assert (image_idx < self.num_images).all(), f"Image index out of range: {image_idx} >= {self.shape[0]}"
+    assert (image_idx < self.num_images).all(), f"Image index out of range: {image_idx} >= {self.num_images}"
 
-    frame_id, camera_id = self.frame_id(image_idx), self.camera_id(image_idx)
-    return self.camera_poses(torch.stack([frame_id, camera_id], -1)), self.camera_projection[camera_id]
+    num_cameras = self._camera_poses.num_cameras
+    frame_idx = image_idx // num_cameras
+    camera_idx = image_idx % num_cameras
+    
+    return Cameras(
+      camera_t_world=self._camera_poses(frame_idx, camera_idx),
+      projection=self.projections[camera_idx],
+      camera_idx=camera_idx,
+      frame_idx=frame_idx,
+      batch_size=image_idx.shape
+    )
 
 
   @property
   def num_images(self):
     """ Total number of images."""
-    return self.camera_poses.num_frames * self.camera_poses.num_cameras
+    return self._camera_poses.num_frames * self._camera_poses.num_cameras
   
   @property
-  def num_cameras(self) -> int:
-    return self.camera_poses.num_cameras
-  
-  def lookup_projection(self, camera_idx:int):
-    return self.camera_projection[camera_idx]
+  def image_name(self, image_idx:int) -> str:
+    return self._image_names[image_idx]
+
 
   @property
-  def get_projection(self, camera_idx:int) -> torch.Tensor:
-    assert camera_idx < self.num_cameras, f"Camera index out of range: {camera_idx} >= {self.num_cameras}"
-    return self.camera_projection[camera_idx]
+  def projections(self) -> Projections:  
+    return Projections.from_tensordict(self._camera_projection)
   
   @property
   def num_frames(self) -> int:
-    return self.camera_poses.num_frames
+    return self._camera_poses.num_frames
   
-  
-  def frame_id(self, image_idx):
-    """ Returns tuple of frame_id for a given image index/indices."""
-    return image_idx // self.num_cameras
-    
-  def camera_id(self, image_idx):
-    """ Returns tuple of frame_id for a given image index/indices."""
-    return image_idx % self.num_cameras
-  
-  @property
-  def camera_centers(self) -> torch.Tensor:
-    frame_id, camera_id = self.frame_id(self.all_images), self.camera_id(self.all_images)
-
-    world_t_camera = torch.linalg.inv(self.camera_poses(torch.stack([frame_id, camera_id], -1)))
-    return world_t_camera[..., :3, 3]
   
   @property
   def device(self):
-    return self.camera_projection.device
+    return self._camera_projection.device
   
 
 
 
-
-class MultiCameraTable(ViewTable):
+class MultiCameraTable(CameraTable):
   """
   A table of camera poses and intrinsics - cameras can have different intrinsics which are stored in the projection table.
   """
   def __init__(self, 
                camera_t_world:torch.Tensor, # (N, 4, 4)
                camera_idx:torch.Tensor,     # (N,) - index into projection table (0, P-1)
-               projection:torch.Tensor     # (P, 4) fx, fy, cx, cy
+               projection:Projections,     # (P,)
+               image_names:List[str]        # (N,)
               ):
     super().__init__()
 
-    assert camera_t_world.shape[0] == camera_idx.shape[0], f"Expected equal number of cameras and indices, got: {camera_t_world.shape[0]} != {camera_idx.shape[0]}"
+    assert camera_t_world.shape[0] == camera_idx.shape[0], \
+        f"Expected equal number of cameras and indices, got: {camera_t_world.shape[0]} != {camera_idx.shape[0]}"
+    
+    assert len(image_names) == camera_t_world.shape[0], \
+        f"Expected equal number of image names and cameras, got: {len(image_names)} != {camera_t_world.shape[0]}"
 
-    self.camera_projection = torch.nn.Parameter(
-      projection.to(torch.float32), requires_grad=False)
-    self.register_buffer("camera_idx", camera_idx)
-    self.camera_t_world = PoseTable(camera_t_world)
+    self._camera_projection = TensorDictParams(projection.to_tensordict())
+    self._camera_projection.requires_grad_(False)
+
+    self.register_buffer("_camera_idx", camera_idx)
+    self._camera_t_world = PoseTable(camera_t_world)
 
   @beartype
-  def forward(self, image_idx:torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+  def forward(self, image_idx:torch.Tensor) -> Cameras:
     assert image_idx.dim() == 1, f"Expected 1D tensor, got: {image_idx.shape}"
 
-    cam_idx = self.camera_idx[image_idx]
-    return self.camera_t_world(image_idx), self.camera_projection[cam_idx]
+    cam_idx = self._camera_idx[image_idx]
+    return Cameras(
+      camera_t_world=self._camera_t_world(image_idx),
+      projection=self.projections[cam_idx],
+      camera_idx=cam_idx,
+      frame_idx=image_idx,
+      batch_size=image_idx.shape
+    )
 
 
   @property
   def num_images(self) -> int:
-    return len(self.camera_t_world)
-  
+    return len(self._camera_t_world)
+
   @property
-  def num_cameras(self) -> int:
-    return self.camera_projection.shape[0]
-  
-  def lookup_projection(self, camera_idx:int):
-    return self.camera_projection[camera_idx]
-  
+  def projections(self) -> Projections:
+    return Projections.from_tensordict(self._camera_projection)
+
   @property
   def num_frames(self) -> int:
     return self.num_images
-  
-  @property
-  def camera_id(self, image_idx):
-    return self.camera_idx[image_idx]
 
-  @property
-  def frame_id(self, image_idx):
-    return image_idx
-
-  @property
-  def camera_centers(self) -> torch.Tensor:
-
-    all_cameras = torch.arange(0, self.num_images, device=self.device)
-    world_t_camera = torch.linalg.inv(self.camera_t_world(all_cameras))
-    return world_t_camera[..., :3, 3]
-  
   @property
   def device(self):
-    return self.camera_projection.device
+    return self._camera_projection.device
 
 
 
-  
 
-
-def camera_json(camera_table:ViewTable):
+def camera_json(camera_table:CameraTable):
   def export_camera(i):
+    camera = camera_table[i]
 
-    camera_t_world, proj = camera_table.lookup(i)
-
-    r, t = split_rt(torch.linalg.inv(camera_t_world))
-    fx, fy, cx, cy = proj.cpu().tolist()
+    r, t = split_rt(torch.linalg.inv(camera.camera_t_world))
+    fx, fy, cx, cy = camera.projection.intrinsics.cpu().tolist()
+    near, far = camera.projection.depth_range.cpu().tolist()
+    width, height = camera.image_sizes.cpu().tolist()
 
     return {
       "id": i,
       "position": t.cpu().numpy().tolist(),
       "rotation": r.cpu().numpy().tolist(),
       "fx": fx, "fy": fy, 
-      "cx": cx, "cy": cy
-      }
+      "cx": cx, "cy": cy,
+      "width": width,
+      "height": height,
+      "near": near,
+      "far": far,
+    }
 
   return [export_camera(i) for i in range(len(camera_table))]
 
 
 
-
-@beartype
-@dataclass 
-class ViewInfo:
-  camera_table:ViewTable
-  image_sizes:torch.Tensor
-  depth_range:Tuple[Number, Number]
-
-  def to(self, device) -> 'ViewInfo':
-    return ViewInfo(
-      camera_table=self.camera_table.to(device),
-      image_sizes=self.image_sizes.to(device),
-      depth_range=self.depth_range,
-    )

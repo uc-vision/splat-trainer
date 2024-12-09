@@ -1,12 +1,28 @@
-from typing import Dict, Tuple
-from taichi_splatting import Gaussians3D, Rendering
+from typing import Dict, Tuple, Any
+from taichi_splatting import Gaussians3D, RasterConfig, Rendering
 
-from taichi_splatting.optim.parameter_class import ParameterClass
-from taichi_splatting.optim.sparse_adam import SparseAdam
+from taichi_splatting.optim import SparseAdam, ParameterClass
+
 from tensordict import TensorDict
 import torch
 
 from splat_trainer.util.misc import lerp
+
+def pop_raster_config(options:Dict[str, Any]) -> RasterConfig:
+
+  keys = set(RasterConfig.__dataclass_fields__.keys())
+  raster_options = {}
+  for k, v in options.items():
+    if k in keys:
+      raster_options[k] = v
+    
+  for k in raster_options:
+    del options[k]
+
+  return RasterConfig(**raster_options)
+
+
+
 
 
 def update_depth(points:ParameterClass, rendering:Rendering, depth_ema:float):

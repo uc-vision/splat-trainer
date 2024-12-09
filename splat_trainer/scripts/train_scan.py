@@ -3,6 +3,7 @@ from pathlib import Path
 import hydra
 import numpy as np
 from omegaconf import OmegaConf
+from taichi_splatting import TaichiQueue
 from termcolor import colored
 from splat_trainer.logger.logger import Logger
 from splat_trainer import config
@@ -11,6 +12,8 @@ from taichi_splatting import TaichiQueue
 
 import torch
 import os
+
+from splat_trainer.viewer.viewer import Viewer
 
 config.add_resolvers()
 
@@ -44,6 +47,8 @@ def cfg_from_args():
   training_group.add_argument("--tcnn", action="store_true", help="Use tcnn scene")
   training_group.add_argument("--sh", action="store_true", help="Use spherical harmonics scene")
   training_group.add_argument("--bilateral", action="store_true", help="Use bilateral color correction")
+
+  training_group.add_argument("--vis", action="store_true", help="Enable web viewer")
 
 
   # Rendering group
@@ -122,6 +127,8 @@ def cfg_from_args():
   if args.bilateral:
     overrides.append("color_corrector=bilateral")
 
+  if args.vis:
+    overrides.append("viewer=splatview")
 
   if args.antialias:
     overrides.append("trainer.antialias=true")
@@ -156,7 +163,6 @@ def train_with_config(cfg) -> dict | str:
   torch.set_printoptions(precision=4, sci_mode=False)
   np.set_printoptions(precision=4, suppress=True)
 
-  # print(config.pretty(cfg))
   output_path = Path.cwd()
   print(f"Output path {colored(output_path, 'light_green')}")
 
@@ -165,23 +171,25 @@ def train_with_config(cfg) -> dict | str:
 
   logger:Logger = hydra.utils.instantiate(cfg.logger)
   logger.log_config(OmegaConf.to_container(cfg, resolve=True))
-  # logger = hydra.utils.instantiate(cfg.logger) 
 
   trainer = None
   result = None
 
   try:
-    TaichiQueue.init(arch=ti.cuda, debug=cfg.debug, device_memory_GB=0.1)
+    TaichiQueue.init(arch=ti.cuda, debug=cfg.debug, device_memory_GB=0.1, threaded=True)
     
     train_config = hydra.utils.instantiate(cfg.trainer, _convert_="object")
     dataset = hydra.utils.instantiate(cfg.dataset)
-    
+  
     trainer = Trainer.initialize(train_config, dataset, logger)
+    trainer.warmup()
+
+    viewer:Viewer = hydra.utils.instantiate(cfg.viewer).create_viewer(trainer, enable_training=True)
 
     result = trainer.train()
-    if cfg.wait_exit:
-      input("Press Enter to continue...")
 
+    # allow viewer to run if enabled
+    viewer.spin()
   except KeyboardInterrupt:
     pass
 

@@ -5,10 +5,10 @@ defaults:
   - dataset: scan
   - logger: tensorboard
   - controller: target
-  - scene: sh
+  - scene: tcnn
   - color_corrector: nil
   - trainer: default
-
+  - viewer: none
 hydra:
   job: 
     chdir: True
@@ -18,6 +18,5 @@ project: ???
 run_name: ???
 base_path: ???
 
-wait_exit: False
 debug: False
 

@@ -18,7 +18,7 @@ def show_image(image):
 
 
 def main():
-  ti.init(arch=ti.cuda, debug=True)
+  TaichiQueue.init(arch=ti.cuda, debug=True)
 
   while True:
     camera = random_camera(image_size=(640, 480))
