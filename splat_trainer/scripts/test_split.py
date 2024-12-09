@@ -1,6 +1,6 @@
 from taichi_splatting.tests.random_data import random_3d_gaussians, random_camera
 
-from taichi_splatting import render_gaussians
+from taichi_splatting import render_gaussians, TaichiQueue
 from taichi_splatting import Gaussians3D
 from splat_trainer.gaussians import split
 

@@ -507,8 +507,8 @@ class Trainer(Dispatcher):
 
 
   def reg_loss(self, rendering:Rendering) -> Tuple[torch.Tensor, dict]:
-    scale_term = (rendering.point_sigma / rendering.camera.focal_length[0]).pow(2)
-    aspect_term = (rendering.point_sigma.max(-1).values / rendering.point_sigma.min(-1).values)
+    scale_term = (rendering.point_scale / rendering.camera.focal_length[0]).pow(2)
+    aspect_term = (rendering.point_scale.max(-1).values / rendering.point_scale.min(-1).values)
     opacity_term = rendering.point_opacity
 
     regs = dict(
