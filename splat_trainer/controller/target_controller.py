@@ -177,7 +177,7 @@ class TargetController(Controller):
     far_points = rendering.point_depth.squeeze(1) > rendering.point_depth.quantile(0.75)
 
     # measure scale of far points in image
-    image_scale = rendering.point_sigma.max(1).values / image_size
+    image_scale = rendering.point_scale.max(1).values / image_size
     image_scale[far_points] = 0.
 
     points.max_scale[idx] = torch.maximum(points.max_scale[idx], image_scale)
