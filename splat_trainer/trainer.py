@@ -48,6 +48,8 @@ from splat_trainer.util.misc import CudaTimer, cluster_points, next_multiple, si
 from splat_trainer.controller import ControllerConfig
 from splat_trainer.color_corrector import CorrectorConfig, Corrector
 
+import time
+
 
 @beartype
 @dataclass(kw_only=True, frozen=True)
@@ -108,10 +110,6 @@ class Evaluation:
   @property
   def image_id(self):
     return self.filename.replace('/', '_')
-
-  @property
-  def log_radii(self):
-    return self.rendering.point_radii.log() / math.log(10.0)
   
   @property
   def image(self):
@@ -364,6 +362,9 @@ class Trainer(Dispatcher):
   # Rendering, Source Image -> Corrected Image
   ColorCorrect = Callable[[Rendering, torch.Tensor], torch.Tensor]
 
+  def update_config(self, **kwargs):
+    self.config = replace(self.config, **kwargs)
+
   @beartype
   def render(self, camera_params:CameraParams, image_idx:Optional[int]=None, **options):
 
@@ -398,14 +399,12 @@ class Trainer(Dispatcher):
                        correct_image:Optional[ColorCorrect] = None, 
                        log_count:int=0, worst_count:int=0):
     if len(data) == 0:
-      return {}
+      return {}, None
 
     rows = {}
-    radius_hist = Histogram.empty(range=(-1, 3), num_bins=20, device=self.device) 
 
     worst = []
     log_indexes = strided_indexes(log_count, len(data)) 
-    
     clusters = cluster_points(position = self.scene.points['position'], 
                                   num_clusters = min(self.config.vis_clusters, self.scene.num_points))
 
@@ -414,7 +413,6 @@ class Trainer(Dispatcher):
     pbar = tqdm(total=len(data), desc=f"rendering {name}", leave=False)
     for i, image_data in enumerate(self.iter_data(data)):
       eval = self.evaluate_image(*image_data, correct_image=correct_image)
-      radius_hist = radius_hist.append(eval.log_radii, trim=False)
 
       if i in log_indexes:
         self.log_eval(f"{name}_images/{eval.image_id}", eval, log_source=self.step == 0)
@@ -440,13 +438,13 @@ class Trainer(Dispatcher):
 
     visibility = torch.stack(visibility, dim=0)   
 
-    self.view_overlaps = (visibility @ visibility.T).to_dense().fill_diagonal_(0.0)
-    self.view_overlaps = sinkhorn(self.view_overlaps, 10)
+    view_overlaps = (visibility @ visibility.T).to_dense().fill_diagonal_(0.0)
+    view_overlaps = sinkhorn(view_overlaps, 10)
 
-    avg_max = self.view_overlaps.max(dim=1).values.median()
-    self.log_colormapped(f"eval_{name}/view_overlaps", self.view_overlaps / avg_max)
+    avg_max = view_overlaps.max(dim=1).values.median()
+    self.log_colormapped(f"eval_{name}/view_overlaps", view_overlaps / avg_max)
 
-    return {f"{name}_psnr": float(np.mean(totals['psnr']))}
+    return {f"{name}_psnr": float(np.mean(totals['psnr']))}, view_overlaps
 
 
   def evaluate_trained(self, rendering, source_image, image_idx):
@@ -457,20 +455,20 @@ class Trainer(Dispatcher):
 
 
   def evaluate(self):
-    train = self.evaluate_dataset("train", self.dataset.train(shuffle=False), 
+    train, self.view_overlaps = self.evaluate_dataset("train", self.dataset.train(shuffle=False), 
         correct_image=self.evaluate_trained,
         log_count=self.config.num_logged_images, 
         worst_count=self.config.log_worst_images)
     
-    val = self.evaluate_dataset("val", self.dataset.val(), 
+    val, _ = self.evaluate_dataset("val", self.dataset.val(), 
       log_count=self.config.num_logged_images, worst_count=self.config.log_worst_images)
     
-    self.evaluate_dataset("val_cc", self.dataset.val(), 
+    val_cc, _ = self.evaluate_dataset("val_cc", self.dataset.val(), 
       correct_image=self.evaluate_fit,
       log_count=self.config.num_logged_images, worst_count=self.config.log_worst_images)
 
     self.scene.log(self.logger, self.step)
-    return {**train, **val}
+    return {**train, **val, **val_cc}
   
 
   def iter_train(self):
@@ -487,6 +485,8 @@ class Trainer(Dispatcher):
       camera_params = self.camera_params(image_idx)
 
       yield filename, camera_params, image_idx, image
+
+  
 
 
   def compute_ssim_loss(self, pred:torch.Tensor, ref:torch.Tensor, levels:int=4):
@@ -507,8 +507,8 @@ class Trainer(Dispatcher):
 
 
   def reg_loss(self, rendering:Rendering) -> Tuple[torch.Tensor, dict]:
-    scale_term = (rendering.point_scale / rendering.camera.focal_length[0]).pow(2)
-    aspect_term = (rendering.point_scale.max(-1).values / rendering.point_scale.min(-1).values)
+    scale_term = (rendering.point_sigma / rendering.camera.focal_length[0]).pow(2)
+    aspect_term = (rendering.point_sigma.max(-1).values / rendering.point_sigma.min(-1).values)
     opacity_term = rendering.point_opacity
 
     regs = dict(
@@ -585,8 +585,8 @@ class Trainer(Dispatcher):
       torch.cuda.empty_cache()
       return eval_metrics
 
-  def train(self):
-    self.state = TrainerState.Training
+  def train(self, state:TrainerState = TrainerState.Training):
+    self.state = state
     self.pbar = tqdm(total=self.config.steps - self.step, desc=self.state.name)
 
     densify_metrics = dict(n = self.scene.num_points)
@@ -600,7 +600,11 @@ class Trainer(Dispatcher):
 
 
     while self.step < self.config.steps:
+
       self.emit("on_update")
+      if self.state == TrainerState.Paused:
+        time.sleep(0.1)
+        continue
       
       if self.step - next_densify > 0:
         self.controller.log_histograms(self.logger, self.step)

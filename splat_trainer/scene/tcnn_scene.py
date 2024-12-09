@@ -226,7 +226,7 @@ class TCNNScene(GaussianScene):
     gaussians2d, depthvars, indexes = project_to_image(self.gaussians, camera_params, raster_config)
 
     colour = TaichiQueue.run_sync(self.eval_colors, indexes, camera_params, image_idx)
-
+    # colour = self.eval_colors(indexes, camera_params, image_idx)
     return render_projected(indexes, gaussians2d, colour, depthvars, 
                             camera_params, raster_config, **options)
 

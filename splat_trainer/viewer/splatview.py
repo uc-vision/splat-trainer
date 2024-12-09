@@ -98,6 +98,9 @@ class SplatviewViewer(Viewer):
         self.zoom_slider = self.server.gui.add_slider("Zoom", min=0.1, max=10, step=0.1, initial_value=1.0)
         self.zoom_slider.on_update(self.on_set_zoom)
 
+        self.antialias_checkbox = self.server.gui.add_checkbox("Antialias", initial_value=self.trainer.config.antialias)
+        self.antialias_checkbox.on_update(self.on_set_antialias)
+
           
 
   @property
@@ -122,9 +125,16 @@ class SplatviewViewer(Viewer):
   def current_camera(self) -> Cameras:
     return self.trainer.camera_table.cameras[self.current_camera_idx]
   
+  @with_traceback
   def on_set_zoom(self, event: viser.GuiEvent[viser.GuiSliderHandle]):
     self.zoom = event.target.value
     self.viewer.client(event.client.client_id).redraw()
+
+  @with_traceback
+  def on_set_antialias(self, event: viser.GuiEvent[viser.GuiCheckboxHandle]):
+    self.trainer.update_config(antialias=event.target.value)
+    self.viewer.client(event.client.client_id).redraw()
+
 
   @with_traceback
   def on_set_camera(self, event: viser.GuiEvent[viser.GuiSliderHandle]):
@@ -146,15 +156,11 @@ class SplatviewViewer(Viewer):
     with self.server.atomic():
       self.logger_folder.update(self.server, self.logger.current)
       self.update_training()
+      self.viewer.update(self.trainer.state == TrainerState.Training)
 
-
-    if self.trainer.state == TrainerState.Training:
-      self.viewer.update(True)
-
-
-    while self.trainer.state == TrainerState.Paused:
-      self.viewer.update()
+    while self.viewer.last_moved > time.time() - 0.2:
       time.sleep(0.1)
+
 
 
 

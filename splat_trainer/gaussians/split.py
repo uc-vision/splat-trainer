@@ -13,8 +13,8 @@ import roma
 
     
 
-def point_basis(log_scaling:torch.Tensor, rotation_quat:torch.Tensor):
-  scale = torch.exp(log_scaling)
+def point_basis(log_scaling:torch.Tensor, rotation_quat:torch.Tensor, eps:float=1e-4):
+  scale = torch.clamp_min(torch.exp(log_scaling), eps)
   r = F.normalize(rotation_quat, dim=1)
 
   return roma.unitquat_to_rotmat(r) * scale.unsqueeze(-2)
@@ -66,12 +66,15 @@ def split_gaussians(points: TensorDict, n:int=2, scaling:Optional[float]=None) -
   return split_with_offsets(scaled, offsets)
 
 
-def split_gaussians_uniform(points: TensorDict, n:int=2, scaling:Optional[float]=None, sep:float=0.7, random_axis:bool=False) -> TensorDict:
+def split_gaussians_uniform(points: TensorDict, n:int=2, 
+                            scaling:Optional[float]=None, sep:float=0.7, 
+                            random_axis:bool=False, 
+                            eps:float=1e-4) -> TensorDict:
   if random_axis:
-    normalized_scaling = F.normalize(points['log_scaling'].exp(), dim=1)
 
     # Randomly choose axis proportional to the scaling
-    axis_probs = normalized_scaling / normalized_scaling.sum(dim=1, keepdim=True)
+    axis_probs = F.normalize(torch.clamp_min(points['log_scaling'].exp(), eps), dim=1)
+
     axis = torch.multinomial(axis_probs, num_samples=1).squeeze(1)
     axis = F.one_hot(axis, num_classes=3)
   else:
