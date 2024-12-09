@@ -8,6 +8,8 @@ from termcolor import colored
 from splat_trainer.logger.logger import Logger
 from splat_trainer import config
 
+from taichi_splatting import TaichiQueue
+
 import torch
 import os
 

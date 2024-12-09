@@ -10,6 +10,7 @@ import numpy as np
 from omegaconf import DictConfig, OmegaConf
 from taichi_splatting import TaichiQueue
 from splat_trainer.trainer import Trainer
+from taichi_splatting import TaichiQueue
 import torch
 
 import taichi as ti
