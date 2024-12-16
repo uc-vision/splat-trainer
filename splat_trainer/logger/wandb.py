@@ -21,13 +21,10 @@ class WandbLogger(Logger):
                name:str | None=None):
     
     dir = Path.cwd()
-    wandb.require("core")
+    settings = wandb.Settings(start_method='thread', quiet=True)
 
-    self.run = wandb.init(project=project, 
-                          name=name, 
-                          dir=dir, 
-                          entity=entity,
-                          settings=wandb.Settings(start_method='thread'))
+    self.run = wandb.init(project=project, name=name, 
+                          dir=dir, entity=entity, settings=settings)
     
   
 
@@ -49,7 +46,7 @@ class WandbLogger(Logger):
     self.queue.put(None)
     self.log_thread.join()
 
-    self.run.finish(quiet=True)
+    self.run.finish()
     
 
   @beartype

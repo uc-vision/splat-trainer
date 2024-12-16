@@ -7,6 +7,7 @@ import math
 from pathlib import Path
 from typing import Callable, Tuple
 
+from matplotlib import pyplot as plt
 from tqdm import tqdm 
 from termcolor import colored
 
@@ -382,6 +383,23 @@ class Trainer(Dispatcher):
       blur_cov=0.0 if self.config.antialias is True else self.config.blur_cov)
 
 
+  def plot_visibility(rendering:Rendering):
+    n = rendering.visible_indices.shape[0]
+    print({10**-x: (rendering.point_visibility < 10**-x).sum() * 100 / n  for x in range(6)})
+    
+    # Create and show visibility histogram
+    plt.figure(figsize=(10, 7))
+    plt.hist(rendering.point_visibility[rendering.point_visibility > 0].cpu().numpy(), 
+             bins=np.logspace(np.log10(10**-6), np.log10(100), 200))
+    plt.xlabel("Sum transmittance")
+
+    plt.xscale('log')
+    plt.ylabel("Count")
+
+    plt.show() 
+    plt.close() 
+
+
   @beartype
   def evaluate_image(self, filename:str, camera_params:CameraParams, image_idx:int, source_image:torch.Tensor, 
                      correct_image:Optional[ColorCorrect] = None):
@@ -390,6 +408,7 @@ class Trainer(Dispatcher):
     if correct_image is not None:
       image = correct_image(rendering, source_image, image_idx)
       rendering = replace(rendering, image=image)
+
 
     return Evaluation(filename, rendering, source_image)
 
@@ -421,6 +440,7 @@ class Trainer(Dispatcher):
       add_worst = heapq.heappush if len(worst) < worst_count else heapq.heappushpop
       add_worst(worst, (-eval.metrics['psnr'], eval))    
       rows[eval.filename] = eval.metrics
+
 
       visibility.append(vis_vector(eval.rendering, clusters, self.config.vis_clusters))
       

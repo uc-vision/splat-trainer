@@ -1,3 +1,4 @@
+from matplotlib import pyplot as plt
 import numpy as np
 from taichi_splatting import Rendering
 import torch
@@ -161,3 +162,20 @@ def sinkhorn(matrix: torch.Tensor, num_iter: int, epsilon: float = 1e-8) -> torc
         matrix = matrix / (col_sums + epsilon)
         
     return matrix
+
+
+def plot_visibility(rendering:Rendering):
+  n = rendering.visible_indices.shape[0]
+  print({10**-x: (rendering.point_visibility < 10**-x).sum() * 100 / n  for x in range(6)})
+  
+  # Create and show visibility histogram
+  plt.figure(figsize=(10, 7))
+  plt.hist(rendering.point_visibility[rendering.point_visibility > 0].cpu().numpy(), 
+            bins=np.logspace(np.log10(10**-6), np.log10(100), 200))
+  plt.xlabel("Sum transmittance")
+
+  plt.xscale('log')
+  plt.ylabel("Count")
+
+  plt.show() 
+  plt.close() 
