@@ -3,11 +3,9 @@ from enum import Enum
 from functools import cached_property, partial
 import heapq
 import json
-import math
 from pathlib import Path
 from typing import Callable, Tuple
 
-from matplotlib import pyplot as plt
 from tqdm import tqdm 
 from termcolor import colored
 
@@ -39,12 +37,11 @@ from splat_trainer.dataset import Dataset
 from splat_trainer.gaussians.loading import from_pointcloud
 
 from splat_trainer.logger import Logger
-from splat_trainer.logger.histogram import Histogram
 
 from splat_trainer.scene.sh_scene import  GaussianSceneConfig
 from splat_trainer.util.colorize import colorize, get_cv_colormap
 from splat_trainer.util.containers import transpose_rows
-from splat_trainer.util.misc import CudaTimer, cluster_points, next_multiple, sinkhorn, strided_indexes, select_batch, vis_vector
+from splat_trainer.util.misc import CudaTimer, cluster_points, next_multiple, strided_indexes, select_batch, vis_vector
 
 from splat_trainer.controller import ControllerConfig
 from splat_trainer.color_corrector import CorrectorConfig, Corrector
@@ -383,21 +380,6 @@ class Trainer(Dispatcher):
       blur_cov=0.0 if self.config.antialias is True else self.config.blur_cov)
 
 
-  def plot_visibility(rendering:Rendering):
-    n = rendering.visible_indices.shape[0]
-    print({10**-x: (rendering.point_visibility < 10**-x).sum() * 100 / n  for x in range(6)})
-    
-    # Create and show visibility histogram
-    plt.figure(figsize=(10, 7))
-    plt.hist(rendering.point_visibility[rendering.point_visibility > 0].cpu().numpy(), 
-             bins=np.logspace(np.log10(10**-6), np.log10(100), 200))
-    plt.xlabel("Sum transmittance")
-
-    plt.xscale('log')
-    plt.ylabel("Count")
-
-    plt.show() 
-    plt.close() 
 
 
   @beartype
