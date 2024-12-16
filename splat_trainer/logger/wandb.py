@@ -112,8 +112,10 @@ class WandbLogger(Logger):
     def log():
       try:
         if isinstance(values, Histogram):
+          counts_norm = values.counts / values.counts.sum()
+
           hist = wandb.Histogram(np_histogram=
-            (values.counts.cpu().numpy(), values.bins.cpu().numpy()))
+            (counts_norm.cpu().numpy(), values.bins.cpu().numpy()))
           
           self.run.log({name:hist}, step=step)
 

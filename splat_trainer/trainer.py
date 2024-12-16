@@ -168,7 +168,12 @@ class Trainer(Dispatcher):
 
     self.config = config
     self.logger = CompositeLogger(logger)
+
     self.step = step
+    self.state = TrainerState.Stopped
+
+    self.last_checkpoint = None
+    self.render_timers = [CudaTimer() for _ in range(self.config.log_interval)]
 
     self.color_map = get_cv_colormap().to(self.device)
     self.ssim = partial(fused_ssim, padding="valid")
