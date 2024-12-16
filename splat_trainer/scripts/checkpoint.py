@@ -2,8 +2,9 @@ from argparse import ArgumentParser, Namespace
 import os
 from pathlib import Path
 from time import time
-from typing import Optional
+from typing import Callable, List, Optional
 
+import cv2
 import hydra
 
 import numpy as np
@@ -73,7 +74,7 @@ def get_path(dotted_path:str, config:DictConfig):
     config = config[key]
   return config
 
-def with_trainer(f, args):
+def with_trainer(f:Callable[[Trainer], None], args:Namespace):
 
   overrides = args.override or []
   
@@ -174,7 +175,7 @@ def visualize():
 
   args = parser.parse_args()
     
-  def f(trainer):
+  def f(trainer:Trainer):
 
     viewer = start_with_viewer(trainer, args)
     viewer.spin()
@@ -186,7 +187,7 @@ def resume():
   add_viewer_args(parser)
   args = parser.parse_args()
 
-  def f(trainer):
+  def f(trainer:Trainer):
 
     if args.vis:
       viewer = start_with_viewer(trainer, args, enable_training=True)
@@ -199,6 +200,46 @@ def resume():
   with_trainer(f, args)
 
 
+def display_image(title:str, image:np.ndarray):
+  cv2.imshow(title, cv2.cvtColor(image, cv2.COLOR_RGB2BGR))
+  while cv2.waitKey(1) == -1:
+    pass
+
+
+def show_batch():
+  parser = arguments()
+  parser.add_argument("--batch_size", type=int, default=8, help="Batch size to show")
+  parser.add_argument("--temperature", type=float, default=1.0, help="Temperature for sampling")
+  args = parser.parse_args()
+
+  cv2.namedWindow("image", cv2.WINDOW_NORMAL)
+
+  def f(trainer:Trainer):
+    result = trainer.evaluate()
+    print(result)
+    
+    while True:
+      batch_indexes = trainer.select_batch(args.batch_size, temperature=args.temperature)
+      
+      filenames = []
+      images = []
+      indexes = []
+
+      for camera in trainer.dataset.loader(batch_indexes.cpu().numpy()):
+        filenames.append(camera.filename)
+        images.append(camera.image)
+        indexes.append(camera.index)
+
+      image = torch.concatenate(images, dim=1)
+      image = image.cpu().numpy()
+
+      print(filenames)
+      print(indexes, batch_indexes)
+
+      display_image("image", image)
+    
+
+  with_trainer(f, args)
 
   
 

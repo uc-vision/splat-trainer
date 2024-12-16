@@ -4,7 +4,7 @@ from typing import Tuple
 from beartype import beartype
 import torch
 
-from splat_trainer.camera_table.camera_table import  Cameras, CameraTable
+from splat_trainer.camera_table.camera_table import  Camera, Cameras, CameraTable
 from splat_trainer.util.pointcloud import PointCloud
 from splat_trainer.util.transforms import expand_proj, transform44
 
@@ -100,9 +100,9 @@ def point_visibility(cameras:Cameras,
 
 
   for i in range(cameras.batch_size[0]):
-    camera = cameras[i]
+    camera:Camera = cameras[i].item()
     
-    image_size = camera.image_sizes
+    image_size = camera.image_size
     near, far = camera.depth_range
 
     proj_points = transform44(image_t_world[i], homog_points)

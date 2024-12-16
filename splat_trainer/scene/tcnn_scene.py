@@ -72,6 +72,7 @@ class TCNNConfig(GaussianSceneConfig):
     scene = TCNNScene(points, self, camera_table)
 
     scene.color_model.load_state_dict(state['color_model'])
+    scene.color_table.load_state_dict(state['color_table'])
     scene.color_opt.load_state_dict(state['color_opt'])
 
     return scene
@@ -170,7 +171,8 @@ class TCNNScene(GaussianScene):
   def state_dict(self):
     return dict(points=self.points.state_dict(), 
                 color_model=self.color_model.state_dict(),
-                color_opt = self.color_opt.state_dict())
+                color_opt = self.color_opt.state_dict(),
+                color_table = self.color_table.state_dict())
   
 
   def get_point_cloud(self, image_idx:int = 0):

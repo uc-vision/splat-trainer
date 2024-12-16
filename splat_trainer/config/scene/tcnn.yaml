@@ -7,7 +7,7 @@ trainer:
 
     parameters:
       position:
-        lr: ${log_decay:0.1, 0.25}
+        lr: ${log_decay:0.2, 0.25}
         type: local_vector
 
       log_scaling:
@@ -25,7 +25,7 @@ trainer:
 
 
     beta1: 0.9
-    beta2: 0.999
+    beta2: 0.99
 
     # TCNN specific
     image_features: 48

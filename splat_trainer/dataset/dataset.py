@@ -1,7 +1,9 @@
 
 from abc import ABCMeta, abstractmethod
 from collections import namedtuple
+from typing import Sequence
 from beartype.typing import Iterator
+import numpy as np
 
 
 from splat_trainer.camera_table.camera_table import CameraTable
@@ -13,13 +15,16 @@ CameraView = namedtuple('CameraView',
 
 
 class Dataset(metaclass=ABCMeta):
-  
   @abstractmethod
-  def train(self, shuffle=True) -> Iterator[CameraView]:
+  def loader(self, idx:np.ndarray, shuffle:bool=False) -> Sequence[CameraView]:
     raise NotImplementedError
     
   @abstractmethod
-  def val(self) -> Iterator[CameraView]:
+  def train(self, shuffle=True) -> Sequence[CameraView]:
+    raise NotImplementedError
+    
+  @abstractmethod
+  def val(self) -> Sequence[CameraView]:
     raise NotImplementedError
 
   

@@ -1,9 +1,12 @@
 from abc import abstractmethod
 import abc
+from dataclasses import dataclass
+from enum import Enum, Flag
 from functools import cached_property
 from numbers import Number
 from typing import List, Tuple
 
+import numpy as np
 from tensordict import tensorclass
 from tensordict import TensorDictParams
 import torch
@@ -14,6 +17,26 @@ from splat_trainer.util.transforms import split_rt
 
 from beartype import beartype
 
+class Label(Flag):
+  """ Labels for camera tables. Bitwise encoded."""
+  Validation = 1 << 0
+  Training = 1 << 1
+  
+
+
+
+
+def to_matrix(intrinsics:torch.Tensor) -> torch.Tensor:
+  fx, fy, cx, cy = intrinsics.unbind(-1)
+  m = torch.eye(3, dtype=intrinsics.dtype, device=intrinsics.device)
+  m = m.unsqueeze(0).expand(intrinsics.shape[:-1] + (3, 3)).clone()
+  m[..., 0, 0] = fx
+  m[..., 1, 1] = fy
+  m[..., 0, 2] = cx
+  m[..., 1, 2] = cy
+  return m
+
+
 @tensorclass
 class Projections:
   """ Projection parameters for a camera or a batch of cameras."""
@@ -23,14 +46,7 @@ class Projections:
 
   @property
   def matrix(self) -> torch.Tensor:
-    fx, fy, cx, cy = self.intrinsics.unbind(-1)
-    m = torch.eye(3, dtype=self.intrinsics.dtype, device=self.intrinsics.device)
-    m = m.unsqueeze(0).expand(self.intrinsics.shape[:-1] + (3, 3)).clone()
-    m[..., 0, 0] = fx
-    m[..., 1, 1] = fy
-    m[..., 0, 2] = cx
-    m[..., 1, 2] = cy
-    return m
+    return to_matrix(self.intrinsics)
   
   @property
   def device(self):
@@ -52,7 +68,52 @@ class Projections:
   def fov(self) -> torch.Tensor:
     f = self.focal_length
     return 2.0 * torch.atan(0.5 * self.image_size / f)
+
+
+@beartype
+@dataclass(kw_only=True)
+class Camera:
+  """ Convenience class for a single camera."""
+  intrinsics: torch.Tensor      # (4,) float
+  camera_t_world:torch.Tensor   # (4, 4) float
+
+  image_size:Tuple[int, int]
+  depth_range:Tuple[float, float]
+
+  camera_idx: int
+  frame_idx: int
+  label: Label
+
+  @property
+  def device(self):
+    return self.camera_t_world.device
   
+  @property
+  def matrix(self) -> torch.Tensor:
+    return to_matrix(self.projection)
+
+  
+  @property
+  def focal_length(self) -> torch.Tensor:
+    return self.intrinsics[..., :2]
+  
+  @property
+  def principal_point(self) -> torch.Tensor:
+    return self.intrinsics[..., 2:]
+  
+  @property
+  def aspect_ratio(self) -> float:
+    return self.image_size[0] / self.image_size[1]
+  
+  @property
+  def fov(self) -> torch.Tensor:
+    f = self.focal_length
+    return 2.0 * torch.atan(0.5 * self.image_size / f)
+  
+  @property
+  def has_label(self, label:Label) -> bool:
+    return bool(self.label & label)
+
 
 @tensorclass
 class Cameras:
@@ -63,6 +124,7 @@ class Cameras:
 
   camera_idx: torch.Tensor     # (..., 1) int
   frame_idx: torch.Tensor      # (..., 1) int
+  labels: torch.Tensor         # (..., 1) int
 
   @property
   def device(self):
@@ -80,8 +142,6 @@ class Cameras:
   def world_t_camera(self) -> torch.Tensor:
     return torch.inverse(self.camera_t_world)
     
-
-
   @property
   def right(self) -> torch.Tensor:
     return self.world_t_camera[..., :3, 0]
@@ -102,37 +162,21 @@ class Cameras:
   def image_sizes(self) -> torch.Tensor:
     return self.projection.image_size
   
-  # Convenience properties for retrieving single camera values
-  @property
-  def depth_range(self) -> Tuple[float, float]:
-    assert len(self.batch_size) == 0, f"depth_range returns (near, far) for a single camera, got batch size: {self.batch_size}"
-    return tuple(self.projection.depth_range.cpu().tolist())
+  def item(self) -> Camera:
+    n = self.batch_size
+    assert np.product(n) == 1, f"Expected batch size 1, got shape: {self.batch_size}"
 
-  @property
-  def frame(self) -> int:
-    assert len(self.batch_size) == 0, "frame returns a single frame index"
-    return self.frame_idx.item()
+    return Camera(
+      intrinsics=self.intrinsics.squeeze(0),
+      camera_t_world=self.camera_t_world.squeeze(0),
 
-  @property
-  def camera(self) -> int:
-    assert len(self.batch_size) == 0, "camera returns a single camera index"
-    return self.camera_idx.item()
+      image_size=tuple(self.image_sizes.cpu().tolist()),
+      depth_range=tuple(self.projection.depth_range.cpu().tolist()),
+      camera_idx=self.camera_idx.item(),
+      frame_idx=self.frame_idx.item(),
+      label=Label(self.labels.item())
+    )
 
-  @property
-  def size_tuple(self) -> Tuple[int, int]:
-    assert len(self.batch_size) == 0, "size_tuple returns (width, height) for a single camera"
-    return tuple(self.image_sizes.cpu().tolist())
-  
-
-  @property
-  def near(self) -> float:
-    assert len(self.batch_size) == 0, "near returns a single camera index"
-    return self.projection.depth_range[0].item()
-  
-  @property
-  def far(self) -> float:
-    assert len(self.batch_size) == 0, "far returns a single camera index"
-    return self.projection.depth_range[1].item()
 
 
 class CameraTable(nn.Module, metaclass=abc.ABCMeta):
@@ -141,14 +185,7 @@ class CameraTable(nn.Module, metaclass=abc.ABCMeta):
   def forward(self, image_idx: torch.Tensor) -> Cameras:
     raise NotImplementedError
   
-  @beartype
-  def __getitem__(self, image_idx:int | torch.Tensor) -> Cameras:
-    if isinstance(image_idx, int):
-      image_idx = torch.tensor([image_idx], device=self.device)
-      return self.forward(image_idx).squeeze(0)
-    else:
-      return self.forward(image_idx)
-  
+
   @property
   @abstractmethod
   def image_name(self, image_idx:int) -> str:
@@ -185,6 +222,31 @@ class CameraTable(nn.Module, metaclass=abc.ABCMeta):
   def cameras(self) -> Cameras:
     return self.forward(torch.arange(self.num_images))
   
+  def has_label(self, label:Label) -> torch.Tensor:
+    """ Get indices of cameras with the given label. 
+    Labels are bitwise encoded, so we use bitwise AND to get the indices.
+    """
+    label_mask = self._labels & label.value
+    return torch.nonzero(label_mask, as_tuple=True)[0]
+  
+  @beartype
+  def with_label(self, label:Label) -> Cameras:
+    """ Get cameras with the given label."""
+    return self.forward(self.has_label(label))
+  
+  @beartype
+  def count_label(self, label:Label) -> int:
+    """ Get number of cameras with the given label."""
+    return self.has_label(label).shape[0]
+  
+
+  @beartype
+  def __getitem__(self, image_idx:int | torch.Tensor) -> Cameras:
+    if isinstance(image_idx, int):
+      image_idx = torch.tensor([image_idx], device=self.device)
+      return self.forward(image_idx).squeeze(0)
+    else:
+      return self.forward(image_idx)
 
 @beartype
 def camera_scene_extents(cameras:Cameras) -> Tuple[torch.Tensor, float]:
@@ -202,16 +264,32 @@ def camera_scene_extents(cameras:Cameras) -> Tuple[torch.Tensor, float]:
 
 
 @beartype
-def pose_adjacency(poses1:torch.Tensor, poses2:torch.Tensor) -> torch.Tensor:
-  """ Compute adjacency matrix between all camera poses in the table."""
+def pose_adjacency(poses1: torch.Tensor, poses2: torch.Tensor, k: int = 8) -> torch.Tensor:
+    """ Compute adjacency matrix between all camera poses in the table.
+    Returns higher values for more similar poses (closer and similarly oriented).
+    Uses k-nearest neighbors to adapt to local scale.
+    
+    Args:
+        poses1, poses2: Camera poses as (N, 4, 4) tensors
+        k: Number of neighbors to consider for local scale (default 8)
+    """
+    forward1, forward2 = poses1[..., :3, 2], poses2[..., :3, 2]
 
-  forward1, forward2 = poses1[..., :3, 2], poses2[..., :3, 2]
-  dir_similarity = torch.sum(forward1 * forward2, dim=1)
+    # Outer product of forward vectors (ranges from -1 to 1)
+    dir_similarity = torch.einsum('id,jd->ij', forward1, forward2)
 
-  pos1, pos2 = poses1[..., :3, 3], poses2[..., :3, 3]  
-  distance = torch.norm(pos1 - pos2, dim=1)
-
-  return dir_similarity * distance
+    pos1, pos2 = poses1[..., :3, 3], poses2[..., :3, 3]  
+    distance = torch.cdist(pos1, pos2)
+    
+    # For each camera, compute local scale based on kNN distances
+    # We use k+1 because the closest point will be the point itself (distance 0)
+    knn_distances, _ = torch.topk(distance, k=min(k + 1, distance.shape[1]), dim=1, largest=False)
+    local_scale = knn_distances.median()
+    
+    # Convert distance to similarity using local scale for each source camera
+    dist_similarity = 1.0 / (1.0 + distance / local_scale)
+    
+    return dir_similarity * dist_similarity
 
 
 @beartype
@@ -220,13 +298,18 @@ def camera_similarity(cameras:Cameras, world_t_camera:torch.Tensor) -> torch.Ten
   assert world_t_camera.shape == (4, 4), f"Expected shape (4, 4), got: {world_t_camera.shape}"
 
   return pose_adjacency(cameras.world_t_camera, world_t_camera.unsqueeze(0))
-  
+
+@beartype
+def camera_adjacency_matrix(cameras:Cameras) -> torch.Tensor:
+  """ Compute adjacency matrix between all camera poses in the table."""
+  return pose_adjacency(cameras.world_t_camera, cameras.world_t_camera)
 
 class CameraRigTable(CameraTable):
   def __init__(self, rig_t_world:torch.Tensor,   # (N, 4, 4) - poses for the whole camera rig
                      camera_t_rig:torch.Tensor,  # (C, 4, 4) - camera poses inside the rig
                      projection:Projections,     # (C) Camera projections (image size and intrinsics)
-                     image_names:List[str]      # (N,)
+                     image_names:List[str],      # (N,)
+                     labels:torch.Tensor        # (N,)
                     ):
     super().__init__()
 
@@ -243,7 +326,8 @@ class CameraRigTable(CameraTable):
     self._camera_poses = RigPoseTable(
       rig_t_world=rig_t_world, camera_t_rig=camera_t_rig)
     self._image_names = image_names
-    
+    self.register_buffer("_labels", labels)
+
   @beartype
   def forward(self, image_idx:torch.Tensor) -> Cameras:     
     assert image_idx.dim() == 1, f"Expected 1D tensor, got: {image_idx.shape}"
@@ -258,7 +342,8 @@ class CameraRigTable(CameraTable):
       projection=self.projections[camera_idx],
       camera_idx=camera_idx,
       frame_idx=frame_idx,
-      batch_size=image_idx.shape
+      batch_size=image_idx.shape,
+      labels=self._labels[image_idx]
     )
 
 
@@ -296,7 +381,8 @@ class MultiCameraTable(CameraTable):
                camera_t_world:torch.Tensor, # (N, 4, 4)
                camera_idx:torch.Tensor,     # (N,) - index into projection table (0, P-1)
                projection:Projections,     # (P,)
-               image_names:List[str]        # (N,)
+               image_names:List[str],      # (N,)
+               labels: torch.Tensor        # (N,) - train=1, val=0
               ):
     super().__init__()
 
@@ -311,6 +397,7 @@ class MultiCameraTable(CameraTable):
 
     self.register_buffer("_camera_idx", camera_idx)
     self._camera_t_world = PoseTable(camera_t_world)
+    self.register_buffer("_labels", labels)
 
   @beartype
   def forward(self, image_idx:torch.Tensor) -> Cameras:
@@ -322,7 +409,8 @@ class MultiCameraTable(CameraTable):
       projection=self.projections[cam_idx],
       camera_idx=cam_idx,
       frame_idx=image_idx,
-      batch_size=image_idx.shape
+      batch_size=image_idx.shape,
+      labels=self._labels[image_idx]
     )
 
 

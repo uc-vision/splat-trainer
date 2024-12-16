@@ -48,18 +48,19 @@ class LogLinear(Varying[T]):
     return math.exp(math.log(self.start) * (1 - t) + math.log(self.end) * t)
 
 class Piecewise(Varying[T]):
-  def __init__(self, start:T, steps:list[tuple[float, T]]):
+  def __init__(self, start:T, steps:list[tuple[float, T]], scale:float = 1.0):
     self.start = start
     self.steps = steps
+    self.scale = scale
 
   def __call__(self, t:float) -> T:
     value = self.start
     for t_min, next_value in self.steps:
         if t < t_min:
-            return value
+            return value * self.scale
         value = next_value
 
-    return value
+    return value * self.scale
   
 
 def smoothstep(t, a, b, interval=(0, 1)):
@@ -152,9 +153,17 @@ def target(name:str, **kwargs):
     **kwargs
   })
 
+
 def add_resolvers():
     OmegaConf.register_new_resolver("dirname", path.dirname)
     OmegaConf.register_new_resolver("basename", path.basename)
+
+    OmegaConf.register_new_resolver("int_mul", lambda x, y: int(x * y))
+    OmegaConf.register_new_resolver("int_div", lambda x, y: x // y)
+
+    
+
+
     OmegaConf.register_new_resolver("without_ext", lambda x: path.splitext(x)[0])
     OmegaConf.register_new_resolver("ext", lambda x: path.splitext(x)[1])
 

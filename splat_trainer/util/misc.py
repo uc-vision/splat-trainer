@@ -1,5 +1,7 @@
 import numpy as np
+from taichi_splatting import Rendering
 import torch
+import torch.nn.functional as F
 
 def strided_indexes(subset:int, total:int):
   if subset > 0:
@@ -56,6 +58,10 @@ def exp_lerp(t, a, b):
 def lerp(t, a, b):
   return a + (b - a) * t
 
+@torch.compile
+def max_decaying(x, t, decay):
+  return x * (1 - decay) + torch.maximum(x, t) * decay
+
 
 class CudaTimer:
   def __init__(self):
@@ -76,6 +82,43 @@ def cluster_points(position:torch.Tensor, num_clusters:int) -> torch.Tensor:
 
   dist = torch.cdist(position[cluster_indices], position)
   return dist.argmin(dim=0)
+
+def vis_vector(rendering:Rendering, cluster_labels:torch.Tensor, num_clusters:int):
+  idx, vis = rendering.visible
+  vector = torch.zeros(num_clusters, device=cluster_labels.device)
+
+  # use clustering to reduce number of points
+  vector.scatter_add_(0, cluster_labels[idx], vis)
+  return vector
+
+def select_batch(batch_size:int,  
+                  view_counts:torch.Tensor, 
+                  view_overlaps:torch.Tensor, 
+                  temperature:float=1.0,
+                  eps:float=1e-6,
+                  ) -> torch.Tensor: # (N,) camera indices 
+  # select initial camera with probability proportional to view count
+  inv_counts = 1 / (view_counts + eps)
+  index = torch.multinomial(inv_counts, 1)
+
+
+  if temperature == 0:
+    # select other cameras just with topk
+    other_index = torch.topk(view_overlaps[index.squeeze(0)] * inv_counts, k=batch_size - 1, dim=0).indices
+
+  else:
+    # select other cameras with probability proportional to view overlap with the selected camera
+    # temperature > 1 means more uniform sampling
+    # temperature < 1 means closer to top_k sampling
+    p = F.softmax(view_overlaps[index.squeeze(0)] / temperature, dim=0) * inv_counts
+
+    # select other cameras with probability proportional to view overlap with the selected camera
+    other_index = torch.multinomial(p, batch_size - 1, replacement=False)
+  
+  
+
+  return torch.cat([index, other_index.squeeze(0)], dim=0)
+
 
 
 def sinkhorn(matrix: torch.Tensor, num_iter: int, epsilon: float = 1e-8) -> torch.Tensor:

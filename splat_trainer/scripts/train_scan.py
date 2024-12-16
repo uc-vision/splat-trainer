@@ -33,12 +33,14 @@ def cfg_from_args():
   dataset_group.add_argument("--colmap", type=str, default=None, help="Colmap scene to load")
   dataset_group.add_argument("--image_scale", type=float, default=None, help="Image scale")
   dataset_group.add_argument("--resize_longest", type=int, default=None, help="Resize longest side")
+  dataset_group.add_argument("--far", type=float, default=None, help="Set far plane")
 
   # Training group
   training_group = parser.add_argument_group("Training")
   training_group.add_argument("--target", type=int, default=None, help="Target point count")
   training_group.add_argument("--no_alpha", action="store_true", help="Fix point alpha=1.0 in training")
   training_group.add_argument("--steps", type=int, default=None, help="Number of training steps")
+  training_group.add_argument("--training_scale", type=float, default=1.0, help="Scale the number of steps by a constant factor")
   
   training_group.add_argument("--add_points", type=int, default=None, help="Add random background points")
   training_group.add_argument("--limit_points", type=int, default=None, help="Limit the number of points from the dataset to N")
@@ -63,6 +65,7 @@ def cfg_from_args():
   output_group.add_argument("--base_path", type=str, default=None, help="Base output path")
   output_group.add_argument("--checkpoint", action="store_true", help="Save checkpoints")
   output_group.add_argument("--wandb", action="store_true", help="Use wandb logging")
+
 
   args = parser.parse_args()
 
@@ -90,6 +93,9 @@ def cfg_from_args():
     overrides.append(f"dataset.resize_longest={args.resize_longest}")
     overrides.append("dataset.image_scale=null")
 
+  if args.far is not None:
+    overrides.append(f"far={args.far}")
+
   # Training group
   if args.target is not None:
     overrides.append("controller=target")
@@ -101,6 +107,9 @@ def cfg_from_args():
 
   if args.steps is not None:
     overrides.append(f"trainer.steps={args.steps}")
+
+  if args.training_scale is not None:
+    overrides.append(f"training_scale={args.training_scale}")
 
   assert args.add_points is None or args.random_points is None, "Cannot specify both background and random points"
   assert args.limit_points is None or args.random_points is None, "Cannot specify both limit and random points"

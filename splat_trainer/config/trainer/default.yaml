@@ -6,8 +6,8 @@ trainer:
 
   device: "cuda:0"
 
-  steps : 20000
-  eval_steps: 2000
+  steps : ${int_mul:20000,${training_scale}}
+  eval_steps: ${int_mul:2000,${training_scale}}
 
   save_checkpoints: False
   save_output: True
@@ -40,7 +40,9 @@ trainer:
     start: 50
     steps:
       - [0.2, 100]
-      - [0.5, 200]
+      - [0.5, 100]
+    
+    scale: ${training_scale}
 
 
 

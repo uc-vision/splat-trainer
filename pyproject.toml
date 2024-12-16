@@ -59,10 +59,10 @@ to-colmap = "splat_trainer.scripts.to_colmap:main"
 
 grid-search-trainer = "splat_trainer.scripts.grid_search:main"
 
-eval-checkpoint = "splat_trainer.scripts.checkpoint:evaluate"
-resume-checkpoint = "splat_trainer.scripts.checkpoint:resume"
-vis-checkpoint = "splat_trainer.scripts.checkpoint:visualize"
-
+checkpoint-evaluate = "splat_trainer.scripts.checkpoint:evaluate"
+checkpoint-resume = "splat_trainer.scripts.checkpoint:resume"
+checkpoint-visualize = "splat_trainer.scripts.checkpoint:visualize"
+checkpoint-show-batch = "splat_trainer.scripts.checkpoint:show_batch"
 
 
 [tool.setuptools.package-data]

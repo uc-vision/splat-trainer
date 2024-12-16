@@ -6,7 +6,7 @@ from beartype import beartype
 from beartype.typing import Optional
 import numpy as np
 
-from splat_trainer.util.misc import exp_lerp, lerp
+from splat_trainer.util.misc import exp_lerp, lerp, max_decaying
 from taichi_splatting import Rendering
 from tensordict import tensorclass
 import torch
@@ -30,6 +30,8 @@ class PointStatistics:
       split_score=torch.zeros(batch_size, dtype=torch.float32, device=device),
       prune_cost=torch.zeros(batch_size, dtype=torch.float32, device=device),
       max_scale=torch.zeros(batch_size, dtype=torch.float32, device=device),
+
+      # in_view=torch.zeros(batch_size, dtype=torch.bool, device=device),
 
       batch_size=(batch_size,)
     )
@@ -170,8 +172,9 @@ class TargetController(Controller):
 
     points.split_score[idx] = exp_lerp(self.config.split_alpha, rendering.split_score, points.split_score[idx])    
     points.prune_cost[idx] = exp_lerp(self.config.prune_alpha, rendering.prune_cost, points.prune_cost[idx])
-    
-    # points.prune_cost[idx] = torch.maximum(points.prune_cost[idx], prune_cost) 
+
+    # points.split_score[idx] = max_decaying(points.split_score[idx], rendering.split_score, self.config.split_alpha)
+    # points.prune_cost[idx] = max_decaying(points.prune_cost[idx], rendering.prune_cost, self.config.prune_alpha)
 
     image_size = max(rendering.camera.image_size)
     far_points = rendering.point_depth.squeeze(1) > rendering.point_depth.quantile(0.75)

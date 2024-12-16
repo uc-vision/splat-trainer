@@ -19,4 +19,7 @@ run_name: ???
 base_path: ???
 
 debug: False
+training_scale: 1
 
+far: 100.0
+near: 0.1

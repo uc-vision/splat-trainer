@@ -8,8 +8,9 @@ dataset:
   resize_longest: 1536
   val_stride: 0
 
-  depth_range: [0.1, 100.0]
-
+  depth_range: 
+    - ${near}
+    - ${far}
 
 
 # hydra:  

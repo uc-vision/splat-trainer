@@ -20,7 +20,7 @@ import torch.nn.functional as F
 
 from pydispatch import Dispatcher
  
-from splat_trainer.camera_table.camera_table import camera_json
+from splat_trainer.camera_table.camera_table import Camera, Label, camera_adjacency_matrix, camera_json
 from splat_trainer.color_corrector.nil_corrector import NilCorrector
 from splat_trainer.controller.controller import Controller
 from splat_trainer.logger.logger import CompositeLogger
@@ -43,7 +43,7 @@ from splat_trainer.logger.histogram import Histogram
 from splat_trainer.scene.sh_scene import  GaussianSceneConfig
 from splat_trainer.util.colorize import colorize, get_cv_colormap
 from splat_trainer.util.containers import transpose_rows
-from splat_trainer.util.misc import CudaTimer, cluster_points, next_multiple, sinkhorn, strided_indexes
+from splat_trainer.util.misc import CudaTimer, cluster_points, next_multiple, sinkhorn, strided_indexes, select_batch, vis_vector
 
 from splat_trainer.controller import ControllerConfig
 from splat_trainer.color_corrector import CorrectorConfig, Corrector
@@ -91,14 +91,17 @@ class TrainConfig:
   opacity_reg: VaryingFloat = 0.01
   aspect_reg: VaryingFloat = 0.01
 
-  vis_clusters: int = 1024 # number of point clusters to use for view similarity
+  # view similarity
+  vis_clusters: int = 1024 # number of point clusters to use
+  overlap_temperature: float = 1.0
 
+
+  # renderer settings
   antialias:bool = False
   blur_cov:float = 0.3
 
   save_checkpoints: bool = False
   save_output: bool = True
-
   evaluate_first: bool = False
 
 @dataclass(frozen=True)
@@ -160,21 +163,20 @@ class Trainer(Dispatcher):
     self.dataset = dataset
 
     self.camera_table = dataset.camera_table().to(self.device)
+    self.train_view_overlaps = camera_adjacency_matrix(self.camera_table.with_label(Label.Training))
+    self.train_view_overlaps.fill_diagonal_(0)
 
     self.config = config
     self.logger = CompositeLogger(logger)
-
     self.step = step
-    self.state = TrainerState.Stopped
-
-    self.last_checkpoint = None
-    self.render_timers = [CudaTimer() for _ in range(self.config.log_interval)]
 
     self.color_map = get_cv_colormap().to(self.device)
     self.ssim = partial(fused_ssim, padding="valid")
     self.pbar = None
 
-    self.view_overlaps: Optional[torch.Tensor] = None
+    n = self.camera_table.count_label(label=Label.Training)
+    
+    self.view_counts: torch.Tensor = torch.zeros((n,), device=self.device)
 
   
   def add_logger(self, logger:Logger):
@@ -270,7 +272,7 @@ class Trainer(Dispatcher):
         image_idx = np.random.randint(0, self.camera_table.num_images)
         camera_params = self.camera_params(image_idx)
 
-        rendering = self.render(camera_params, image_idx, compute_point_heuristics=True)
+        rendering = self.render(camera_params, image_idx, compute_split_heuristic=True)
         rendering = replace(rendering, image=self.color_corrector.correct(rendering, image_idx))
 
         loss, losses = self.losses(rendering, torch.zeros_like(rendering.image, device=self.device))
@@ -306,6 +308,8 @@ class Trainer(Dispatcher):
     checkpoint = self.state_dict()
     torch.save(checkpoint, path)
 
+    self.pbar.write(f"Checkpoint saved to {colored(path, 'light_green')}")
+
 
   @property
   def t(self):
@@ -320,13 +324,13 @@ class Trainer(Dispatcher):
 
 
   def camera_params(self, cam_idx:torch.Tensor):
-    camera = self.camera_table[cam_idx]
+    camera:Camera = self.camera_table[cam_idx].item()
     near, far = camera.depth_range
 
     return CameraParams(
             T_camera_world=camera.camera_t_world,
-            projection=camera.projection.intrinsics,
-            image_size=camera.size_tuple,
+            projection=camera.intrinsics,
+            image_size=camera.image_size,
             near_plane=near,
             far_plane=far,
         ).to(self.device, dtype=torch.float32)
@@ -384,14 +388,6 @@ class Trainer(Dispatcher):
 
     return Evaluation(filename, rendering, source_image)
 
-  @torch.compile
-  def vis_vector(self, rendering:Rendering, cluster:torch.Tensor):
-    idx, vis = rendering.visible
-    vector = torch.zeros(cluster.shape, device=self.device)
-
-    # use clustering to reduce number of points
-    cluster_vis = torch.scatter_add(vector, 0, cluster[idx], vis)
-    return cluster_vis
 
 
 
@@ -421,7 +417,7 @@ class Trainer(Dispatcher):
       add_worst(worst, (-eval.metrics['psnr'], eval))    
       rows[eval.filename] = eval.metrics
 
-      visibility.append(self.vis_vector(eval.rendering, clusters))
+      visibility.append(vis_vector(eval.rendering, clusters, self.config.vis_clusters))
       
       pbar.update(1)
       pbar.set_postfix(**{k:f"{v:.3f}" for k, v in eval.metrics.items()})
@@ -437,9 +433,10 @@ class Trainer(Dispatcher):
       self.log_histogram(f"eval_{name}/{k}_hist", torch.tensor(v))
 
     visibility = torch.stack(visibility, dim=0)   
+    visibility /= visibility.mean()
 
     view_overlaps = (visibility @ visibility.T).to_dense().fill_diagonal_(0.0)
-    view_overlaps = sinkhorn(view_overlaps, 10)
+    # view_overlaps = sinkhorn(view_overlaps, 10)
 
     avg_max = view_overlaps.max(dim=1).values.median()
     self.log_colormapped(f"eval_{name}/view_overlaps", view_overlaps / avg_max)
@@ -455,7 +452,7 @@ class Trainer(Dispatcher):
 
 
   def evaluate(self):
-    train, self.view_overlaps = self.evaluate_dataset("train", self.dataset.train(shuffle=False), 
+    train, self.train_view_overlaps = self.evaluate_dataset("train", self.dataset.train(shuffle=False), 
         correct_image=self.evaluate_trained,
         log_count=self.config.num_logged_images, 
         worst_count=self.config.log_worst_images)
@@ -470,6 +467,30 @@ class Trainer(Dispatcher):
     self.scene.log(self.logger, self.step)
     return {**train, **val, **val_cc}
   
+
+  def select_batch(self, batch_size:int, temperature:Optional[float]=None) -> torch.Tensor:
+    """ Select a batch of camera indexes from the training set.
+    """
+
+    if temperature is None:
+      temperature = self.config.overlap_temperature
+
+    train_idx = select_batch(batch_size, self.view_counts + 1, 
+          self.train_view_overlaps, temperature)
+    self.view_counts[train_idx] += 1
+
+    # Lookup camera table to get camera indexes 
+    all_train_idx = self.camera_table.has_label(Label.Training)
+    return all_train_idx[train_idx]
+
+  def iter_batch(self, batch_indexes:torch.Tensor):
+    return self.iter_data(self.dataset.loader(batch_indexes.cpu().numpy()))
+
+  def iter_batches(self, batch_size:int):
+    while True:
+      batch_indexes = self.select_batch(batch_size)
+      yield from self.iter_batch(batch_indexes)
+
 
   def iter_train(self):
     while True:
@@ -550,7 +571,7 @@ class Trainer(Dispatcher):
   def training_step(self, filename:str, camera_params:CameraParams, image_idx:int, image:torch.Tensor, timer:CudaTimer) -> dict:
 
     with timer:    
-      rendering = self.render(camera_params, image_idx, compute_point_heuristics=True)
+      rendering = self.render(camera_params, image_idx, compute_split_heuristic=True)
       rendering = replace(rendering, image=self.color_corrector.correct(rendering, image_idx))
 
       loss, losses = self.losses(rendering, image)

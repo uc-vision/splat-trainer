@@ -1,7 +1,7 @@
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import Optional, Sequence, Tuple
 from beartype.typing import Dict, Iterator, List
 
 import cv2
@@ -67,7 +67,7 @@ def projections(scan:FrameSet, depth_range:Tuple[float, float]) -> Projections:
 
     return torch.stack([to_projection(camera) for camera in scan.cameras.values()])
 
-def camera_rig_table(scan:FrameSet, depth_range:Tuple[float, float]) -> CameraRigTable:
+def camera_rig_table(scan:FrameSet, depth_range:Tuple[float, float], labels:torch.Tensor) -> CameraRigTable:
     camera_t_rig = np.array(
       [camera.camera_t_parent for camera in scan.cameras.values()])
     
@@ -78,7 +78,8 @@ def camera_rig_table(scan:FrameSet, depth_range:Tuple[float, float]) -> CameraRi
       rig_t_world=torch.linalg.inv(world_t_rig),
       camera_t_rig=torch.from_numpy(camera_t_rig).to(torch.float32),
       projection=projections(scan, depth_range),
-      image_names=image_names)
+      image_names=image_names,
+      labels=labels)
 
 
 def concat_lists(xs):
@@ -113,7 +114,7 @@ def preload_images(scan:FrameSet, undistorted:Dict[str, Camera]) -> List[CameraI
   frames = load_frames_with(scan, undistortions, load)
   return concat_lists(frames)
 
-class PreloadedImages(torch.utils.data.Dataset):
+class PreloadedImages(Sequence[CameraView]):
   @beartype
   def __init__(self, camera_images:List[CameraImage], shuffle:bool=False):
     self.camera_images = camera_images
@@ -124,7 +125,7 @@ class PreloadedImages(torch.utils.data.Dataset):
 
   def __getitem__(self, index) -> CameraView:
     camera_image:CameraImage = self.camera_images[index]
-    return camera_image.filename, camera_image.image, camera_image.image_id
+    return CameraView(camera_image.filename, camera_image.image, camera_image.image_id)
      
   def __iter__(self) -> Iterator[CameraView]:
     order = torch.randperm(len(self)) if self.shuffle else torch.arange(len(self))
