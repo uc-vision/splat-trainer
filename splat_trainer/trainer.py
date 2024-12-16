@@ -92,7 +92,7 @@ class TrainConfig:
   aspect_reg: VaryingFloat = 0.01
 
   # view similarity
-  vis_clusters: int = 1024 # number of point clusters to use
+  vis_clusters: int = 8192 # number of point clusters to use
   overlap_temperature: float = 1.0
 
 
@@ -433,7 +433,7 @@ class Trainer(Dispatcher):
       self.log_histogram(f"eval_{name}/{k}_hist", torch.tensor(v))
 
     visibility = torch.stack(visibility, dim=0)   
-    visibility /= visibility.mean()
+    visibility /= visibility.max(dim=1).values.mean()
 
     view_overlaps = (visibility @ visibility.T).to_dense().fill_diagonal_(0.0)
     # view_overlaps = sinkhorn(view_overlaps, 10)

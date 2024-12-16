@@ -77,11 +77,29 @@ class CudaTimer:
   def ellapsed(self):
     return self.start.elapsed_time(self.end)
   
-def cluster_points(position:torch.Tensor, num_clusters:int) -> torch.Tensor:
+def cluster_points(position:torch.Tensor, num_clusters:int, chunk_size:int=128) -> torch.Tensor:
   cluster_indices = torch.randperm(position.shape[0])[:num_clusters]
+  # Process clusters in chunks to avoid memory issues with large point clouds
+  num_points = position.shape[0]
+  
+  min_dist = torch.full((num_points,), float('inf'), device=position.device)
+  min_cluster = torch.zeros(num_points, dtype=torch.long, device=position.device)
 
-  dist = torch.cdist(position[cluster_indices], position)
-  return dist.argmin(dim=0)
+  for start in range(0, num_clusters, chunk_size):
+    end = min(start + chunk_size, num_clusters)
+    chunk_indices = cluster_indices[start:end]
+    
+    # Calculate distances for this chunk of clusters
+    chunk_dist = torch.cdist(position[chunk_indices], position)
+    
+    # Update minimum distances and cluster assignments
+    chunk_min_dist, chunk_min_cluster = chunk_dist.min(dim=0)
+    update_mask = chunk_min_dist < min_dist
+    
+    min_dist[update_mask] = chunk_min_dist[update_mask]
+    min_cluster[update_mask] = chunk_min_cluster[update_mask] + start
+
+  return min_cluster
 
 def vis_vector(rendering:Rendering, cluster_labels:torch.Tensor, num_clusters:int):
   idx, vis = rendering.visible

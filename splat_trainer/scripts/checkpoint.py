@@ -209,8 +209,12 @@ def display_image(title:str, image:np.ndarray):
 def show_batch():
   parser = arguments()
   parser.add_argument("--batch_size", type=int, default=8, help="Batch size to show")
+  parser.add_argument("--rows", type=int, default=2, help="Number of rows to show")
+  
   parser.add_argument("--temperature", type=float, default=1.0, help="Temperature for sampling")
   args = parser.parse_args()
+
+  assert args.batch_size % args.rows == 0, "Batch size must be divisible by number of rows"
 
   cv2.namedWindow("image", cv2.WINDOW_NORMAL)
 
@@ -230,7 +234,13 @@ def show_batch():
         images.append(camera.image)
         indexes.append(camera.index)
 
-      image = torch.concatenate(images, dim=1)
+      # arrange images in rows and columns
+      rows = []
+      for i in range(0, len(images), args.rows):
+        row = torch.concatenate(images[i:i+args.rows], dim=0)
+        rows.append(row)
+      
+      image = torch.concatenate(rows, dim=1)
       image = image.cpu().numpy()
 
       print(filenames)
