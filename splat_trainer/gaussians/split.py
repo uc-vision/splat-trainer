@@ -27,8 +27,14 @@ def point_basis_inverse(log_scaling:torch.Tensor, rotation_quat:torch.Tensor):
   
   inv_rotation = rotation_matrix.transpose(-1, -2)
   inv_scale = 1.0 / scale
-  
-  inv_basis = inv_rotation * inv_scale.unsqueeze(-1)
+  condition = scale > 1e-1
+  condition = condition.unsqueeze(-1).expand(-1, 3, 3)
+  inv_basis = torch.where(
+    condition,
+    inv_rotation * inv_scale.unsqueeze(-1),
+    inv_rotation
+  )
+  # inv_basis = inv_rotation * inv_scale.unsqueeze(-1)
   return inv_basis
 
 
