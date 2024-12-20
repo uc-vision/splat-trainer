@@ -164,14 +164,14 @@ def sinkhorn(matrix: torch.Tensor, num_iter: int, epsilon: float = 1e-8) -> torc
     return matrix
 
 
-def plot_visibility(rendering:Rendering):
+def plot_visibility(rendering:Rendering, min_vis:int = 12):
   n = rendering.visible_indices.shape[0]
-  print({10**-x: (rendering.point_visibility < 10**-x).sum() * 100 / n  for x in range(6)})
+  print(", ".join([f"vis < {10**-x}: {((rendering.point_visibility < 10**-x).sum() * 100 / n):.1f}%" for x in range(min_vis)]))
   
   # Create and show visibility histogram
   plt.figure(figsize=(10, 7))
   plt.hist(rendering.point_visibility[rendering.point_visibility > 0].cpu().numpy(), 
-            bins=np.logspace(np.log10(10**-6), np.log10(100), 200))
+            bins=np.logspace(np.log10(10**-min_vis), np.log10(100), 200))
   plt.xlabel("Sum transmittance")
 
   plt.xscale('log')

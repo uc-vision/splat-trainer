@@ -24,12 +24,10 @@ class GaussianScene(metaclass=ABCMeta):
   def split_and_prune(self, keep_mask:torch.Tensor, split_idx:torch.Tensor):
     raise NotImplementedError
 
-  
   @abstractmethod
   def log(self, logger:Logger):
     raise NotImplementedError
   
-
   @property
   @abstractmethod
   def num_points(self) -> int:
@@ -43,6 +41,10 @@ class GaussianScene(metaclass=ABCMeta):
 
   @abstractmethod
   def write_to(self, output_dir:str):
+    raise NotImplementedError
+  
+  @abstractmethod
+  def to_sh_gaussians(self) -> Gaussians3D:
     raise NotImplementedError
 
 

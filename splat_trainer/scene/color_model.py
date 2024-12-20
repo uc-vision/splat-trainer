@@ -5,9 +5,10 @@ import torch
 import torch.nn.functional as F
 import torch.nn as nn
 from taichi_splatting.perspective import (CameraParams)
+from taichi_splatting.spherical_harmonics import evaluate_sh_at
 
 from splat_trainer.config import Varying, VaryingFloat, eval_varying, schedule_groups, schedule_lr
-from splat_trainer.scene.mlp.torch_mlp import AffineMLP, DirectionalMLP
+from splat_trainer.scene.mlp.torch_mlp import AffineMLP, BasicMLP, DirectionalMLP
 
 
 
@@ -41,6 +42,11 @@ class GLOTable(torch.nn.Module):
     schedule_groups(dict(glo=lr_glo), t, optimizer)
 
 
+
+
+
+
+  
 class ColorModel(torch.nn.Module):
   def __init__(self, 
                

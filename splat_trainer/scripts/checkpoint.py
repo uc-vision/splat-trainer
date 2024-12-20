@@ -2,14 +2,15 @@ from argparse import ArgumentParser, Namespace
 import os
 from pathlib import Path
 from time import time
-from typing import Callable, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import cv2
 import hydra
 
 import numpy as np
 from omegaconf import DictConfig, OmegaConf
-from taichi_splatting import TaichiQueue
+from taichi_splatting import Gaussians3D, TaichiQueue
+from splat_trainer.dataset.dataset import CameraView
 from splat_trainer.trainer import Trainer
 from taichi_splatting import TaichiQueue
 import torch
@@ -17,6 +18,10 @@ import torch
 import taichi as ti
 
 from splat_trainer.config import add_resolvers, setup_project
+from splat_trainer.util.misc import sh_to_rgb
+from splat_trainer.util.pointcloud import PointCloud
+from splat_trainer.util.view_cameras import show_cameras
+from splat_trainer.util.visibility import foreground_points
 from splat_trainer.viewer import SplatviewConfig
 
 
@@ -84,7 +89,7 @@ def with_trainer(f:Callable[[Trainer], None], args:Namespace):
   torch.set_printoptions(precision=4, sci_mode=False)
   np.set_printoptions(precision=4, suppress=True)
 
-  TaichiQueue.init(arch=ti.cuda, debug=args.debug, threaded=True)
+  TaichiQueue.init(arch=ti.cuda, debug=args.debug, threaded=False)
 
   add_resolvers()
 
@@ -206,47 +211,76 @@ def display_image(title:str, image:np.ndarray):
     pass
 
 
+def transpose_batch(views:List[CameraView]) -> Tuple[List[str], List[np.ndarray], List[int]]:
+  fields = {k:[] for k in CameraView._fields}
+  for view in views:
+    for k, v in zip(CameraView._fields, view):
+      fields[k].append(v)
+
+  return fields["filename"], fields["image"], fields["index"]
+
+
+def image_grid(images:List[np.ndarray], rows:int):
+  rows = []
+  for i in range(0, len(images), rows):
+    row = torch.concatenate(images[i:i+rows], dim=0)
+    rows.append(row)
+  
+  image = torch.concatenate(rows, dim=1)
+  image = image.cpu().numpy()
+
+def sh_gaussians_to_cloud(gaussians:Gaussians3D) -> PointCloud:
+  sh_features = gaussians.feature[:, :, 0] # N, 3
+  positions = gaussians.position # N, 3
+  colors = sh_to_rgb(sh_features) # N, 3
+
+  return PointCloud(positions, colors, batch_size=(positions.shape[0],))
+
+
 def show_batch():
   parser = arguments()
   parser.add_argument("--batch_size", type=int, default=8, help="Batch size to show")
   parser.add_argument("--rows", type=int, default=2, help="Number of rows to show")
   
   parser.add_argument("--temperature", type=float, default=1.0, help="Temperature for sampling")
+  parser.add_argument("--show_images", action="store_true", help="Show images")
+  parser.add_argument("--show_cameras", action="store_true", help="Show cameras")
   args = parser.parse_args()
 
   assert args.batch_size % args.rows == 0, "Batch size must be divisible by number of rows"
 
-  cv2.namedWindow("image", cv2.WINDOW_NORMAL)
+  if args.show_images:
+    cv2.namedWindow("image", cv2.WINDOW_NORMAL)
 
   def f(trainer:Trainer):
+    gaussians = trainer.scene.to_sh_gaussians()
+    point_cloud = sh_gaussians_to_cloud(gaussians)
+    cameras = trainer.camera_table.cameras
+
+    fg_mask = foreground_points(cameras, point_cloud.points)
+
     result = trainer.evaluate()
     print(result)
-    
+
+
     while True:
       batch_indexes = trainer.select_batch(args.batch_size, temperature=args.temperature)
-      
-      filenames = []
-      images = []
-      indexes = []
-
-      for camera in trainer.dataset.loader(batch_indexes.cpu().numpy()):
-        filenames.append(camera.filename)
-        images.append(camera.image)
-        indexes.append(camera.index)
-
-      # arrange images in rows and columns
-      rows = []
-      for i in range(0, len(images), args.rows):
-        row = torch.concatenate(images[i:i+args.rows], dim=0)
-        rows.append(row)
-      
-      image = torch.concatenate(rows, dim=1)
-      image = image.cpu().numpy()
+      filenames, images, indexes = transpose_batch(trainer.dataset.loader(batch_indexes.cpu().numpy()))
 
       print(filenames)
       print(indexes, batch_indexes)
 
-      display_image("image", image)
+      if args.show_cameras:
+
+        # cameras = trainer.camera_table[batch_indexes]
+        mask = torch.zeros(len(cameras), dtype=torch.bool)
+        mask[batch_indexes] = True
+        show_cameras(cameras, point_cloud[fg_mask], highlight_mask = mask)
+
+      if args.show_images:
+        grid = image_grid(images, args.rows)
+        display_image("image", grid)
+
     
 
   with_trainer(f, args)

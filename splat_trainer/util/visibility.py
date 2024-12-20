@@ -1,6 +1,6 @@
 from dataclasses import replace
 from numbers import Number
-from typing import Tuple
+from typing import Optional, Tuple
 from beartype import beartype
 import torch
 
@@ -91,27 +91,46 @@ def random_cloud(cameras:Cameras, count:int, seed:int=0) -> PointCloud:
 
 @beartype
 def point_visibility(cameras:Cameras, 
-                     points:torch.Tensor) -> torch.Tensor:
+                     points:torch.Tensor, 
+                     far_threshold:Optional[float]=None, 
+                     quantile:float=1.0) -> torch.Tensor:
   
-  counts = torch.zeros(points.shape[0], dtype=torch.int32, device=cameras.device)
+  vis_counts = torch.zeros(points.shape[0], dtype=torch.int32, device=cameras.device)
   image_t_world = expand_proj(cameras.projection.matrix, 1) @ cameras.camera_t_world
 
   homog_points = make_homog(points)
 
-
   for i in range(cameras.batch_size[0]):
     camera:Camera = cameras[i].item()
     
-    image_size = camera.image_size
+    w, h = camera.image_size
     near, far = camera.depth_range
 
     proj_points = transform44(image_t_world[i], homog_points)
-    proj_points = proj_points / proj_points[..., 2:3]
+    depth = proj_points[..., 2]
+    xy = proj_points[..., :2] / depth.unsqueeze(-1)
 
-    counts += (
-      (proj_points[..., 0] >= 0) & (proj_points[..., 0] < image_size[0]) 
-      & (proj_points[..., 1] >= 0) & (proj_points[..., 1] < image_size[1]) 
-      & (proj_points[..., 2] > near) & (proj_points[..., 2] < far)
+    view_mask = (
+      (xy[..., 0] >= 0) & (xy[..., 0] < w) 
+      & (xy[..., 1] >= 0) & (xy[..., 1] < h) 
+      & (depth > near) & (depth < far)
     )
 
-  return counts
+    if far_threshold is None:
+      far_threshold = torch.quantile(depth[view_mask], quantile)
+
+    near_mask = view_mask & (depth < far_threshold)
+    vis_counts[near_mask] += 1
+
+  return vis_counts
+
+
+
+@beartype
+def foreground_points(cameras:Cameras, points:torch.Tensor, 
+                      far_threshold:Optional[float]=None, quantile:float=0.25, min_overlap:float=0.01) -> torch.Tensor:
+  
+  near_counts = point_visibility(cameras, points, far_threshold, quantile=quantile)
+  num_views = cameras.batch_size[0]
+
+  return near_counts > (min_overlap * num_views)

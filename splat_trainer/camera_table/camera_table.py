@@ -1,9 +1,9 @@
 from abc import abstractmethod
 import abc
-from dataclasses import dataclass
-from enum import Enum, Flag
+from dataclasses import dataclass, replace
+from enum import Flag
 from functools import cached_property
-from numbers import Number
+import math
 from typing import List, Tuple
 
 import numpy as np
@@ -13,7 +13,7 @@ import torch
 from torch import nn
 
 from splat_trainer.camera_table.pose_table import PoseTable, RigPoseTable
-from splat_trainer.util.transforms import split_rt
+from splat_trainer.util.transforms import join_rt, split_rt
 
 from beartype import beartype
 
@@ -70,6 +70,7 @@ class Projections:
     return 2.0 * torch.atan(0.5 * self.image_size / f)
 
 
+
 @beartype
 @dataclass(kw_only=True)
 class Camera:
@@ -92,6 +93,21 @@ class Camera:
   def matrix(self) -> torch.Tensor:
     return to_matrix(self.projection)
 
+  @property
+  def position(self) -> torch.Tensor:
+    return self.world_t_camera[..., :3, 3]
+
+  @property
+  def world_t_camera(self) -> torch.Tensor:
+    return torch.inverse(self.camera_t_world)
+
+  def translate(self, vector:torch.Tensor) -> 'Camera':
+    position = self.position + (self.world_t_camera[..., :3, :3] @ vector.unsqueeze(-1)).squeeze(-1)
+    return replace(self, camera_t_world=torch.linalg.inv(join_rt(self.rotation, position)))
+
+  @property
+  def rotation(self) -> torch.Tensor:
+    return self.world_t_camera[..., :3, :3].transpose(-1, -2)
   
   @property
   def focal_length(self) -> torch.Tensor:
@@ -108,11 +124,12 @@ class Camera:
   @property
   def fov(self) -> torch.Tensor:
     f = self.focal_length
-    return 2.0 * torch.atan(0.5 * self.image_size / f)
+    return 2.0 * torch.atan(0.5 * torch.tensor(self.image_size, device=self.device) / f)
   
   @property
   def has_label(self, label:Label) -> bool:
     return bool(self.label & label)
+
 
 
 @tensorclass
@@ -132,8 +149,8 @@ class Cameras:
   
   @property
   def centers(self) -> torch.Tensor:
-    return -self.camera_t_world[..., :3, 3] 
-  
+    return self.world_t_camera[..., :3, 3]
+    
   @property
   def rotations(self) -> torch.Tensor:
     return self.camera_t_world[..., :3, :3].transpose(-1, -2)
@@ -166,12 +183,13 @@ class Cameras:
     n = self.batch_size
     assert np.product(n) == 1, f"Expected batch size 1, got shape: {self.batch_size}"
 
+
     return Camera(
       intrinsics=self.intrinsics.squeeze(0),
       camera_t_world=self.camera_t_world.squeeze(0),
 
-      image_size=tuple(self.image_sizes.cpu().tolist()),
-      depth_range=tuple(self.projection.depth_range.cpu().tolist()),
+      image_size=tuple(self.image_sizes.squeeze(0).cpu().tolist()),
+      depth_range=tuple(self.projection.depth_range.squeeze(0).cpu().tolist()),
       camera_idx=self.camera_idx.item(),
       frame_idx=self.frame_idx.item(),
       label=Label(self.labels.item())
@@ -241,10 +259,10 @@ class CameraTable(nn.Module, metaclass=abc.ABCMeta):
   
 
   @beartype
-  def __getitem__(self, image_idx:int | torch.Tensor) -> Cameras:
+  def __getitem__(self, image_idx:int | torch.Tensor) -> Camera | Cameras:
     if isinstance(image_idx, int):
       image_idx = torch.tensor([image_idx], device=self.device)
-      return self.forward(image_idx).squeeze(0)
+      return self.forward(image_idx).item()
     else:
       return self.forward(image_idx)
 
@@ -330,7 +348,7 @@ class CameraRigTable(CameraTable):
 
   @beartype
   def forward(self, image_idx:torch.Tensor) -> Cameras:     
-    assert image_idx.dim() == 1, f"Expected 1D tensor, got: {image_idx.shape}"
+    assert image_idx.dim() <= 1, f"Expected 1D tensor, got: {image_idx.shape}"
     assert (image_idx < self.num_images).all(), f"Image index out of range: {image_idx} >= {self.num_images}"
 
     num_cameras = self._camera_poses.num_cameras

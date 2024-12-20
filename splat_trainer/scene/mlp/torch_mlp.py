@@ -5,7 +5,13 @@ from torch import nn
 from typing import Optional
 import torch.nn.functional as F
 
-def layer(in_features: int, out_features: int, norm = nn.Identity, activation = torch.nn.ReLU):
+def layer(in_features: int, out_features: int, norm = nn.Identity, activation = torch.nn.ReLU, out_scale:Optional[float] = None):
+    m = torch.nn.Linear(in_features, out_features)
+    
+    if out_scale is not None:
+      nn.init.normal_(m.weight, std=out_scale)
+      nn.init.zeros_(m.bias)
+
     return torch.nn.Sequential(
     torch.nn.Linear(in_features, out_features),
     activation(),
@@ -74,13 +80,13 @@ class AffineMLP(torch.nn.Module):
 
 class BasicMLP(torch.nn.Module):
   def __init__(self, inputs: int, outputs: int, hidden: int, layers: int, 
-               norm = nn.Identity, activation = torch.nn.ReLU, output_activation = nn.Identity):
+               norm = nn.Identity, activation = torch.nn.ReLU, output_activation = nn.Identity, out_scale:Optional[float] = None):
     super().__init__()
 
     self.layers = nn.ModuleList([
       layer(inputs, hidden, norm=norm, activation=activation),
       *[layer(hidden, hidden, norm=norm, activation=activation) for _ in range(layers - 1)],
-      layer(hidden, outputs, activation=output_activation)
+      layer(hidden, outputs, activation=output_activation, out_scale=out_scale)
     ])
 
   def forward(self, x):

@@ -38,6 +38,14 @@ class Linear(Varying[T]):
   def __call__(self, t:float) -> T:
     return self.start * (1 - t) + self.end * t
   
+class LogDecay(Varying[T]):
+  def __init__(self, start:T, factor:T):
+    self.start = start
+    self.factor = factor
+
+  def __call__(self, t:float) -> T:
+    return self.start * self.factor ** t
+
 
 class LogLinear(Varying[T]):
   def __init__(self, start:T, end:T):

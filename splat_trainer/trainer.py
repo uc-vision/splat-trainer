@@ -41,7 +41,7 @@ from splat_trainer.logger import Logger
 from splat_trainer.scene.sh_scene import  GaussianSceneConfig
 from splat_trainer.util.colorize import colorize, get_cv_colormap
 from splat_trainer.util.containers import transpose_rows
-from splat_trainer.util.misc import CudaTimer, cluster_points, next_multiple, strided_indexes, select_batch, vis_vector
+from splat_trainer.util.misc import CudaTimer, cluster_points, next_multiple, plot_visibility, strided_indexes, select_batch, vis_vector
 
 from splat_trainer.controller import ControllerConfig
 from splat_trainer.color_corrector import CorrectorConfig, Corrector
@@ -327,7 +327,7 @@ class Trainer(Dispatcher):
 
 
   def camera_params(self, cam_idx:torch.Tensor):
-    camera:Camera = self.camera_table[cam_idx].item()
+    camera:Camera = self.camera_table[cam_idx]
     near, far = camera.depth_range
 
     return CameraParams(
@@ -422,7 +422,6 @@ class Trainer(Dispatcher):
       add_worst = heapq.heappush if len(worst) < worst_count else heapq.heappushpop
       add_worst(worst, (-eval.metrics['psnr'], eval))    
       rows[eval.filename] = eval.metrics
-
 
       visibility.append(vis_vector(eval.rendering, clusters, self.config.vis_clusters))
       
