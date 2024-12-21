@@ -149,6 +149,7 @@ def batch_transform(transforms, points):
 
 def instance_meshes(mesh:trimesh.Trimesh, transforms:np.array):
   n = transforms.shape[0]
+  
   vertices = batch_transform(transforms, mesh.vertices)
   
   offsets = np.arange(n).reshape(n, 1, 1) * mesh.vertices.shape[0] 
@@ -160,7 +161,7 @@ def instance_meshes(mesh:trimesh.Trimesh, transforms:np.array):
   return mesh
 
 def camera_marker(camera:Camera, scale=0.1):
-  x, y = [np.tan(a / 2) for a in camera.fov]
+  x, y = [0.5 * np.tan(a/2) for a in camera.fov]
 
   points = np.array([
     [0, 0, 0],
@@ -194,7 +195,7 @@ def make_camera_markers(cameras:camera_table.Cameras, scale:float=0.1, color=(25
     color_normalized = tuple(c/255.0 for c in color) + (1.0,)
     material = pyrender.MetallicRoughnessMaterial(
         metallicFactor=0.0,     # Increased metallic effect
-        roughnessFactor=0.1,    # Made more reflective/less rough
+        roughnessFactor=0.5,    # Made more reflective/less rough
         baseColorFactor=color_normalized,
         doubleSided=True,
         wireframe=wireframe
@@ -229,11 +230,13 @@ flip_yz = np.array([
 def normalize(v):
   return v / np.linalg.norm(v)
 
-def to_pyrender_camera(camera:camera_table.Camera):
+def to_pyrender_camera(camera:camera_table.Camera, viewport_size:Tuple[int, int]):
     camera = Camera.from_torch(camera)
 
-    fx, fy = camera.focal_length
-    cx, cy = camera.principal_point
+    scaling = max(viewport_size) / max(camera.image_size)
+
+    fx, fy = camera.focal_length * scaling
+    cx, cy = camera.principal_point * scaling
 
     pr_camera = pyrender.IntrinsicsCamera(fx, fy, cx, cy,
         znear=camera.depth_range[0], zfar=camera.depth_range[1])
@@ -257,33 +260,69 @@ def look_at_pose(eye, target, up=np.array([0., 0., 1.])):
   pose[:3, 3] = eye
   return pose
 
+@beartype
+class CameraViewer:
+  def __init__(self, cameras:camera_table.Cameras, points:PointCloud, marker_size:float=0.02):
+    self.cameras = cameras
+    self.points = points
+    self.scene = pyrender.Scene(bg_color=[1, 1, 1], ambient_light=[0.3, 0.3, 0.3, 1.0])
+    self.point_mesh = pyrender.Mesh.from_points(points.points.cpu().numpy(), points.colors.cpu().numpy())
 
-def show_cameras(cameras:camera_table.Cameras, points:PointCloud, highlight_mask:Optional[torch.Tensor]=None):
-    scene = pyrender.Scene(bg_color=[1, 1, 1], ambient_light=[0.3, 0.3, 0.3, 1.0])
+    # Calculate scene center and scale
+    center = points.points.cpu().numpy().mean(axis=0)
 
-    point_mesh = pyrender.Mesh.from_points(points.points.cpu().numpy(), points.colors.cpu().numpy())
-    scene.add(point_mesh)
-
-    if highlight_mask is not None:
-      scene.add(make_camera_markers(cameras[highlight_mask], 0.01, color=(255, 255, 0), wireframe=False))
-      scene.add(make_camera_markers(cameras[~highlight_mask], 0.01, color=(0, 0, 255), wireframe=False))
-    else:
-      scene.add(make_camera_markers(cameras, 0.01, color=(255, 255, 0), wireframe=False))
-
+    self.marker_size = marker_size
+    self.camera_markers = make_camera_markers(cameras, self.marker_size, color=(128, 128, 128), wireframe=False)
+    self.scene.add(self.camera_markers)
+    self.scene.add(self.point_mesh)
+    
     light = pyrender.DirectionalLight(color=[1.0, 1.0, 1.0], intensity=1.0)
-    scene.add(light)
+    self.scene.add(light)
 
     # Find index of 'middle' camera (median position)
-    # Find camera closest to median position
     median_idx = torch.median(cameras.centers, axis=0).indices[0].item()
     camera:camera_table.Camera = cameras[median_idx].item()
 
-    #camera = camera.translate(torch.tensor([0, 0, 0.5], device=camera.device))
-    scene.add_node(to_pyrender_camera(camera))
-    
-    pyrender.Viewer(scene, use_raymond_lighting=True, 
-                   view_center=camera.position.cpu().numpy(), 
-                   point_size=4.0, fullscreen=True)
+    viewport_size=(1920, 1080)
+
+    self.scene.add_node(to_pyrender_camera(camera, viewport_size))
+    self.markers_node = None
+
+    self.space_pressed = False
+
+    self.viewer = pyrender.Viewer(
+        self.scene, 
+        use_raymond_lighting=True, 
+        view_center=center,  # Use calculated center
+        viewport_size=viewport_size,
+        point_size=4.0,
+        run_in_thread=True,
+        registered_keys={
+            ' ': self._on_space,  # Space character as string
+            'S': lambda: None     # block default behavior
+        }
+    )
+
+  def _on_space(self, viewer):
+    self.space_pressed = True
+
+  def wait_key(self):
+    self.space_pressed = False
+    while not self.space_pressed and self.viewer.is_active:
+      time.sleep(0.01)
+
+
+  def highlight_cameras(self, mask:torch.Tensor):
+    # Create the new markers first
+    markers = make_camera_markers(self.cameras[mask], self.marker_size * 1.2, color=(255, 255, 0), wireframe=False)
+    new_node = pyrender.Node(mesh=markers, name='highlight_markers')
+
+    # Use the viewer's scene lock to safely modify the scene
+    with self.viewer.render_lock:
+        if self.markers_node is not None:
+            self.scene.remove_node(self.markers_node)
+        self.markers_node = new_node
+        self.scene.add_node(self.markers_node)
     
 
   

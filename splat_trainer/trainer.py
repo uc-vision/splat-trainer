@@ -41,7 +41,7 @@ from splat_trainer.logger import Logger
 from splat_trainer.scene.sh_scene import  GaussianSceneConfig
 from splat_trainer.util.colorize import colorize, get_cv_colormap
 from splat_trainer.util.containers import transpose_rows
-from splat_trainer.util.misc import CudaTimer, cluster_points, next_multiple, plot_visibility, strided_indexes, select_batch, vis_vector
+from splat_trainer.util.misc import CudaTimer, cluster_points, next_multiple, plot_visibility, select_batch_grouped, strided_indexes, select_batch, vis_vector
 
 from splat_trainer.controller import ControllerConfig
 from splat_trainer.color_corrector import CorrectorConfig, Corrector
@@ -481,7 +481,7 @@ class Trainer(Dispatcher):
     if temperature is None:
       temperature = self.config.overlap_temperature
 
-    train_idx = select_batch(batch_size, self.view_counts + 1, 
+    train_idx = select_batch_grouped(batch_size, self.view_counts + 1, 
           self.train_view_overlaps, temperature)
     self.view_counts[train_idx] += 1
 

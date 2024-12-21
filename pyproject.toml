@@ -62,7 +62,8 @@ grid-search-trainer = "splat_trainer.scripts.grid_search:main"
 checkpoint-evaluate = "splat_trainer.scripts.checkpoint:evaluate"
 checkpoint-resume = "splat_trainer.scripts.checkpoint:resume"
 checkpoint-visualize = "splat_trainer.scripts.checkpoint:visualize"
-checkpoint-show-batch = "splat_trainer.scripts.checkpoint:show_batch"
+
+checkpoint-show-batch = "splat_trainer.scripts.view_batching:show_batch"
 
 
 [tool.setuptools.package-data]

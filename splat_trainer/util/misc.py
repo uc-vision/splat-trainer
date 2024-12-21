@@ -110,6 +110,16 @@ def vis_vector(rendering:Rendering, cluster_labels:torch.Tensor, num_clusters:in
   vector.scatter_add_(0, cluster_labels[idx], vis)
   return vector
 
+def sample_with_temperature(p:torch.Tensor, temperature:float=1.0, n:int=1):
+  # select other cameras with probability proportional to view overlap with the selected camera
+  # temperature > 1 means more uniform sampling
+  # temperature < 1 means closer to top_k sampling
+
+  if temperature == 0:
+    return torch.topk(p, k=n, dim=0).indices
+  else:
+    return torch.multinomial(p, n, replacement=False)
+
 def select_batch(batch_size:int,  
                   view_counts:torch.Tensor, 
                   view_overlaps:torch.Tensor, 
@@ -120,23 +130,31 @@ def select_batch(batch_size:int,
   inv_counts = 1 / (view_counts + eps)
   index = torch.multinomial(inv_counts, 1)
 
-
-  if temperature == 0:
-    # select other cameras just with topk
-    other_index = torch.topk(view_overlaps[index.squeeze(0)] * inv_counts, k=batch_size - 1, dim=0).indices
-
-  else:
-    # select other cameras with probability proportional to view overlap with the selected camera
-    # temperature > 1 means more uniform sampling
-    # temperature < 1 means closer to top_k sampling
-    p = F.softmax(view_overlaps[index.squeeze(0)] / temperature, dim=0) * inv_counts
-
-    # select other cameras with probability proportional to view overlap with the selected camera
-    other_index = torch.multinomial(p, batch_size - 1, replacement=False)
-  
-  
-
+  other_index = sample_with_temperature(view_overlaps[index.squeeze(0)] * inv_counts, temperature=temperature, n=batch_size - 1)
   return torch.cat([index, other_index.squeeze(0)], dim=0)
+
+
+def select_batch_grouped(batch_size:int,  
+                  view_counts:torch.Tensor, 
+                  view_overlaps:torch.Tensor, 
+                  temperature:float=1.0,
+                  eps:float=1e-6,
+                  ) -> torch.Tensor: # (N,) camera indices 
+  # select initial camera with probability proportional to view count
+  inv_counts = 1 / (view_counts + eps)
+  index = torch.multinomial(inv_counts, 1)
+  overlaps = view_overlaps[index.squeeze(0)]
+
+  selected = index
+  # select other cameras incrementally proportional to overlap with already selected cameras
+  for i in range(batch_size - 1):
+    overlaps[selected] = 0
+    other_index = sample_with_temperature(overlaps * inv_counts, temperature=temperature, n=1)
+
+    overlaps += view_overlaps[other_index.squeeze(0)]
+    selected = torch.cat([selected, other_index], dim=0)
+
+  return selected
 
 
 
