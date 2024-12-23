@@ -8,7 +8,7 @@ from splat_trainer.config import VaryingFloat, eval_varying, schedule_lr
 from taichi_splatting import Rendering
 from .corrector import CorrectorConfig, Corrector
 
-from splat_trainer.util.lib_bilagrid import (
+from splat_trainer.color_corrector.util.lib_bilagrid import (
     BilateralGrid,
     color_affine_transform,
     fit_affine_colors,

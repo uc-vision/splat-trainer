@@ -154,15 +154,7 @@ class TCNNScene(GaussianScene):
 
     self.points = self.points[keep_mask].append_tensors(splits)
  
-  
 
-  def write_to(self, output_dir:Path):
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    write_gaussians(output_dir / 'point_cloud.ply', self.gaussians.apply(torch.detach), with_sh=False)
-
-    d = self.color_model.state_dict()
-    torch.save(d, output_dir / 'color_model.pth')
 
 
   def state_dict(self):
@@ -199,7 +191,8 @@ class TCNNScene(GaussianScene):
       image_idx = self.camera_table.camera_id(image_idx)
 
     glo_feature = self.color_table(image_idx)
-    return torch.sum(similarity.unsqueeze(1) * glo_feature, dim=0)
+    
+    return torch.sum(similarity * glo_feature, dim=0).unsqueeze(0)
 
 
   def eval_colors(self, point_indexes:torch.Tensor, camera_params:CameraParams, image_idx:Optional[int] = None):
@@ -207,6 +200,7 @@ class TCNNScene(GaussianScene):
       glo_feature = self.lookup_glo_feature(image_idx)
     else:
       glo_feature = self.interpolated_glo_feature(torch.inverse(camera_params.T_camera_world))
+
 
     with torch.autocast(device_type=self.device.type, dtype=torch.float16):
       return self.color_model(self.points.feature[point_indexes], self.points.position[point_indexes], 

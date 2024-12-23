@@ -5,6 +5,7 @@ import time
 from typing import Optional, Tuple
 from beartype import beartype
 from beartype.typing import List
+import cv2
 import torch
 import trimesh
 
@@ -12,8 +13,9 @@ import numpy as np
 import pyrender
 
 from splat_trainer.camera_table import camera_table
+from splat_trainer.util.misc import lerp
 from splat_trainer.util.pointcloud import PointCloud
-from splat_trainer.util.visibility import point_visibility
+from splat_trainer.visibility.query_points import point_visibility
 
 
 
@@ -147,7 +149,7 @@ def batch_transform(transforms, points):
   return transformed[..., 0].reshape([transforms.shape[0], -1, 4])[:, :, :3]
 
 
-def instance_meshes(mesh:trimesh.Trimesh, transforms:np.array):
+def instance_meshes(mesh:trimesh.Trimesh, transforms:np.array, colors:Optional[np.ndarray]=None):
   n = transforms.shape[0]
   
   vertices = batch_transform(transforms, mesh.vertices)
@@ -155,8 +157,14 @@ def instance_meshes(mesh:trimesh.Trimesh, transforms:np.array):
   offsets = np.arange(n).reshape(n, 1, 1) * mesh.vertices.shape[0] 
   faces = mesh.faces.reshape(1, -1, 3) + offsets
 
+  if colors is not None:
+    colors = np.repeat(colors, mesh.faces.shape[0], axis=0).reshape(-1, 3)
+
   mesh = trimesh.Trimesh(vertices=vertices.reshape(-1, 3), 
-                         faces=faces.reshape(-1, 3))
+                         faces=faces.reshape(-1, 3),
+                         face_colors=colors)
+  
+
   mesh.fix_normals()
   return mesh
 
@@ -186,21 +194,25 @@ def camera_marker(camera:Camera, scale=0.1):
   return mesh
     
 
-def make_camera_markers(cameras:camera_table.Cameras, scale:float=0.1, color=(255, 0, 0), wireframe=False):
+def make_camera_markers(cameras:camera_table.Cameras, scale:float=0.1, 
+                        color=(1.0, 1.0, 1.0), wireframe=False,
+                        colors:Optional[np.ndarray]=None):
 
     mesh = camera_marker(Camera.from_torch(cameras[0].item()), scale)
-    markers = instance_meshes(mesh, cameras.world_t_camera.cpu().numpy())
-    
-    # Convert color to 0-1 range and add metallic/roughness properties
-    color_normalized = tuple(c/255.0 for c in color) + (1.0,)
-    material = pyrender.MetallicRoughnessMaterial(
-        metallicFactor=0.0,     # Increased metallic effect
-        roughnessFactor=0.5,    # Made more reflective/less rough
-        baseColorFactor=color_normalized,
-        doubleSided=True,
-        wireframe=wireframe
-    )
-    
+    markers = instance_meshes(mesh, cameras.world_t_camera.cpu().numpy(), colors=colors)
+    material = None
+  
+    if colors is None:
+      # Convert color to 0-1 range and add metallic/roughness properties
+      color_normalized = tuple(c for c in color) + (1.0,)
+      material = pyrender.MetallicRoughnessMaterial(
+          metallicFactor=0.0,     # Increased metallic effect
+          roughnessFactor=0.5,    # Made more reflective/less rough
+          baseColorFactor=color_normalized,
+          doubleSided=True,
+          wireframe=wireframe
+        )
+      
     markers = pyrender.Mesh.from_trimesh(
         markers,
         smooth=False,
@@ -273,8 +285,9 @@ class CameraViewer:
 
     self.marker_size = marker_size
     self.camera_markers = make_camera_markers(cameras, self.marker_size, color=(128, 128, 128), wireframe=False)
-    self.scene.add(self.camera_markers)
-    self.scene.add(self.point_mesh)
+
+    self.camera_node = self.scene.add(self.camera_markers)
+    self.point_node = self.scene.add(self.point_mesh)
     
     light = pyrender.DirectionalLight(color=[1.0, 1.0, 1.0], intensity=1.0)
     self.scene.add(light)
@@ -286,7 +299,6 @@ class CameraViewer:
     viewport_size=(1920, 1080)
 
     self.scene.add_node(to_pyrender_camera(camera, viewport_size))
-    self.markers_node = None
 
     self.space_pressed = False
 
@@ -299,7 +311,7 @@ class CameraViewer:
         run_in_thread=True,
         registered_keys={
             ' ': self._on_space,  # Space character as string
-            'S': lambda: None     # block default behavior
+            'S': lambda _: None     # block default behavior
         }
     )
 
@@ -311,19 +323,33 @@ class CameraViewer:
     while not self.space_pressed and self.viewer.is_active:
       time.sleep(0.01)
 
+  def is_active(self):
+    return self.viewer.is_active
 
-  def highlight_cameras(self, mask:torch.Tensor):
-    # Create the new markers first
-    markers = make_camera_markers(self.cameras[mask], self.marker_size * 1.2, color=(255, 255, 0), wireframe=False)
-    new_node = pyrender.Node(mesh=markers, name='highlight_markers')
 
-    # Use the viewer's scene lock to safely modify the scene
+  def replace_node(self, mesh:pyrender.Mesh, existing_node:Optional[pyrender.Node]=None):
     with self.viewer.render_lock:
-        if self.markers_node is not None:
-            self.scene.remove_node(self.markers_node)
-        self.markers_node = new_node
-        self.scene.add_node(self.markers_node)
-    
+        if existing_node is not None:
+            self.scene.remove_node(existing_node)
+        return self.scene.add(mesh)
 
-  
+  def colorize_cameras(self, colors:torch.Tensor):
+    markers = make_camera_markers(self.cameras, self.marker_size, colors=colors.cpu().numpy())
+    self.camera_node = self.replace_node(markers, self.camera_node)
+
+  def show_batch_selection(self, view_overlaps:torch.Tensor, highlight_mask:Optional[torch.Tensor]=None):
+    # green to red color map
+
+    t = view_overlaps / view_overlaps.max()
+
+    green = torch.tensor([0.0, 1.0, 0.0], device=view_overlaps.device)
+    purple = torch.tensor([1.0, 0.0, 1.0], device=view_overlaps.device)
+
+    color_map = green.unsqueeze(0) * t.unsqueeze(1)
+    
+    if highlight_mask is not None:
+      color_map[highlight_mask, :] = purple
+        
+    self.colorize_cameras(color_map)
+
 

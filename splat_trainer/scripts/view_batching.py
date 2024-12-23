@@ -1,16 +1,22 @@
-
 from typing import List, Tuple
+
 import cv2
 import numpy as np
-from taichi_splatting import Gaussians3D
 import torch
+import torch.nn.functional as F
+from taichi_splatting import Gaussians3D
+
 from splat_trainer.dataset.dataset import CameraView
+from splat_trainer.scene.io import read_gaussians
 from splat_trainer.scripts.checkpoint import arguments, with_trainer
 from splat_trainer.trainer import Trainer
+
 from splat_trainer.util.misc import sh_to_rgb
 from splat_trainer.util.pointcloud import PointCloud
 from splat_trainer.util.view_cameras import CameraViewer
-from splat_trainer.util.visibility import foreground_points
+from splat_trainer.visibility import cluster
+from splat_trainer.visibility.query_points import foreground_points
+
 
 
 def display_image(title:str, image:np.ndarray):
@@ -37,6 +43,18 @@ def image_grid(images:List[np.ndarray], rows:int):
   image = torch.concatenate(rows, dim=1)
   image = image.cpu().numpy()
 
+
+
+def show_batch(window:str, trainer:Trainer, batch_indexes:torch.Tensor, rows:int=2):
+  filenames, images, indexes = transpose_batch(trainer.dataset.loader(batch_indexes.cpu().numpy()))
+
+  print(filenames)
+  print(indexes, batch_indexes)
+
+  grid = image_grid(images, rows)
+  display_image(window, grid)
+
+
 def sh_gaussians_to_cloud(gaussians:Gaussians3D) -> PointCloud:
   sh_features = gaussians.feature[:, :, 0] # N, 3
   positions = gaussians.position # N, 3
@@ -45,55 +63,58 @@ def sh_gaussians_to_cloud(gaussians:Gaussians3D) -> PointCloud:
   return PointCloud(positions, colors, batch_size=(positions.shape[0],))
 
 
-def show_batch():
+
+
+def show_batches():
   parser = arguments()
   parser.add_argument("--batch_size", type=int, default=8, help="Batch size to show")
   parser.add_argument("--rows", type=int, default=2, help="Number of rows to show")
   
   parser.add_argument("--temperature", type=float, default=1.0, help="Temperature for sampling")
   parser.add_argument("--show_images", action="store_true", help="Show images")
-  parser.add_argument("--show_cameras", action="store_true", help="Show cameras")
+  parser.add_argument("--recalculate", action="store_true", help="Recalculate visibility")
   args = parser.parse_args()
 
   assert args.batch_size % args.rows == 0, "Batch size must be divisible by number of rows"
 
 
   def f(trainer:Trainer):
-    gaussians = trainer.scene.to_sh_gaussians()
+    paths = trainer.paths()
+
+    if paths.point_cloud.exists():  
+      gaussians = read_gaussians(paths.point_cloud, with_sh=True)
+    else:
+      gaussians = trainer.scene.to_sh_gaussians()
+    gaussians = gaussians.to(trainer.device)
+
     point_cloud = sh_gaussians_to_cloud(gaussians)
     cameras = trainer.camera_table.cameras
 
     fg_mask = foreground_points(cameras, point_cloud.points)
 
-    if args.show_cameras:
-      camera_viewer = CameraViewer(cameras, point_cloud[fg_mask])
-
-    if args.show_images:
-      cv2.namedWindow("image", cv2.WINDOW_NORMAL)
-
-    result = trainer.evaluate()
-    print(result)
+    camera_viewer = CameraViewer(cameras, point_cloud[fg_mask])
 
 
-    while True:
-      batch_indexes = trainer.select_batch(args.batch_size, temperature=args.temperature)
-      filenames, images, indexes = transpose_batch(trainer.dataset.loader(batch_indexes.cpu().numpy()))
-
-      print(filenames)
-      print(indexes, batch_indexes)
+    view_overlaps = trainer.train_view_overlaps.clone()
+    view_overlaps.fill_diagonal_(0.0)
 
 
+    while camera_viewer.is_active():
+      batch_indexes = cluster.select_batch_grouped(args.batch_size, view_overlaps, temperature=args.temperature)
+  
 
-      if args.show_images:
-        grid = image_grid(images, args.rows)
-        display_image("image", grid)
+      master_index = batch_indexes[0]
+      master_overlaps = view_overlaps[master_index]
 
-      if camera_viewer is not None:
+      print(master_overlaps.max(0), master_index.item())
 
-        # cameras = trainer.camera_table[batch_indexes]
-        mask = torch.zeros(len(cameras), dtype=torch.bool)
-        mask[batch_indexes] = True
-        camera_viewer.highlight_cameras(mask)
-        camera_viewer.wait_key()
+      if args.temperature > 0:
+        master_overlaps = F.softmax(master_overlaps * 1/args.temperature, dim=0)
+
+      mask = torch.zeros(len(cameras), dtype=torch.bool)
+      mask[batch_indexes] = True
+
+      camera_viewer.colorize_cameras(master_overlaps.squeeze(0), mask)
+      camera_viewer.wait_key()
 
   with_trainer(f, args)

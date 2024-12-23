@@ -75,8 +75,13 @@ class ScanDataset(Dataset):
 
   @cached_property
   def _images(self) -> PreloadedImages:
+    """ Load all images into memory, DO NOT use this property unless you want to load the images """
     print("Loading images...")
     return preload_images(self.loaded_scan, self.cameras)
+
+  @property
+  def num_images(self) -> int:
+    return self.scan.num_frames * len(self.cameras)
 
   @beartype
   def loader(self, idx:np.ndarray, shuffle:bool=False) -> Sequence[CameraView]:
@@ -92,7 +97,7 @@ class ScanDataset(Dataset):
     return self.loader(self.val_idx)
   
   def camera_table(self) -> CameraRigTable:
-    labels = torch.zeros((len(self._images), ), dtype=torch.int32)
+    labels = torch.zeros((self.num_images, ), dtype=torch.int32)
 
     labels[self.train_idx] |= Label.Training.value
     labels[self.val_idx] |= Label.Validation.value

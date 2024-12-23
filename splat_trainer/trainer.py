@@ -4,6 +4,7 @@ from functools import cached_property, partial
 import heapq
 import json
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Callable, Tuple
 
 from tqdm import tqdm 
@@ -23,13 +24,14 @@ from splat_trainer.camera_table.camera_table import Camera, Label, camera_adjace
 from splat_trainer.color_corrector.nil_corrector import NilCorrector
 from splat_trainer.controller.controller import Controller
 from splat_trainer.logger.logger import CompositeLogger
+from splat_trainer.scene.io import read_gaussians, write_gaussians
 from splat_trainer.scene.scene import GaussianScene
 from splat_trainer.config import VaryingFloat, VaryingInt, eval_varying
 from splat_trainer.util.pointcloud import PointCloud
-from splat_trainer.util.lib_bilagrid import fit_affine_colors
+from splat_trainer.color_corrector.util.lib_bilagrid import fit_affine_colors
 
 
-from splat_trainer.util.visibility import crop_cloud, random_cloud
+from splat_trainer.visibility.query_points import crop_cloud, random_cloud
 from taichi_splatting import Gaussians3D, RasterConfig, Rendering
 from taichi_splatting.perspective import CameraParams
 
@@ -41,7 +43,8 @@ from splat_trainer.logger import Logger
 from splat_trainer.scene.sh_scene import  GaussianSceneConfig
 from splat_trainer.util.colorize import colorize, get_cv_colormap
 from splat_trainer.util.containers import transpose_rows
-from splat_trainer.util.misc import CudaTimer, cluster_points, next_multiple, plot_visibility, select_batch_grouped, strided_indexes, select_batch, vis_vector
+from splat_trainer.util.misc import CudaTimer, next_multiple, strided_indexes
+from splat_trainer.visibility import cluster, query_points
 
 from splat_trainer.controller import ControllerConfig
 from splat_trainer.color_corrector import CorrectorConfig, Corrector
@@ -151,7 +154,9 @@ class Trainer(Dispatcher):
                 controller:Controller,
                 dataset:Dataset,              
                 logger:Logger,
-                step = 0
+                step = 0,
+                view_overlaps:Optional[torch.Tensor] = None,
+                view_counts:Optional[torch.Tensor] = None
       ):
 
     self.device = torch.device(config.device)
@@ -161,8 +166,6 @@ class Trainer(Dispatcher):
     self.dataset = dataset
 
     self.camera_table = dataset.camera_table().to(self.device)
-    self.train_view_overlaps = camera_adjacency_matrix(self.camera_table.with_label(Label.Training))
-    self.train_view_overlaps.fill_diagonal_(0)
 
     self.config = config
     self.logger = CompositeLogger(logger)
@@ -178,8 +181,16 @@ class Trainer(Dispatcher):
     self.pbar = None
 
     n = self.camera_table.count_label(label=Label.Training)
-    
-    self.view_counts: torch.Tensor = torch.zeros((n,), device=self.device)
+    if view_counts is None:
+      self.view_counts: torch.Tensor = torch.zeros((n,), device=self.device)
+    else:
+      self.view_counts = view_counts.to(self.device)
+
+    if view_overlaps is None:
+      self.train_view_overlaps = camera_adjacency_matrix(self.camera_table.with_label(Label.Training))
+    else:
+      self.train_view_overlaps = view_overlaps.to(self.device)
+
 
   
   def add_logger(self, logger:Logger):
@@ -251,21 +262,6 @@ class Trainer(Dispatcher):
 
     return Trainer(config, scene, color_corrector, controller, dataset, logger)
       
-  @staticmethod
-  def from_state_dict(config:TrainConfig, dataset:Dataset, logger:Logger, state_dict:dict):
-    device = torch.device(config.device)
-    camera_table = dataset.camera_table().to(device)
-
-    scene = config.scene.from_state_dict(state_dict['scene'], camera_table)
-    controller = config.controller.from_state_dict(state_dict['controller'], scene)
-
-    if 'color_corrector' in state_dict:
-      color_corrector = config.color_corrector.from_state_dict(state_dict['color_corrector'], device=config.device)
-    else:
-      color_corrector = NilCorrector(config.device)
-
-    return Trainer(config, scene, color_corrector, controller, dataset, logger, step=state_dict['step'])
-
 
   def warmup(self):
     # workaround various issues with thread safety (e.g. Dynamo) by running a few steps
@@ -281,38 +277,75 @@ class Trainer(Dispatcher):
         loss, losses = self.losses(rendering, torch.zeros_like(rendering.image, device=self.device))
         loss.backward()
     
+  @staticmethod
+  def from_state_dict(config:TrainConfig, dataset:Dataset, logger:Logger, state_dict:dict):
+    device = torch.device(config.device)
+    camera_table = dataset.camera_table().to(device)
 
+    scene = config.scene.from_state_dict(state_dict['scene'], camera_table)
+    controller = config.controller.from_state_dict(state_dict['controller'], scene)
+
+    if 'color_corrector' in state_dict:
+      color_corrector = config.color_corrector.from_state_dict(state_dict['color_corrector'], device=config.device)
+    else:
+      color_corrector = NilCorrector(config.device)
+
+    return Trainer(config, scene, color_corrector, controller, dataset, logger, 
+                   step=state_dict['step'],
+                   view_overlaps=state_dict.get('view_overlaps', None),
+                   view_counts=state_dict.get('view_counts', None))
 
   def state_dict(self):
     return dict(step=self.step, 
                 scene=self.scene.state_dict(), 
                 controller=self.controller.state_dict(),
-                color_corrector=self.color_corrector.state_dict())
+                color_corrector=self.color_corrector.state_dict(),
+                
+                view_overlaps=self.train_view_overlaps,
+                view_counts=self.view_counts)
   
 
   @property
   def output_path(self):
     return Path.cwd() 
 
+  def paths(self, step:Optional[int]=None):
+
+    if step is None:
+      step = self.step
+
+    paths = dict(
+      checkpoint = self.output_path / "checkpoint" / f"checkpoint_{step}.pt",
+      point_cloud = self.output_path / "point_cloud" / f"iteration_{step}" / "point_cloud.ply",
+      cameras = self.output_path / "checkpoint" / f"cameras.json"
+    )
+
+    for path in paths.values():
+      path.parent.mkdir(parents=True, exist_ok=True)
+
+    return SimpleNamespace(**paths)
+  
+  def print(self, str:str):
+    if self.pbar is not None:
+      self.pbar.write(str)
+    else:
+      print(str)
+
   def write_checkpoint(self):
-    iteration_path = self.output_path / f"point_cloud/iteration_{self.step}"
-    iteration_path.mkdir(parents=True, exist_ok=True)
-
-    self.scene.write_to(iteration_path)
-
-    checkpoint_path = self.output_path / "checkpoint"
-    checkpoint_path.mkdir(parents=True, exist_ok=True)
+    paths = self.paths()
+    write_gaussians(paths.point_cloud, self.scene.to_sh_gaussians(), with_sh=True)  
     
-    with open(checkpoint_path / "cameras.json", "w") as f:
+    with open(paths.cameras, "w") as f:
       json.dump(camera_json(self.camera_table), f)
 
-    path = checkpoint_path / f"checkpoint_{self.step}.pt"
-    path.parent.mkdir(parents=True, exist_ok=True)
     checkpoint = self.state_dict()
-    torch.save(checkpoint, path)
+    torch.save(checkpoint, paths.checkpoint)
 
-    self.pbar.write(f"Checkpoint saved to {colored(path, 'light_green')}")
+    self.print(f"Checkpoint saved to {colored(paths.checkpoint, 'light_green')}")
 
+  def load_cloud(self, step:Optional[int]=None) -> Gaussians3D:
+    paths = self.paths(step)
+    return read_gaussians(paths.point_cloud)
 
   @property
   def t(self):
@@ -381,7 +414,6 @@ class Trainer(Dispatcher):
 
 
 
-
   @beartype
   def evaluate_image(self, filename:str, camera_params:CameraParams, image_idx:int, source_image:torch.Tensor, 
                      correct_image:Optional[ColorCorrect] = None):
@@ -396,7 +428,6 @@ class Trainer(Dispatcher):
 
 
 
-
   def evaluate_dataset(self, name, data, 
                        correct_image:Optional[ColorCorrect] = None, 
                        log_count:int=0, worst_count:int=0):
@@ -407,10 +438,8 @@ class Trainer(Dispatcher):
 
     worst = []
     log_indexes = strided_indexes(log_count, len(data)) 
-    clusters = cluster_points(position = self.scene.points['position'], 
-                                  num_clusters = min(self.config.vis_clusters, self.scene.num_points))
+    visibility_cluster = cluster.ClusteredVisibility(self.scene.points['position'], self.config.vis_clusters)
 
-    visibility = []
 
     pbar = tqdm(total=len(data), desc=f"rendering {name}", leave=False)
     for i, image_data in enumerate(self.iter_data(data)):
@@ -423,7 +452,7 @@ class Trainer(Dispatcher):
       add_worst(worst, (-eval.metrics['psnr'], eval))    
       rows[eval.filename] = eval.metrics
 
-      visibility.append(vis_vector(eval.rendering, clusters, self.config.vis_clusters))
+      visibility_cluster.add_view(i, eval.rendering)
       
       pbar.update(1)
       pbar.set_postfix(**{k:f"{v:.3f}" for k, v in eval.metrics.items()})
@@ -438,14 +467,11 @@ class Trainer(Dispatcher):
       self.log_value(f"eval_{name}/{k}", np.mean(v))
       self.log_histogram(f"eval_{name}/{k}_hist", torch.tensor(v))
 
-    visibility = torch.stack(visibility, dim=0)   
-    visibility /= visibility.max(dim=1).values.mean()
+    view_overlaps = visibility_cluster.view_overlaps()
 
-    view_overlaps = (visibility @ visibility.T).to_dense().fill_diagonal_(0.0)
-    # view_overlaps = sinkhorn(view_overlaps, 10)
-
-    avg_max = view_overlaps.max(dim=1).values.median()
-    self.log_colormapped(f"eval_{name}/view_overlaps", view_overlaps / avg_max)
+    vis_overlaps = view_overlaps.clone().fill_diagonal_(0.0)
+    avg_max = vis_overlaps.max(dim=1).values.median()
+    self.log_colormapped(f"eval_{name}/view_overlaps", vis_overlaps / avg_max)
 
     return {f"{name}_psnr": float(np.mean(totals['psnr']))}, view_overlaps
 
@@ -462,6 +488,7 @@ class Trainer(Dispatcher):
         correct_image=self.evaluate_trained,
         log_count=self.config.num_logged_images, 
         worst_count=self.config.log_worst_images)
+    
     
     val, _ = self.evaluate_dataset("val", self.dataset.val(), 
       log_count=self.config.num_logged_images, worst_count=self.config.log_worst_images)
@@ -481,8 +508,10 @@ class Trainer(Dispatcher):
     if temperature is None:
       temperature = self.config.overlap_temperature
 
-    train_idx = select_batch_grouped(batch_size, self.view_counts + 1, 
-          self.train_view_overlaps, temperature)
+    weighting = 1 / (self.view_counts + 1)
+
+    train_idx = cluster.select_batch(batch_size, 
+          self.train_view_overlaps, temperature, weighting=weighting)
     self.view_counts[train_idx] += 1
 
     # Lookup camera table to get camera indexes 

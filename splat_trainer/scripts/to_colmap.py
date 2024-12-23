@@ -19,7 +19,7 @@ from scipy.spatial.transform import Rotation as R
 
 import torch
 from splat_trainer.util.pointcloud import PointCloud
-from splat_trainer.util.visibility import random_cloud
+from splat_trainer.visibility.query_points import random_cloud
 
 from multiprocessing.pool import ThreadPool
 

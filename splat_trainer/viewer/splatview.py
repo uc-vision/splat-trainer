@@ -18,7 +18,7 @@ from splatview.util import with_traceback
 
 from taichi_splatting.perspective import CameraParams
 
-from splat_trainer.camera_table.camera_table import Cameras
+from splat_trainer.camera_table.camera_table import Camera, Cameras
 from splat_trainer.trainer import Trainer, TrainerState
 
 from .viewer import ViewerConfig, Viewer
@@ -122,8 +122,8 @@ class SplatviewViewer(Viewer):
     return self.camera_slider.value
   
   @property
-  def current_camera(self) -> Cameras:
-    return self.trainer.camera_table.cameras[self.current_camera_idx]
+  def current_camera(self) -> Camera:
+    return self.trainer.camera_table.cameras[self.current_camera_idx].item()
   
   @with_traceback
   def on_set_zoom(self, event: viser.GuiEvent[viser.GuiSliderHandle]):
@@ -182,7 +182,6 @@ class SplatviewViewer(Viewer):
 
     camera = camera.zoomed(self.zoom)
     projection = camera.projection
-
     
     near, far = self.current_camera.depth_range
 

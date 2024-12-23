@@ -77,8 +77,9 @@ class ColorModel(torch.nn.Module):
                 cam_pos:torch.Tensor,            # 3
                 glo_feature:torch.Tensor         # 1, glo_features
               ):
+    
 
-    glo_feature = glo_feature.expand(positions.shape[0], -1)
+    glo_feature = glo_feature.expand(positions.shape[0], glo_feature.shape[1])
     feature = torch.cat([point_features, glo_feature], dim=1)
 
     dir = F.normalize(positions.detach() - cam_pos.unsqueeze(0), dim=1)

@@ -12,11 +12,7 @@ def layer(in_features: int, out_features: int, norm = nn.Identity, activation = 
       nn.init.normal_(m.weight, std=out_scale)
       nn.init.zeros_(m.bias)
 
-    return torch.nn.Sequential(
-    torch.nn.Linear(in_features, out_features),
-    activation(),
-    norm(out_features)
-  )
+    return torch.nn.Sequential(m, activation(), norm(out_features))
 
 
 

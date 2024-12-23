@@ -5,6 +5,7 @@ import math
 from os import path
 from omegaconf import OmegaConf 
 
+import termcolor
 from wonderwords import RandomWord
 from pathlib import Path
 from typing import Generic, Mapping, Protocol, Sequence, Tuple, TypeVar, runtime_checkable
@@ -162,6 +163,14 @@ def target(name:str, **kwargs):
   })
 
 
+def make_overrides(**kwargs):
+  overrides = []
+  for k, v in kwargs.items():
+    overrides.append(f"{k}={v if v is not None else 'null'}")
+  return overrides
+
+
+
 def add_resolvers():
     OmegaConf.register_new_resolver("dirname", path.dirname)
     OmegaConf.register_new_resolver("basename", path.basename)
@@ -235,17 +244,12 @@ def number_folders(path:Path, name:str):
   return path / f"{name}_{i}"
 
 @beartype
-def setup_project(project_name:str, run_name:str | None, base_path:str | None) -> Tuple[Path, str]:
-  if base_path is None:
-    base_path = Path.cwd() / project_name
-  else:
-    base_path = Path(base_path) / project_name
+def setup_project(project_name:str, run_name:str | None, base_path:str | None) -> Tuple[Path, Path, str]:
+    base_path = Path(base_path) if base_path is not None else Path.cwd()
 
-  base_path.mkdir(parents=True, exist_ok=True)
+    run_name = run_name or random_folder(base_path)
+    run_path = base_path / project_name / run_name
+    run_path.mkdir(parents=True, exist_ok=True)
 
-  run_name = run_name or random_folder(base_path)
-  run_path = base_path / run_name
-  run_path.mkdir(parents=True, exist_ok=True)
-
-
-  return run_path, run_name
+    print(f"Running {termcolor.colored(run_name, 'light_yellow')} in {termcolor.colored(run_path, 'light_green')}")
+    return base_path, run_path, run_name

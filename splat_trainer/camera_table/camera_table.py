@@ -15,6 +15,8 @@ from torch import nn
 from splat_trainer.camera_table.pose_table import PoseTable, RigPoseTable
 from splat_trainer.util.transforms import join_rt, split_rt
 
+from taichi_splatting.perspective import CameraParams
+
 from beartype import beartype
 
 class Label(Flag):
@@ -85,6 +87,8 @@ class Camera:
   frame_idx: int
   label: Label
 
+  image_name: str
+
   @property
   def device(self):
     return self.camera_t_world.device
@@ -129,6 +133,23 @@ class Camera:
   @property
   def has_label(self, label:Label) -> bool:
     return bool(self.label & label)
+  
+  def resized(self, image_scale:float) -> 'Camera':
+    return replace(self, 
+                   intrinsics=self.intrinsics * image_scale,
+                   image_size=(int(self.image_size[0] * image_scale), int(self.image_size[1] * image_scale)))
+
+  @beartype
+  def to_camera_params(self) -> CameraParams:
+    return CameraParams(
+      projection=self.intrinsics,
+      T_camera_world=self.camera_t_world,
+
+      near_plane=self.depth_range[0],
+      far_plane=self.depth_range[1],  
+      image_size=self.image_size,
+    )
+
 
 
 
@@ -142,6 +163,8 @@ class Cameras:
   camera_idx: torch.Tensor     # (..., 1) int
   frame_idx: torch.Tensor      # (..., 1) int
   labels: torch.Tensor         # (..., 1) int
+
+  image_names: List[str]
 
   @property
   def device(self):
@@ -192,7 +215,8 @@ class Cameras:
       depth_range=tuple(self.projection.depth_range.squeeze(0).cpu().tolist()),
       camera_idx=self.camera_idx.item(),
       frame_idx=self.frame_idx.item(),
-      label=Label(self.labels.item())
+      label=Label(self.labels.item()),
+      image_name=self.image_names[0]
     )
 
 
@@ -204,10 +228,6 @@ class CameraTable(nn.Module, metaclass=abc.ABCMeta):
     raise NotImplementedError
   
 
-  @property
-  @abstractmethod
-  def image_name(self, image_idx:int) -> str:
-    raise NotImplementedError
   
   @property
   def num_projections(self) -> int:
@@ -237,6 +257,11 @@ class CameraTable(nn.Module, metaclass=abc.ABCMeta):
     raise NotImplementedError
   
   @property
+  @abstractmethod
+  def image_names(self) -> List[str]:
+    raise NotImplementedError
+  
+  @property
   def cameras(self) -> Cameras:
     return self.forward(torch.arange(self.num_images))
   
@@ -258,11 +283,12 @@ class CameraTable(nn.Module, metaclass=abc.ABCMeta):
     return self.has_label(label).shape[0]
   
 
+
   @beartype
-  def __getitem__(self, image_idx:int | torch.Tensor) -> Camera | Cameras:
+  def __getitem__(self, image_idx:int | torch.Tensor) -> Cameras:
     if isinstance(image_idx, int):
       image_idx = torch.tensor([image_idx], device=self.device)
-      return self.forward(image_idx).item()
+      return self.forward(image_idx)
     else:
       return self.forward(image_idx)
 
@@ -343,6 +369,8 @@ class CameraRigTable(CameraTable):
 
     self._camera_poses = RigPoseTable(
       rig_t_world=rig_t_world, camera_t_rig=camera_t_rig)
+    self._camera_poses.requires_grad_(False)
+
     self._image_names = image_names
     self.register_buffer("_labels", labels)
 
@@ -361,7 +389,8 @@ class CameraRigTable(CameraTable):
       camera_idx=camera_idx,
       frame_idx=frame_idx,
       batch_size=image_idx.shape,
-      labels=self._labels[image_idx]
+      labels=self._labels[image_idx],
+      image_names=[self._image_names[i] for i in image_idx]
     )
 
 
@@ -371,8 +400,8 @@ class CameraRigTable(CameraTable):
     return self._camera_poses.num_frames * self._camera_poses.num_cameras
   
   @property
-  def image_name(self, image_idx:int) -> str:
-    return self._image_names[image_idx]
+  def image_names(self) -> List[str]:
+    return self._image_names
 
 
   @property
@@ -415,7 +444,13 @@ class MultiCameraTable(CameraTable):
 
     self.register_buffer("_camera_idx", camera_idx)
     self._camera_t_world = PoseTable(camera_t_world)
+    self._camera_t_world.requires_grad_(False)
+
+
+    self._image_names = image_names
     self.register_buffer("_labels", labels)
+
+
 
   @beartype
   def forward(self, image_idx:torch.Tensor) -> Cameras:
@@ -428,7 +463,8 @@ class MultiCameraTable(CameraTable):
       camera_idx=cam_idx,
       frame_idx=image_idx,
       batch_size=image_idx.shape,
-      labels=self._labels[image_idx]
+      labels=self._labels[image_idx],
+      image_names=[self._image_names[i] for i in image_idx]
     )
 
 
@@ -456,9 +492,9 @@ def camera_json(camera_table:CameraTable):
     camera = camera_table[i]
 
     r, t = split_rt(torch.linalg.inv(camera.camera_t_world))
-    fx, fy, cx, cy = camera.projection.intrinsics.cpu().tolist()
-    near, far = camera.projection.depth_range.cpu().tolist()
-    width, height = camera.image_sizes.cpu().tolist()
+    fx, fy, cx, cy = camera.intrinsics.cpu().tolist()
+    near, far = camera.depth_range
+    width, height = camera.image_size
 
     return {
       "id": i,
@@ -470,9 +506,12 @@ def camera_json(camera_table:CameraTable):
       "height": height,
       "near": near,
       "far": far,
+      "img_name": camera.image_name
     }
 
   return [export_camera(i) for i in range(len(camera_table))]
+
+
 
 
 

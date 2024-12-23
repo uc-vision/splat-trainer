@@ -39,9 +39,6 @@ class GaussianScene(metaclass=ABCMeta):
     """ Return controller state for checkpointing """
     raise NotImplementedError
 
-  @abstractmethod
-  def write_to(self, output_dir:str):
-    raise NotImplementedError
   
   @abstractmethod
   def to_sh_gaussians(self) -> Gaussians3D:

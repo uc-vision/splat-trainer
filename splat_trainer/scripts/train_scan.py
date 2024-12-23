@@ -5,6 +5,7 @@ import numpy as np
 from omegaconf import OmegaConf
 from taichi_splatting import TaichiQueue
 from termcolor import colored
+import termcolor
 from splat_trainer.logger.logger import Logger
 from splat_trainer import config
 
@@ -15,7 +16,7 @@ import os
 
 from splat_trainer.viewer.viewer import Viewer
 
-config.add_resolvers()
+
 
 
 
@@ -143,19 +144,23 @@ def cfg_from_args():
     overrides.append("trainer.antialias=true")
 
   # Output group
-  if args.wandb is not None:
+  if args.wandb is True:
     overrides.append("logger=wandb")
 
   if args.checkpoint:
     overrides.append("trainer.save_checkpoints=true")
   
-  run_path, args.run = config.setup_project(args.project, args.run, base_path=args.base_path)
+  args.base_path, run_path, args.run = config.setup_project(args.project, args.run, base_path=args.base_path)
   os.chdir(str(run_path))
 
-  overrides += [f"run_name={args.run}", f"project={args.project}", f"base_path={args.base_path}"]
+  overrides += config.make_overrides(run_name=args.run, project=args.project, base_path=args.base_path)
+  config.add_resolvers()
 
+  
   hydra.initialize(config_path="../config", version_base="1.2")
   cfg = hydra.compose(config_name="config", overrides=overrides)
+
+  print(f"{termcolor.colored(cfg.base_path, 'red')}", type(cfg.base_path))
 
   if args.show_config:
     print(config.pretty(cfg))
