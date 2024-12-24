@@ -75,7 +75,8 @@ class Camera:
 
   @property
   def fov(self) -> Tuple[float, float]:
-    return tuple(2.0 * np.arctan(0.5 * size / f) for f, size in zip(self.intrinsics[:2], self.image_size))
+    return tuple(2.0 * np.arctan(0.5 * size / f) 
+                 for f, size in zip(self.intrinsics[:2], self.image_size))
   
   @property
   def intrinsic_matrix(self) -> np.ndarray:

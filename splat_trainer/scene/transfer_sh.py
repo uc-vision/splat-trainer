@@ -79,7 +79,7 @@ def transfer_sh(eval_colors:Callable[[torch.Tensor, CameraParams, int], torch.Te
     for _ in range(epochs):
       idx = train_idx[torch.randperm(train_idx.shape[0], device=train_idx.device)]
       for i in idx.cpu().tolist():
-        camera_params = camera_table[i].resized(0.5).to_camera_params()
+        camera_params = camera_table[i].item().resized(0.5).to_camera_params()
         yield i, camera_params
 
   pbar = tqdm(iter(), total=train_idx.shape[0] * epochs, desc="Transferring SH colors")

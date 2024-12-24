@@ -489,7 +489,7 @@ class MultiCameraTable(CameraTable):
 
 def camera_json(camera_table:CameraTable):
   def export_camera(i):
-    camera = camera_table[i]
+    camera = camera_table[i].item()
 
     r, t = split_rt(torch.linalg.inv(camera.camera_t_world))
     fx, fy, cx, cy = camera.intrinsics.cpu().tolist()
