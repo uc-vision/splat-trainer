@@ -66,6 +66,7 @@ checkpoint-write-sh = "splat_trainer.scripts.checkpoint:write_sh_gaussians"
 
 checkpoint-show-batch = "splat_trainer.scripts.view_batching:main"
 checkpoint-cluster-views = "splat_trainer.scripts.cluster_views:main"
+checkpoint-view-clusters = "splat_trainer.scripts.view_clusters:main"
 
 
 [tool.setuptools.package-data]

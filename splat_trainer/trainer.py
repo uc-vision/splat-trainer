@@ -93,7 +93,7 @@ class TrainConfig:
   aspect_reg: VaryingFloat = 0.01
 
   # view similarity
-  vis_clusters: int = 8192 # number of point clusters to use
+  vis_clusters: int = 1024 # number of point clusters to use
   overlap_temperature: float = 1.0
 
 
@@ -155,7 +155,7 @@ class Trainer(Dispatcher):
                 dataset:Dataset,              
                 logger:Logger,
                 step = 0,
-                view_overlaps:Optional[torch.Tensor] = None,
+                view_clustering:Optional[cluster.ViewClustering] = None,
                 view_counts:Optional[torch.Tensor] = None
       ):
 
@@ -186,11 +186,7 @@ class Trainer(Dispatcher):
     else:
       self.view_counts = view_counts.to(self.device)
 
-    if view_overlaps is None:
-      self.train_view_overlaps = camera_adjacency_matrix(self.camera_table.with_label(Label.Training))
-    else:
-      self.train_view_overlaps = view_overlaps.to(self.device)
-
+    self.view_clustering = view_clustering
 
   
   def add_logger(self, logger:Logger):
@@ -290,18 +286,22 @@ class Trainer(Dispatcher):
     else:
       color_corrector = NilCorrector(config.device)
 
+    view_clustering = cluster.ViewClustering.from_state_dict(state_dict['view_clustering'])
+
     return Trainer(config, scene, color_corrector, controller, dataset, logger, 
                    step=state_dict['step'],
-                   view_overlaps=state_dict.get('view_overlaps', None),
+                   view_clustering=view_clustering,
                    view_counts=state_dict.get('view_counts', None))
 
   def state_dict(self):
+    assert self.view_clustering is not None, "View clustering not initialized, call evaluate() first"
+
     return dict(step=self.step, 
                 scene=self.scene.state_dict(), 
                 controller=self.controller.state_dict(),
                 color_corrector=self.color_corrector.state_dict(),
                 
-                view_overlaps=self.train_view_overlaps,
+                view_clustering=self.view_clustering.state_dict(),
                 view_counts=self.view_counts)
   
 
@@ -317,7 +317,8 @@ class Trainer(Dispatcher):
     paths = dict(
       checkpoint = self.output_path / "checkpoint" / f"checkpoint_{step}.pt",
       point_cloud = self.output_path / "point_cloud" / f"iteration_{step}" / "point_cloud.ply",
-      cameras = self.output_path / "checkpoint" / f"cameras.json"
+      cameras = self.output_path / "checkpoint" / f"cameras.json",
+      workspace = self.output_path 
     )
 
     for path in paths.values():
@@ -430,7 +431,7 @@ class Trainer(Dispatcher):
 
   def evaluate_dataset(self, name, data, 
                        correct_image:Optional[ColorCorrect] = None, 
-                       log_count:int=0, worst_count:int=0):
+                       log_count:int=0, worst_count:int=0) -> Tuple[dict, cluster.ViewClustering]:
     if len(data) == 0:
       return {}, None
 
@@ -438,8 +439,8 @@ class Trainer(Dispatcher):
 
     worst = []
     log_indexes = strided_indexes(log_count, len(data)) 
-    visibility_cluster = cluster.PointClusters(self.scene.points['position'], self.config.vis_clusters)
-
+    point_clusters = cluster.PointClusters(self.scene.points['position'], self.config.vis_clusters)
+    vis_features = []
 
     pbar = tqdm(total=len(data), desc=f"rendering {name}", leave=False)
     for i, image_data in enumerate(self.iter_data(data)):
@@ -452,7 +453,7 @@ class Trainer(Dispatcher):
       add_worst(worst, (-eval.metrics['psnr'], eval))    
       rows[eval.filename] = eval.metrics
 
-      visibility_cluster.add_view(i, eval.rendering)
+      vis_features.append(point_clusters.rendering_features(eval.rendering))
       
       pbar.update(1)
       pbar.set_postfix(**{k:f"{v:.3f}" for k, v in eval.metrics.items()})
@@ -467,13 +468,9 @@ class Trainer(Dispatcher):
       self.log_value(f"eval_{name}/{k}", np.mean(v))
       self.log_histogram(f"eval_{name}/{k}_hist", torch.tensor(v))
 
-    view_overlaps = visibility_cluster.view_overlaps()
-
-    vis_overlaps = view_overlaps.clone().fill_diagonal_(0.0)
-    avg_max = vis_overlaps.max(dim=1).values.median()
-    self.log_colormapped(f"eval_{name}/view_overlaps", vis_overlaps / avg_max)
-
-    return {f"{name}_psnr": float(np.mean(totals['psnr']))}, view_overlaps
+    view_clusters = cluster.ViewClustering(point_clusters, torch.stack(vis_features))
+    
+    return {f"{name}_psnr": float(np.mean(totals['psnr']))}, view_clusters
 
 
   def evaluate_trained(self, rendering, source_image, image_idx):
@@ -484,7 +481,7 @@ class Trainer(Dispatcher):
 
 
   def evaluate(self):
-    train, self.train_view_overlaps = self.evaluate_dataset("train", self.dataset.train(shuffle=False), 
+    train, self.view_clustering = self.evaluate_dataset("train", self.dataset.train(shuffle=False), 
         correct_image=self.evaluate_trained,
         log_count=self.config.num_logged_images, 
         worst_count=self.config.log_worst_images)
@@ -504,14 +501,15 @@ class Trainer(Dispatcher):
   def select_batch(self, batch_size:int, temperature:Optional[float]=None) -> torch.Tensor:
     """ Select a batch of camera indexes from the training set.
     """
+    if self.view_clustering is None:
+      raise ValueError("View clustering not initialized, call evaluate() first")
 
     if temperature is None:
       temperature = self.config.overlap_temperature
 
     weighting = 1 / (self.view_counts + 1)
 
-    train_idx = cluster.select_batch(batch_size, 
-          self.train_view_overlaps, temperature, weighting=weighting)
+    train_idx = self.view_clustering.select_batch(batch_size, temperature, weighting=weighting)
     self.view_counts[train_idx] += 1
 
     # Lookup camera table to get camera indexes 

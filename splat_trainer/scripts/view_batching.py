@@ -45,6 +45,9 @@ def image_grid(images:List[np.ndarray], rows:int):
 
 
 def show_batch(window:str, trainer:Trainer, batch_indexes:torch.Tensor, rows:int=2):
+  assert batch_indexes.shape[0] % rows == 0, "Batch size must be divisible by number of rows"
+
+
   filenames, images, indexes = transpose_batch(trainer.dataset.loader(batch_indexes.cpu().numpy()))
 
   print(filenames)
@@ -74,7 +77,6 @@ def main():
   parser.add_argument("--recalculate", action="store_true", help="Recalculate visibility")
   args = parser.parse_args()
 
-  assert args.batch_size % args.rows == 0, "Batch size must be divisible by number of rows"
 
 
   def f(trainer:Trainer):
@@ -96,7 +98,7 @@ def main():
 
 
     view_overlaps = trainer.train_view_overlaps.clone()
-    view_overlaps.fill_diagonal_(0.0)
+    # view_overlaps.fill_diagonal_(0.0)
 
 
     while camera_viewer.is_active():
@@ -110,7 +112,7 @@ def main():
       print(master_overlaps.max(0), master_index.item())
 
       if args.temperature > 0:
-        master_overlaps = F.softmax(master_overlaps * 1/args.temperature, dim=0)
+        master_overlaps = F.softmax(master_overlaps.log() * 1/args.temperature, dim=0)
 
       camera_viewer.show_batch_selection(master_overlaps.squeeze(0), batch_indexes)
       camera_viewer.wait_key()

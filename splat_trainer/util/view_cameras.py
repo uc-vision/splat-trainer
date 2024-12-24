@@ -150,7 +150,9 @@ def batch_transform(transforms, points):
   return transformed[..., 0].reshape([transforms.shape[0], -1, 4])[:, :, :3]
 
 
-def instance_meshes(mesh:trimesh.Trimesh, transforms:np.array, colors:Optional[np.ndarray]=None):
+def instance_meshes(mesh:trimesh.Trimesh, transforms:np.array, 
+                    face_colors:Optional[np.ndarray]=None,
+                    vertex_colors:Optional[np.ndarray]=None):
   n = transforms.shape[0]
   
   vertices = batch_transform(transforms, mesh.vertices)
@@ -158,12 +160,16 @@ def instance_meshes(mesh:trimesh.Trimesh, transforms:np.array, colors:Optional[n
   offsets = np.arange(n).reshape(n, 1, 1) * mesh.vertices.shape[0] 
   faces = mesh.faces.reshape(1, -1, 3) + offsets
 
-  if colors is not None:
-    colors = np.repeat(colors, mesh.faces.shape[0], axis=0).reshape(-1, 3)
+  if face_colors is not None:
+    face_colors = np.repeat(face_colors, mesh.faces.shape[0], axis=0).reshape(-1, 3)
+
+  if vertex_colors is not None:
+    vertex_colors = np.repeat(vertex_colors, mesh.vertices.shape[0], axis=0).reshape(-1, 3)
 
   mesh = trimesh.Trimesh(vertices=vertices.reshape(-1, 3), 
                          faces=faces.reshape(-1, 3),
-                         face_colors=colors)
+                         face_colors=face_colors,
+                         vertex_colors=vertex_colors)
   
 
   mesh.fix_normals()
@@ -195,34 +201,25 @@ def camera_marker(camera:Camera, scale=0.1):
   return mesh
     
 
-def make_camera_markers(cameras:camera_table.Cameras, scale:float=0.1, 
-                        color=(1.0, 1.0, 1.0), wireframe=False,
-                        colors:Optional[np.ndarray]=None):
+
+def make_camera_markers(cameras:camera_table.Cameras, 
+                        colors:np.ndarray | tuple[float, float, float], scale:float=0.1):
+    
+    if isinstance(colors, tuple):
+      colors = np.array([colors]).reshape(1, 3).repeat(cameras.shape[0], axis=0)
 
     mesh = camera_marker(Camera.from_torch(cameras[0].item()), scale)
-    markers = instance_meshes(mesh, cameras.world_t_camera.cpu().numpy(), colors=colors)
-    material = None
-  
-    if colors is None:
-      # Convert color to 0-1 range and add metallic/roughness properties
-      color_normalized = tuple(c for c in color) + (1.0,)
-      material = pyrender.MetallicRoughnessMaterial(
-          metallicFactor=0.0,     # Increased metallic effect
-          roughnessFactor=0.5,    # Made more reflective/less rough
-          baseColorFactor=color_normalized,
-          doubleSided=True,
-          wireframe=wireframe
-        )
-      
+    markers = instance_meshes(mesh, cameras.world_t_camera.cpu().numpy(), 
+                              face_colors=colors)
+
     markers = pyrender.Mesh.from_trimesh(
-        markers,
-        smooth=False,
-        material=material,
-        wireframe=wireframe
+        markers, smooth=False,
     )
 
   
     return markers
+
+
 
 
 def make_sphere(radius=1.0, subdivisions=3, color=(0.0, 0.0, 1.0)):
@@ -230,6 +227,18 @@ def make_sphere(radius=1.0, subdivisions=3, color=(0.0, 0.0, 1.0)):
 
   material = pyrender.MetallicRoughnessMaterial(doubleSided=True, wireframe=False, smooth=False, baseColorFactor=(*[color * 255], 255))
   return pyrender.Mesh.from_trimesh(sphere, smooth=True, material=material)
+
+def translations(positions:np.ndarray):
+  transforms = np.tile(np.eye(4, dtype=positions.dtype), (positions.shape[0], 1, 1))
+  transforms[..., :3, 3] = positions
+  return transforms
+
+def make_spheres(radius=0.1, positions=np.ndarray, colors=np.ndarray):
+  sphere = trimesh.creation.icosphere(radius=radius, subdivisions=3)
+
+
+  spheres = instance_meshes(sphere, translations(positions), vertex_colors=colors)
+  return pyrender.Mesh.from_trimesh(spheres, smooth=True)
 
 def fov_to_focal(fov, image_size):
   return image_size / (2 * np.tan(fov / 2))
@@ -279,15 +288,17 @@ class CameraViewer:
     self.cameras = cameras
     self.points = points
     self.scene = pyrender.Scene(bg_color=[1, 1, 1], ambient_light=[0.3, 0.3, 0.3, 1.0])
-    self.point_mesh = pyrender.Mesh.from_points(points.points.cpu().numpy(), points.colors.cpu().numpy())
 
     # Calculate scene center and scale
-    center = points.points.cpu().numpy().mean(axis=0)
+    center = cameras.centers.cpu().numpy().mean(axis=0)
 
     self.marker_size = marker_size
-    self.camera_markers = make_camera_markers(cameras, self.marker_size, color=(128, 128, 128), wireframe=False)
-
+    self.camera_markers = make_camera_markers(cameras, colors=(128, 128, 128), scale=self.marker_size)
     self.camera_node = self.scene.add(self.camera_markers)
+    
+    self.selected_markers = None
+
+    self.point_mesh = pyrender.Mesh.from_points(points.points.cpu().numpy(), points.colors.cpu().numpy())
     self.point_node = self.scene.add(self.point_mesh)
     
     light = pyrender.DirectionalLight(color=[1.0, 1.0, 1.0], intensity=1.0)
@@ -300,8 +311,8 @@ class CameraViewer:
     viewport_size=(1920, 1080)
 
     self.scene.add_node(to_pyrender_camera(camera, viewport_size))
-
     self.space_pressed = False
+
 
     self.viewer = pyrender.Viewer(
         self.scene, 
@@ -315,6 +326,9 @@ class CameraViewer:
             'S': lambda _: None     # block default behavior
         }
     )
+
+    self.trackball = self.viewer._trackball
+    self.trackball._scale = self.camera_markers.scale
 
   def _on_space(self, viewer):
     self.space_pressed = True
@@ -333,26 +347,40 @@ class CameraViewer:
         if existing_node is not None:
             self.scene.remove_node(existing_node)
         return self.scene.add(mesh)
+    
+    
 
   def colorize_cameras(self, colors:torch.Tensor):
-    markers = make_camera_markers(self.cameras, self.marker_size, colors=colors.cpu().numpy())
+    markers = make_camera_markers(self.cameras, colors=colors.cpu().numpy(), scale=self.marker_size)
     self.camera_node = self.replace_node(markers, self.camera_node)
+
+
+  def show_selection(self, selected:Optional[torch.Tensor]=None):
+    # show selected cameras as small sphere at camera centre
+    if selected is not None:
+
+      yellow = torch.tensor([1.0, 1.0, 0.0], device=selected.device)
+      red = torch.tensor([1.0, 0.0, 0.0], device=selected.device)
+
+      color_map = torch.zeros(selected.shape[0], 3, device=selected.device)
+
+      color_map[1:, :] = yellow
+      color_map[0, :] = red
+
+      markers = make_spheres(radius=self.marker_size * 0.2, 
+                             positions=self.cameras.centers[selected].cpu().numpy(), 
+                             colors=color_map.cpu().numpy())
+      
+      self.selected_markers = self.replace_node(markers, self.selected_markers)
 
   def show_batch_selection(self, view_overlaps:torch.Tensor, selected:Optional[torch.Tensor]=None):
 
-    t = view_overlaps / view_overlaps.max()
+    t = view_overlaps - view_overlaps.min() 
+    t = (t / t.max())
 
     green = torch.tensor([0.0, 1.0, 0.0], device=view_overlaps.device)
-    yellow = torch.tensor([1.0, 1.0, 0.0], device=view_overlaps.device)
-    red = torch.tensor([1.0, 0.0, 0.0], device=view_overlaps.device)
-
     color_map = green.unsqueeze(0) * t.unsqueeze(1)
-    
-    if selected is not None:
-      color_map[selected[1:], :] = yellow
-      color_map[selected[:1], :] = red
-
         
     self.colorize_cameras(color_map)
-
+    self.show_selection(selected)
 

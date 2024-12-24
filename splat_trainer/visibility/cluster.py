@@ -1,5 +1,7 @@
 
+from dataclasses import dataclass
 from enum import Enum, auto
+from functools import cached_property
 from typing import List, Optional
 from beartype import beartype
 from matplotlib import pyplot as plt
@@ -15,7 +17,7 @@ class PointClusters:
     self.view_visibility = {}
     self.num_clusters = num_clusters
 
-    self.point_cluster_labels, self.centroids = kmeans(points, 
+    self.point_labels, self.centroids = kmeans(points, 
                                 k = min(num_clusters, points.shape[0]))
 
 
@@ -23,8 +25,9 @@ class PointClusters:
     return assign_clusters(points, self.centroids)
 
   @beartype
-  def view_features(self, point_idx:torch.Tensor, point_vis:torch.Tensor, vis_threshold:float=0.01) -> torch.Tensor:
-    vector = torch.zeros(self.num_clusters, device=self.point_cluster_labels.device)
+  def view_features(self, point_idx:torch.Tensor, 
+                    point_vis:torch.Tensor, vis_threshold:float=0.01) -> torch.Tensor:
+    vector = torch.zeros(self.num_clusters, device=self.point_labels.device)
 
     # filter points with low visibility
     mask = point_vis > vis_threshold
@@ -33,7 +36,7 @@ class PointClusters:
     point_vis = point_vis[mask]
 
     # use clustering to reduce number of points
-    vector.scatter_add_(0, self.point_cluster_labels[point_idx], point_vis)
+    vector.scatter_add_(0, self.point_labels[point_idx], point_vis)
     return vector
   
   @beartype
@@ -41,20 +44,51 @@ class PointClusters:
     idx, vis = rendering.visible
     return self.view_features(idx, vis)
 
+class ViewClustering:
+  def __init__(self, point_clusters:PointClusters, cluster_visibility:torch.Tensor, metric:str='cosine'):
+    assert metric in ['cosine', 'euclidean'], f"Unknown metric: {metric}, expected 'cosine' or 'euclidean'"
 
-  def stack_features(self, features:List[torch.Tensor], normalize:bool=True) -> torch.Tensor:
-    visibility = torch.stack(features, dim=0)  
-    if normalize:
-      visibility = F.normalize(visibility, dim=1, p=2)
-    return visibility
+    self.point_clusters = point_clusters
+    self.cluster_visibility = cluster_visibility
+    self.metric = metric
+
+  @cached_property  
+  def view_overlaps(self) -> torch.Tensor:
+    # normalize features by cluster
+    self.cluster_visibility = F.normalize(self.cluster_visibility, dim=0, p=2)
+
+    # compute view overlaps
+    if self.metric == 'cosine':
+      self.view_overlaps = (self.cluster_visibility @ self.cluster_visibility.T)
+    elif self.metric == 'euclidean':
+      self.view_overlaps = torch.cdist(self.cluster_visibility, self.cluster_visibility, p=2)
+
+
+  def select_batch(self, batch_size:int, temperature:float=1.0, weighting:Optional[torch.Tensor]=None) -> torch.Tensor:
+    return select_batch(batch_size, self.view_overlaps, temperature, weighting)
   
-  @beartype
-  def view_overlaps(self, features:List[torch.Tensor]) -> torch.Tensor:
-    visibility = self.stack_features(features, normalize=True)
-    view_overlaps = (visibility @ visibility.T)
-    return view_overlaps
+  def select_batch_grouped(self, batch_size:int, temperature:float=1.0, weighting:Optional[torch.Tensor]=None) -> torch.Tensor:
+    return select_batch_grouped(batch_size, self.view_overlaps, temperature, weighting)
+  
+  def visible_points(self, batch_indices:torch.Tensor) -> torch.Tensor:
+    cluster_visibility = self.cluster_visibility[batch_indices].sum(dim=0)
+    visible_mask = cluster_visibility[self.point_clusters.point_labels] > 0
+    
+    return torch.nonzero(visible_mask[self.point_clusters.point_labels]).squeeze(1)
 
-
+  def state_dict(self):
+    return {
+      'point_clusters': self.point_clusters.state_dict(),
+      'cluster_visibility': self.cluster_visibility,
+      'metric': self.metric
+    }
+  
+  @classmethod
+  def from_state_dict(cls, state_dict):
+    point_clusters = PointClusters.from_state_dict(state_dict['point_clusters'])
+    features = state_dict['features']
+    metric = state_dict['metric']
+    return cls(point_clusters, features, metric)
 
 
 def assign_clusters(x:torch.Tensor, centroids:torch.Tensor) -> torch.Tensor:
@@ -121,9 +155,9 @@ def sample_with_temperature(p:torch.Tensor, temperature:float=1.0, n:int=1, weig
     return torch.topk(p, k=n, dim=0).indices
   else:
 
-    p = F.softmax(p / temperature, dim=0)
+    p = F.softmax(p.log() / temperature, dim=0)
     if weighting is not None:
-      p = p * weighting
+      p = F.normalize(p * weighting, dim=0, p=1)
     return torch.multinomial(p, n, replacement=False)
 
 def select_batch(batch_size:int,  
@@ -141,8 +175,8 @@ def select_batch(batch_size:int,
   probs = view_overlaps[index.squeeze(0)] 
   probs[index.squeeze(0)] = 0 
 
-  other_index = sample_with_temperature(probs, temperature=temperature, n=batch_size - 1)
-  return torch.cat([index, other_index.squeeze(0)], dim=0)
+  other_index = sample_with_temperature(probs, temperature=temperature, n=batch_size - 1, weighting=weighting)
+  return torch.cat([index, other_index], dim=0)
 
 
 def select_batch_grouped(batch_size:int,  
