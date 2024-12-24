@@ -1,97 +1,112 @@
 
-from typing import Optional
+from enum import Enum, auto
+from typing import List, Optional
 from beartype import beartype
 from matplotlib import pyplot as plt
 import numpy as np
 from taichi_splatting import Rendering
 import torch
 import torch.nn.functional as F
+from pykeops.torch import LazyTensor
 
 
-class ClusteredVisibility:
+class PointClusters:
   def __init__(self, points:torch.Tensor, num_clusters:int):
     self.view_visibility = {}
     self.num_clusters = num_clusters
 
-    self.point_cluster_labels, self.centroids = kmeans_keops(points, 
+    self.point_cluster_labels, self.centroids = kmeans(points, 
                                 k = min(num_clusters, points.shape[0]))
 
-  
-  @beartype
-  def add_view(self, image_idx:int, rendering:Rendering):
-    idx, vis = rendering.visible
-    self.add_visible(image_idx, idx, vis)
+
+  def assign_clusters(self, points:torch.Tensor) -> torch.Tensor:
+    return assign_clusters(points, self.centroids)
 
   @beartype
-  def add_visible(self, image_idx:int, idx:torch.Tensor, vis:torch.Tensor):
+  def view_features(self, point_idx:torch.Tensor, point_vis:torch.Tensor, vis_threshold:float=0.01) -> torch.Tensor:
     vector = torch.zeros(self.num_clusters, device=self.point_cluster_labels.device)
 
+    # filter points with low visibility
+    mask = point_vis > vis_threshold
+
+    point_idx = point_idx[mask]
+    point_vis = point_vis[mask]
+
     # use clustering to reduce number of points
-    vector.scatter_add_(0, self.point_cluster_labels[idx], vis)
-    self.view_visibility[image_idx] = vector
+    vector.scatter_add_(0, self.point_cluster_labels[point_idx], point_vis)
+    return vector
+  
+  @beartype
+  def rendering_features(self, rendering:Rendering) -> torch.Tensor:
+    idx, vis = rendering.visible
+    return self.view_features(idx, vis)
 
 
-  def feature_matrix(self, normalize:bool=True):
-    view_visibility = [self.view_visibility[i] for i in sorted(self.view_visibility.keys())]
-    visibility = torch.stack(view_visibility, dim=0)  
+  def stack_features(self, features:List[torch.Tensor], normalize:bool=True) -> torch.Tensor:
+    visibility = torch.stack(features, dim=0)  
     if normalize:
       visibility = F.normalize(visibility, dim=1, p=2)
     return visibility
   
-  def view_overlaps(self):
-    visibility = self.feature_matrix(normalize=True)
+  @beartype
+  def view_overlaps(self, features:List[torch.Tensor]) -> torch.Tensor:
+    visibility = self.stack_features(features, normalize=True)
     view_overlaps = (visibility @ visibility.T)
     return view_overlaps
 
-def cluster_points(position:torch.Tensor, num_clusters:int, chunk_size:int=128) -> torch.Tensor:
-  cluster_indices = torch.randperm(position.shape[0])[:num_clusters]
-  # Process clusters in chunks to avoid memory issues with large point clouds
-  num_points = position.shape[0]
-  
-  min_dist = torch.full((num_points,), float('inf'), device=position.device)
-  min_cluster = torch.zeros(num_points, dtype=torch.long, device=position.device)
-
-  for start in range(0, num_clusters, chunk_size):
-    end = min(start + chunk_size, num_clusters)
-    chunk_indices = cluster_indices[start:end]
-    
-    # Calculate distances for this chunk of clusters
-    chunk_dist = torch.cdist(position[chunk_indices], position)
-    
-    # Update minimum distances and cluster assignments
-    chunk_min_dist, chunk_min_cluster = chunk_dist.min(dim=0)
-    update_mask = chunk_min_dist < min_dist
-    
-    min_dist[update_mask] = chunk_min_dist[update_mask]
-    min_cluster[update_mask] = chunk_min_cluster[update_mask] + start
-
-  return min_cluster
 
 
-def kmeans_keops(x:torch.Tensor, k:int=10, iters:int=100) -> tuple[torch.Tensor, torch.Tensor]:
-    from pykeops.torch import LazyTensor
-    N, D = x.shape  # Number of samples, dimension of the ambient space
 
-    centroids = x[:k, :].clone()  # Simplistic initialization for the centroids
+def assign_clusters(x:torch.Tensor, centroids:torch.Tensor) -> torch.Tensor:
+  assert x.shape[1] == centroids.shape[1], f"Expected x and centroids to have the same number of features, got: {x.shape[1]} and {centroids.shape[1]}"
+
+  x_i = LazyTensor(x.view(x.shape[0], 1, x.shape[1]))  # (N, 1, D) samples
+  c_j = LazyTensor(centroids.view(1, centroids.shape[0], centroids.shape[1]))  # (1, k, D) centroids
+
+  D_ij = ((x_i - c_j) ** 2).sum(-1)  # (N, K) symbolic squared distances
+  return D_ij.argmin(dim=1).long().view(-1)  # Points -> Nearest cluster
+
+
+def kmeans_iter(x:torch.Tensor, centroids:torch.Tensor, iters:int=100) -> tuple[torch.Tensor, torch.Tensor]:
+    N, D = x.shape  # Number of samples, dimension
+    k = centroids.shape[0]
 
     x_i = LazyTensor(x.view(N, 1, D))  # (N, 1, D) samples
     c_j = LazyTensor(centroids.view(1, k, D))  # (1, k, D) centroids
 
+
     for i in range(iters):
         # assign points to the closest cluster 
-        D_ij = ((x_i - c_j) ** 2).sum(-1)  # (N, K) symbolic squared distances
-        cluster_labels = D_ij.argmin(dim=1).long().view(-1)  # Points -> Nearest cluster
+        D_ij = ((x_i - c_j) ** 2).sum(-1)  # pairwise squared distances
+        cluster_labels = D_ij.argmin(dim=1).long().view(-1)  # assign points to clusters by minimum distance
 
-        # Update the centroids to the normalized cluster average: 
-        # Compute the sum of points per cluster:
+        # update centroids
         centroids.zero_()
         centroids.scatter_add_(0, cluster_labels[:, None].repeat(1, D), x)
 
-        # Divide by the number of points per cluster:
         cluster_counts = torch.bincount(cluster_labels, minlength=k).type_as(centroids).view(k, 1)
-        centroids /= cluster_counts  # in-place division to compute the average
+        centroids /= cluster_counts  
 
     return cluster_labels, centroids  
+
+
+
+class InitMethod(Enum):
+  Random = auto()
+  Farthest = auto()
+
+@beartype
+def kmeans(x:torch.Tensor, k:int=10, iters:int=100, init_method:InitMethod=InitMethod.Random) -> tuple[torch.Tensor, torch.Tensor]:
+  if init_method == InitMethod.Random:
+    centroid_idx = torch.randperm(x.shape[0])[:k]
+    centroids = x[centroid_idx]
+
+  elif init_method == InitMethod.Farthest:
+    import torch_fpsample
+    centroids, _ = torch_fpsample.sample(x, k)
+
+  return kmeans_iter(x, centroids, iters)
+
 
 
 
@@ -126,7 +141,7 @@ def select_batch(batch_size:int,
   probs = view_overlaps[index.squeeze(0)] 
   probs[index.squeeze(0)] = 0 
 
-  other_index = sample_with_temperature(probs, temperature=temperature, n=batch_size - 1, weighting=weighting)
+  other_index = sample_with_temperature(probs, temperature=temperature, n=batch_size - 1)
   return torch.cat([index, other_index.squeeze(0)], dim=0)
 
 
@@ -147,7 +162,7 @@ def select_batch_grouped(batch_size:int,
   # select other cameras incrementally proportional to overlap with already selected cameras
   for i in range(batch_size - 1):
     overlaps[selected] = 0
-    other_index = sample_with_temperature(overlaps, temperature=temperature, n=1, weighting=weighting)
+    other_index = sample_with_temperature(overlaps, temperature=temperature, n=1)
 
     overlaps += view_overlaps[other_index.squeeze(0)]
     selected = torch.cat([selected, other_index], dim=0)

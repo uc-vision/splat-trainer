@@ -64,8 +64,8 @@ checkpoint-resume = "splat_trainer.scripts.checkpoint:resume"
 checkpoint-visualize = "splat_trainer.scripts.checkpoint:visualize"
 checkpoint-write-sh = "splat_trainer.scripts.checkpoint:write_sh_gaussians"
 
-checkpoint-show-batch = "splat_trainer.scripts.view_batching:show_batch"
-checkpoint-cluster-views = "splat_trainer.scripts.cluster_views:show_clusters"
+checkpoint-show-batch = "splat_trainer.scripts.view_batching:main"
+checkpoint-cluster-views = "splat_trainer.scripts.cluster_views:main"
 
 
 [tool.setuptools.package-data]

@@ -18,7 +18,6 @@ from splat_trainer.visibility import cluster
 from splat_trainer.visibility.query_points import foreground_points
 
 
-
 def display_image(title:str, image:np.ndarray):
   cv2.imshow(title, cv2.cvtColor(image, cv2.COLOR_RGB2BGR))
   while cv2.waitKey(1) == -1:
@@ -65,7 +64,7 @@ def sh_gaussians_to_cloud(gaussians:Gaussians3D) -> PointCloud:
 
 
 
-def show_batches():
+def main():
   parser = arguments()
   parser.add_argument("--batch_size", type=int, default=8, help="Batch size to show")
   parser.add_argument("--rows", type=int, default=2, help="Number of rows to show")
@@ -90,9 +89,10 @@ def show_batches():
     point_cloud = sh_gaussians_to_cloud(gaussians)
     cameras = trainer.camera_table.cameras
 
-    fg_mask = foreground_points(cameras, point_cloud.points)
+    # fg_mask = foreground_points(cameras, point_cloud.points)
+    # point_cloud = point_cloud[fg_mask]
 
-    camera_viewer = CameraViewer(cameras, point_cloud[fg_mask])
+    camera_viewer = CameraViewer(cameras, point_cloud)
 
 
     view_overlaps = trainer.train_view_overlaps.clone()
@@ -100,7 +100,8 @@ def show_batches():
 
 
     while camera_viewer.is_active():
-      batch_indexes = cluster.select_batch_grouped(args.batch_size, view_overlaps, temperature=args.temperature)
+      # batch_indexes = cluster.select_batch_grouped(args.batch_size, view_overlaps, temperature=args.temperature)
+      batch_indexes = trainer.select_batch(args.batch_size, temperature=args.temperature)
   
 
       master_index = batch_indexes[0]
@@ -111,10 +112,7 @@ def show_batches():
       if args.temperature > 0:
         master_overlaps = F.softmax(master_overlaps * 1/args.temperature, dim=0)
 
-      mask = torch.zeros(len(cameras), dtype=torch.bool)
-      mask[batch_indexes] = True
-
-      camera_viewer.colorize_cameras(master_overlaps.squeeze(0), mask)
+      camera_viewer.show_batch_selection(master_overlaps.squeeze(0), batch_indexes)
       camera_viewer.wait_key()
 
   with_trainer(f, args)

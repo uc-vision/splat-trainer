@@ -35,7 +35,7 @@ def evaluate_visibility(scene:GaussianScene,
     yield idx, vis #/ depth.squeeze(1)
 
 def get_visibility_features(scene:GaussianScene, cameras:Cameras, num_clusters:int):
-  visibility_clusters = cluster.ClusteredVisibility(scene.points.position, num_clusters)
+  visibility_clusters = cluster.PointClusters(scene.points.position, num_clusters)
   
   for i, (idx, vis) in tqdm(enumerate(evaluate_visibility(scene, cameras)), 
                             total=cameras.batch_size[0], 
@@ -57,7 +57,7 @@ def make_colors(k:int):
   colors = distinctipy.get_colors(k, pastel_factor=0.0)
   return torch.tensor(colors, dtype=torch.float32)
 
-def show_clusters():
+def main():
   parser = arguments()
   parser.add_argument("--k", type=int, default=4, help="Number of clusters")
   args = parser.parse_args()
@@ -76,7 +76,9 @@ def show_clusters():
     cameras:Cameras = trainer.camera_table.cameras
 
     fg_mask = foreground_points(cameras, point_cloud.points)
-    camera_viewer = CameraViewer(cameras, point_cloud[fg_mask])
+    point_cloud = point_cloud[fg_mask]
+    
+    camera_viewer = CameraViewer(cameras, point_cloud)
 
     vis_clusters = get_visibility_features(trainer.scene, cameras, 8192)
     features = vis_clusters.feature_matrix(normalize=False)

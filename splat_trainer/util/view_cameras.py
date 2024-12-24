@@ -337,18 +337,20 @@ class CameraViewer:
     markers = make_camera_markers(self.cameras, self.marker_size, colors=colors.cpu().numpy())
     self.camera_node = self.replace_node(markers, self.camera_node)
 
-  def show_batch_selection(self, view_overlaps:torch.Tensor, highlight_mask:Optional[torch.Tensor]=None):
-    # green to red color map
+  def show_batch_selection(self, view_overlaps:torch.Tensor, selected:Optional[torch.Tensor]=None):
 
     t = view_overlaps / view_overlaps.max()
 
     green = torch.tensor([0.0, 1.0, 0.0], device=view_overlaps.device)
-    purple = torch.tensor([1.0, 0.0, 1.0], device=view_overlaps.device)
+    yellow = torch.tensor([1.0, 1.0, 0.0], device=view_overlaps.device)
+    red = torch.tensor([1.0, 0.0, 0.0], device=view_overlaps.device)
 
     color_map = green.unsqueeze(0) * t.unsqueeze(1)
     
-    if highlight_mask is not None:
-      color_map[highlight_mask, :] = purple
+    if selected is not None:
+      color_map[selected[1:], :] = yellow
+      color_map[selected[:1], :] = red
+
         
     self.colorize_cameras(color_map)
 

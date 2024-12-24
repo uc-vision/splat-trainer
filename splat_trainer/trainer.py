@@ -438,7 +438,7 @@ class Trainer(Dispatcher):
 
     worst = []
     log_indexes = strided_indexes(log_count, len(data)) 
-    visibility_cluster = cluster.ClusteredVisibility(self.scene.points['position'], self.config.vis_clusters)
+    visibility_cluster = cluster.PointClusters(self.scene.points['position'], self.config.vis_clusters)
 
 
     pbar = tqdm(total=len(data), desc=f"rendering {name}", leave=False)
