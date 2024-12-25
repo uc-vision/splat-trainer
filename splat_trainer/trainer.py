@@ -286,7 +286,10 @@ class Trainer(Dispatcher):
     else:
       color_corrector = NilCorrector(config.device)
 
-    view_clustering = cluster.ViewClustering.from_state_dict(state_dict['view_clustering'])
+    print(state_dict.keys())
+    view_clustering = None
+    if 'view_clustering' in state_dict:
+      view_clustering = cluster.ViewClustering.from_state_dict(state_dict['view_clustering'])
 
     return Trainer(config, scene, color_corrector, controller, dataset, logger, 
                    step=state_dict['step'],
@@ -361,7 +364,7 @@ class Trainer(Dispatcher):
 
 
   def camera_params(self, cam_idx:torch.Tensor):
-    camera:Camera = self.camera_table[cam_idx]
+    camera:Camera = self.camera_table[cam_idx].item()
     near, far = camera.depth_range
 
     return CameraParams(
@@ -439,7 +442,7 @@ class Trainer(Dispatcher):
 
     worst = []
     log_indexes = strided_indexes(log_count, len(data)) 
-    point_clusters = cluster.PointClusters(self.scene.points['position'], self.config.vis_clusters)
+    point_clusters = cluster.PointClusters.cluster(self.scene.points['position'], self.config.vis_clusters)
     vis_features = []
 
     pbar = tqdm(total=len(data), desc=f"rendering {name}", leave=False)

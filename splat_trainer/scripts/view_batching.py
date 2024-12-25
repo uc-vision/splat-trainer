@@ -97,7 +97,7 @@ def main():
     camera_viewer = CameraViewer(cameras, point_cloud)
 
 
-    view_overlaps = trainer.train_view_overlaps.clone()
+    view_similarity = trainer.view_clustering.view_similarity
     # view_overlaps.fill_diagonal_(0.0)
 
 
@@ -107,7 +107,7 @@ def main():
   
 
       master_index = batch_indexes[0]
-      master_overlaps = view_overlaps[master_index]
+      master_overlaps = view_similarity[master_index]
 
       print(master_overlaps.max(0), master_index.item())
 

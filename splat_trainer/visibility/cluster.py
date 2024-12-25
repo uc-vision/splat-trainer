@@ -13,21 +13,29 @@ from pykeops.torch import LazyTensor
 
 
 class PointClusters:
-  def __init__(self, points:torch.Tensor, num_clusters:int):
+  def __init__(self, point_labels:torch.Tensor, centroids:torch.Tensor):
+
     self.view_visibility = {}
-    self.num_clusters = num_clusters
+    self.centroids = centroids
+    self.point_labels = assign_clusters(point_labels, centroids)
 
-    self.point_labels, self.centroids = kmeans(points, 
-                                k = min(num_clusters, points.shape[0]))
-
+  @staticmethod
+  def cluster (points:torch.Tensor, num_clusters:int) -> 'PointClusters':
+    centroids, point_labels = kmeans(points, min(num_clusters, points.shape[0]))
+    return PointClusters(point_labels, centroids)
 
   def assign_clusters(self, points:torch.Tensor) -> torch.Tensor:
     return assign_clusters(points, self.centroids)
+  
+  @property
+  def num_clusters(self):
+    return self.centroids.shape[0]
 
   @beartype
   def view_features(self, point_idx:torch.Tensor, 
                     point_vis:torch.Tensor, vis_threshold:float=0.01) -> torch.Tensor:
     vector = torch.zeros(self.num_clusters, device=self.point_labels.device)
+
 
     # filter points with low visibility
     mask = point_vis > vis_threshold
@@ -43,6 +51,16 @@ class PointClusters:
   def rendering_features(self, rendering:Rendering) -> torch.Tensor:
     idx, vis = rendering.visible
     return self.view_features(idx, vis)
+  
+  def state_dict(self):
+    return {
+      'point_labels': self.point_labels,
+      'centroids': self.centroids
+    }
+  
+  @classmethod
+  def from_state_dict(cls, state_dict):
+    return cls(state_dict['point_labels'], state_dict['centroids'])
 
 class ViewClustering:
   def __init__(self, point_clusters:PointClusters, cluster_visibility:torch.Tensor, metric:str='cosine'):
@@ -53,22 +71,22 @@ class ViewClustering:
     self.metric = metric
 
   @cached_property  
-  def view_overlaps(self) -> torch.Tensor:
+  def view_similarity(self) -> torch.Tensor:
     # normalize features by cluster
     self.cluster_visibility = F.normalize(self.cluster_visibility, dim=0, p=2)
 
     # compute view overlaps
     if self.metric == 'cosine':
-      self.view_overlaps = (self.cluster_visibility @ self.cluster_visibility.T)
+      return (self.cluster_visibility @ self.cluster_visibility.T)
     elif self.metric == 'euclidean':
-      self.view_overlaps = torch.cdist(self.cluster_visibility, self.cluster_visibility, p=2)
+      return torch.cdist(self.cluster_visibility, self.cluster_visibility, p=2)
 
 
   def select_batch(self, batch_size:int, temperature:float=1.0, weighting:Optional[torch.Tensor]=None) -> torch.Tensor:
-    return select_batch(batch_size, self.view_overlaps, temperature, weighting)
+    return select_batch(batch_size, self.view_similarity, temperature, weighting)
   
   def select_batch_grouped(self, batch_size:int, temperature:float=1.0, weighting:Optional[torch.Tensor]=None) -> torch.Tensor:
-    return select_batch_grouped(batch_size, self.view_overlaps, temperature, weighting)
+    return select_batch_grouped(batch_size, self.view_similarity, temperature, weighting)
   
   def visible_points(self, batch_indices:torch.Tensor) -> torch.Tensor:
     cluster_visibility = self.cluster_visibility[batch_indices].sum(dim=0)
