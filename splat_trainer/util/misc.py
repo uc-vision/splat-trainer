@@ -75,3 +75,7 @@ class CudaTimer:
   def ellapsed(self):
     return self.start.elapsed_time(self.end)
   
+  def wrap(self, f, *args, **kwargs):
+    with self:
+      return f(*args, **kwargs)
+  

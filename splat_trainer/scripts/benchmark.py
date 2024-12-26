@@ -8,11 +8,12 @@ from splat_trainer.trainer import Trainer
 
 from taichi_splatting.perspective import CameraParams
 
-def benchmark(name:str, f, cameras:List[CameraParams]):
+def benchmark(name:str, iter, total:int):
   torch.cuda.synchronize()
   start = time()
-  for camera_params in tqdm(cameras, desc=name):
-    f(camera_params)
+  for x in tqdm(iter, desc=name, total=total):
+    pass
+
   torch.cuda.synchronize()
   end = time()
   elapsed = end - start
@@ -32,20 +33,33 @@ def main():
 
     cameras = [trainer.camera_params(i) for i in range(trainer.camera_table.num_images)] * args.repeats
 
-    def render_forward(camera_params:CameraParams):
-      rendering =trainer.render(camera_params)
-      loss, losses = trainer.losses(rendering, torch.zeros_like(rendering.image, device=trainer.device))
-      return loss
+    def render_forward():
+      for camera_params in cameras:
+        rendering = trainer.render(camera_params)
+        loss, losses = trainer.losses(rendering, torch.zeros_like(rendering.image, device=trainer.device))
+        yield loss
+
+    def render_backward():
+      for loss in render_forward():
+        loss.backward()
+        yield  
 
 
-    def render_backward(camera_params:CameraParams):
-      loss = render_forward(camera_params)
-      loss.backward()
+    def training_step():
+      for _ in range(args.repeats):
+        for filename, camera_params, image_idx, image in trainer.iter_train():
+          trainer.training_step(filename, camera_params, image_idx, image)
+          yield
 
-    benchmark("render_forward", render_forward, cameras)
+    benchmark("render_forward", render_forward(), len(cameras))
+
+    trainer.iter_train()
+
+
 
     with torch.enable_grad():
-      benchmark("render_backward", render_backward, cameras)
+      benchmark("render_backward", render_backward(), len(cameras))
+      benchmark("training_step", training_step(), len(cameras))
 
 
 

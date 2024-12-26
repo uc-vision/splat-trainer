@@ -623,17 +623,16 @@ class Trainer(Dispatcher):
     return loss, metrics
 
 
-  def training_step(self, filename:str, camera_params:CameraParams, image_idx:int, image:torch.Tensor, timer:CudaTimer) -> dict:
+  def training_step(self, filename:str, camera_params:CameraParams, image_idx:int, image:torch.Tensor) -> dict:
 
-    with timer:    
-      rendering = self.render(camera_params, image_idx, compute_split_heuristic=True)
-      rendering = replace(rendering, image=self.color_corrector.correct(rendering, image_idx))
+    rendering = self.render(camera_params, image_idx, compute_split_heuristic=True)
+    rendering = replace(rendering, image=self.color_corrector.correct(rendering, image_idx))
 
-      loss, losses = self.losses(rendering, image)
-      loss.backward()
+    loss, losses = self.losses(rendering, image)
+    loss.backward()
 
-      metrics_scene = self.scene.step(rendering, self.t)
-      metrics_cc = self.color_corrector.step(self.t)
+    metrics_scene = self.scene.step(rendering, self.t)
+    metrics_cc = self.color_corrector.step(self.t)
 
     with torch.no_grad():
       metrics =  self.controller.step(rendering, self.t)
@@ -697,7 +696,7 @@ class Trainer(Dispatcher):
 
       with torch.enable_grad():
         with step_timer:
-          steps = [self.training_step(*next(iter_train), timer=timer) 
+          steps = [timer.wrap(self.training_step, *next(iter_train)) 
                   for timer in self.render_timers]
 
       torch.cuda.empty_cache()
