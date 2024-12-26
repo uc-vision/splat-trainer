@@ -1,8 +1,5 @@
-from matplotlib import pyplot as plt
 import numpy as np
-from taichi_splatting import Rendering
 import torch
-import torch.nn.functional as F
 
 def strided_indexes(subset:int, total:int):
   if subset > 0:

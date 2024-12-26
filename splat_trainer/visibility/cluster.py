@@ -17,7 +17,7 @@ class PointClusters:
 
     self.view_visibility = {}
     self.centroids = centroids
-    self.point_labels = assign_clusters(point_labels, centroids)
+    self.point_labels = point_labels
 
   @staticmethod
   def cluster (points:torch.Tensor, num_clusters:int) -> 'PointClusters':
@@ -73,20 +73,23 @@ class ViewClustering:
   @cached_property  
   def view_similarity(self) -> torch.Tensor:
     # normalize features by cluster
-    self.cluster_visibility = F.normalize(self.cluster_visibility, dim=0, p=2)
+    cluster_visibility = F.normalize(self.cluster_visibility, dim=0, p=2)
+
+    # normalize features by view
+    cluster_visibility = F.normalize(cluster_visibility, dim=1, p=2)
 
     # compute view overlaps
     if self.metric == 'cosine':
-      return (self.cluster_visibility @ self.cluster_visibility.T)
+      return (cluster_visibility @ cluster_visibility.T)
     elif self.metric == 'euclidean':
-      return torch.cdist(self.cluster_visibility, self.cluster_visibility, p=2)
+      return torch.cdist(cluster_visibility, cluster_visibility, p=2)
 
+  def select_batch(self, weighting:torch.Tensor, min_batch_size:int, overlap_threshold:float=0.5) -> torch.Tensor:
+    return select_batch(self.view_similarity, weighting, min_batch_size, overlap_threshold)
 
-  def select_batch(self, batch_size:int, temperature:float=1.0, weighting:Optional[torch.Tensor]=None) -> torch.Tensor:
-    return select_batch(batch_size, self.view_similarity, temperature, weighting)
+  def sample_batch(self, weighting:torch.Tensor, batch_size:int, temperature:float=1.0) -> torch.Tensor:
+    return sample_batch(self.view_similarity, weighting, batch_size, temperature)
   
-  def select_batch_grouped(self, batch_size:int, temperature:float=1.0, weighting:Optional[torch.Tensor]=None) -> torch.Tensor:
-    return select_batch_grouped(batch_size, self.view_similarity, temperature, weighting)
   
   def visible_points(self, batch_indices:torch.Tensor) -> torch.Tensor:
     cluster_visibility = self.cluster_visibility[batch_indices].sum(dim=0)
@@ -104,13 +107,15 @@ class ViewClustering:
   @classmethod
   def from_state_dict(cls, state_dict):
     point_clusters = PointClusters.from_state_dict(state_dict['point_clusters'])
-    features = state_dict['features']
+
+    cluster_visibility = state_dict['cluster_visibility']
     metric = state_dict['metric']
-    return cls(point_clusters, features, metric)
+    return cls(point_clusters, cluster_visibility, metric)
 
 
 def assign_clusters(x:torch.Tensor, centroids:torch.Tensor) -> torch.Tensor:
-  assert x.shape[1] == centroids.shape[1], f"Expected x and centroids to have the same number of features, got: {x.shape[1]} and {centroids.shape[1]}"
+  assert x.dim() == 2 and centroids.dim() == 2 and x.shape[1] == centroids.shape[1], \
+    f"Expected x and centroids to have the same number of features, got: {x.shape} and {centroids.shape}"
 
   x_i = LazyTensor(x.view(x.shape[0], 1, x.shape[1]))  # (N, 1, D) samples
   c_j = LazyTensor(centroids.view(1, centroids.shape[0], centroids.shape[1]))  # (1, k, D) centroids
@@ -143,19 +148,10 @@ def kmeans_iter(x:torch.Tensor, centroids:torch.Tensor, iters:int=100) -> tuple[
 
 
 
-class InitMethod(Enum):
-  Random = auto()
-  Farthest = auto()
-
 @beartype
-def kmeans(x:torch.Tensor, k:int=10, iters:int=100, init_method:InitMethod=InitMethod.Random) -> tuple[torch.Tensor, torch.Tensor]:
-  if init_method == InitMethod.Random:
-    centroid_idx = torch.randperm(x.shape[0])[:k]
-    centroids = x[centroid_idx]
-
-  elif init_method == InitMethod.Farthest:
-    import torch_fpsample
-    centroids, _ = torch_fpsample.sample(x, k)
+def kmeans(x:torch.Tensor, k:int=10, iters:int=100) -> tuple[torch.Tensor, torch.Tensor]:
+  centroid_idx = torch.randperm(x.shape[0])[:k]
+  centroids = x[centroid_idx]
 
   return kmeans_iter(x, centroids, iters)
 
@@ -178,17 +174,34 @@ def sample_with_temperature(p:torch.Tensor, temperature:float=1.0, n:int=1, weig
       p = F.normalize(p * weighting, dim=0, p=1)
     return torch.multinomial(p, n, replacement=False)
 
-def select_batch(batch_size:int,  
-                  view_overlaps:torch.Tensor, 
+def select_weighted(weighting:Optional[torch.Tensor], n:int) -> torch.Tensor:
+  if weighting is not None:
+    return 
+  else:
+    return torch.randint(0, weighting.shape[0], (n,))
+
+
+def select_batch(view_similarity:torch.Tensor,
+                weighting:torch.Tensor,
+                threshold:float=0.4, min_size:int=25) -> torch.Tensor:
+  """Select master view and group of views with similar overlap. 
+     Returns at least min_size views if threshold is not met.
+    Returns:
+      batch_indexes: torch.Tensor, shape (N,) - indices of views in desending similarity, master is first
+  """
+  index = torch.multinomial(weighting, 1, replacement=False)
+
+  group_mask = view_similarity[index] > threshold
+  n =  max(group_mask.sum().item(), min_size)
+  return torch.topk(view_similarity[index], k=n, sorted=True).indices
+
+def sample_batch(view_overlaps:torch.Tensor, 
+                  weighting:torch.Tensor,
+                  batch_size:int,
                   temperature:float=1.0,
-                  weighting:Optional[torch.Tensor]=None,
                   ) -> torch.Tensor: # (N,) camera indices 
   # select initial camera with probability proportional to weighting
-  if weighting is not None:
-    index = torch.multinomial(weighting, 1)
-  else:
-    index = torch.randint(0, view_overlaps.shape[0], (1,))
-
+  index = torch.multinomial(weighting, 1, replacement=False)
 
   probs = view_overlaps[index.squeeze(0)] 
   probs[index.squeeze(0)] = 0 
@@ -196,17 +209,16 @@ def select_batch(batch_size:int,
   other_index = sample_with_temperature(probs, temperature=temperature, n=batch_size - 1, weighting=weighting)
   return torch.cat([index, other_index], dim=0)
 
+  
 
-def select_batch_grouped(batch_size:int,  
+
+def sample_batch_grouped(batch_size:int,  
                   view_overlaps:torch.Tensor, 
+                  weighting:torch.Tensor,
                   temperature:float=1.0,
-                  weighting:Optional[torch.Tensor]=None,
                   ) -> torch.Tensor: # (N,) camera indices 
   # select initial camera with probability proportional to weighting
-  if weighting is not None:
-    index = torch.multinomial(weighting, 1)
-  else:
-    index = torch.randint(0, view_overlaps.shape[0], (1,), device=view_overlaps.device)
+  index = torch.multinomial(weighting, 1, replacement=False)
 
   overlaps = view_overlaps[index.squeeze(0)].clone()
 

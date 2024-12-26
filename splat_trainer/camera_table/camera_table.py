@@ -7,7 +7,7 @@ import math
 from typing import List, Tuple
 
 import numpy as np
-from tensordict import tensorclass
+from tensordict import TensorClass
 from tensordict import TensorDictParams
 import torch
 from torch import nn
@@ -39,8 +39,7 @@ def to_matrix(intrinsics:torch.Tensor) -> torch.Tensor:
   return m
 
 
-@tensorclass
-class Projections:
+class Projections(TensorClass):
   """ Projection parameters for a camera or a batch of cameras."""
   intrinsics:torch.Tensor      # (..., 4) fx, fy, cx, cy
   image_size:torch.Tensor      # (..., 2) int
@@ -50,9 +49,6 @@ class Projections:
   def matrix(self) -> torch.Tensor:
     return to_matrix(self.intrinsics)
   
-  @property
-  def device(self):
-    return self.intrinsics.device
   
   @property
   def focal_length(self) -> torch.Tensor:
@@ -73,7 +69,6 @@ class Projections:
 
 
 
-@beartype
 @dataclass(kw_only=True)
 class Camera:
   """ Convenience class for a single camera."""
@@ -95,7 +90,7 @@ class Camera:
   
   @property
   def matrix(self) -> torch.Tensor:
-    return to_matrix(self.projection)
+    return to_matrix(self.intrinsics)
 
   @property
   def position(self) -> torch.Tensor:
@@ -130,7 +125,6 @@ class Camera:
     f = self.focal_length
     return 2.0 * torch.atan(0.5 * torch.tensor(self.image_size, device=self.device) / f)
   
-  @property
   def has_label(self, label:Label) -> bool:
     return bool(self.label & label)
   
@@ -147,14 +141,12 @@ class Camera:
 
       near_plane=self.depth_range[0],
       far_plane=self.depth_range[1],  
-      image_size=self.image_size,
+      image_size=self.image_size
     )
 
 
 
-
-@tensorclass
-class Cameras:
+class Cameras(TensorClass):
   """ Represents either a single camera or a batch of cameras."""
 
   camera_t_world:torch.Tensor  # (..., 4, 4) float
@@ -166,6 +158,7 @@ class Cameras:
 
   image_names: List[str]
 
+  
   @property
   def device(self):
     return self.camera_t_world.device
@@ -204,7 +197,7 @@ class Cameras:
   
   def item(self) -> Camera:
     n = self.batch_size
-    assert np.product(n) == 1, f"Expected batch size 1, got shape: {self.batch_size}"
+    assert np.prod(n) == 1, f"Expected batch size 1, got shape: {self.batch_size}"
 
 
     return Camera(
@@ -213,8 +206,8 @@ class Cameras:
 
       image_size=tuple(self.image_sizes.squeeze(0).cpu().tolist()),
       depth_range=tuple(self.projection.depth_range.squeeze(0).cpu().tolist()),
-      camera_idx=self.camera_idx.item(),
-      frame_idx=self.frame_idx.item(),
+      camera_idx=int(self.camera_idx.item()),
+      frame_idx=int(self.frame_idx.item()),
       label=Label(self.labels.item()),
       image_name=self.image_names[0]
     )
@@ -372,7 +365,9 @@ class CameraRigTable(CameraTable):
     self._camera_poses.requires_grad_(False)
 
     self._image_names = image_names
-    self.register_buffer("_labels", labels)
+
+    self.register_buffer("_labels", labels) 
+    self._labels:torch.Tensor = labels
 
   @beartype
   def forward(self, image_idx:torch.Tensor) -> Cameras:     
@@ -382,6 +377,7 @@ class CameraRigTable(CameraTable):
     num_cameras = self._camera_poses.num_cameras
     frame_idx = image_idx // num_cameras
     camera_idx = image_idx % num_cameras
+
     
     return Cameras(
       camera_t_world=self._camera_poses(frame_idx, camera_idx),
@@ -406,7 +402,7 @@ class CameraRigTable(CameraTable):
 
   @property
   def projections(self) -> Projections:  
-    return Projections.from_tensordict(self._camera_projection)
+    return Projections.from_dict(self._camera_projection, batch_dims=1)
   
   @property
   def num_frames(self) -> int:
@@ -442,12 +438,16 @@ class MultiCameraTable(CameraTable):
     self._camera_projection = TensorDictParams(projection.to_tensordict())
     self._camera_projection.requires_grad_(False)
 
+    self._camera_idx = camera_idx
     self.register_buffer("_camera_idx", camera_idx)
+    
     self._camera_t_world = PoseTable(camera_t_world)
     self._camera_t_world.requires_grad_(False)
 
-
+    self._labels = labels
     self._image_names = image_names
+
+    self._labels = labels
     self.register_buffer("_labels", labels)
 
 
@@ -474,7 +474,7 @@ class MultiCameraTable(CameraTable):
 
   @property
   def projections(self) -> Projections:
-    return Projections.from_tensordict(self._camera_projection)
+    return Projections.from_dict(self._camera_projection)
 
   @property
   def num_frames(self) -> int:

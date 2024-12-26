@@ -1,8 +1,8 @@
 from abc import ABCMeta, abstractmethod
-from typing import Dict, Optional, Tuple
+from typing import Dict, Optional
 import torch
 
-from taichi_splatting import Gaussians3D, RasterConfig, Rendering
+from taichi_splatting import Gaussians3D, Rendering
 from taichi_splatting.perspective import CameraParams
 
 from splat_trainer.camera_table.camera_table import CameraTable
@@ -42,6 +42,11 @@ class GaussianScene(metaclass=ABCMeta):
   
   @abstractmethod
   def to_sh_gaussians(self) -> Gaussians3D:
+    raise NotImplementedError
+  
+  @property
+  @abstractmethod
+  def device(self) -> torch.device:
     raise NotImplementedError
 
 

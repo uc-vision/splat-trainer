@@ -4,11 +4,10 @@ import math
 from typing import Dict
 from beartype import beartype
 from beartype.typing import Optional
-import numpy as np
 
-from splat_trainer.util.misc import exp_lerp, lerp, max_decaying
+from splat_trainer.util.misc import exp_lerp
 from taichi_splatting import Rendering
-from tensordict import tensorclass
+from tensordict import TensorClass
 import torch
 
 from splat_trainer.logger.logger import Logger
@@ -17,8 +16,7 @@ from splat_trainer.scene import GaussianScene
 
 from splat_trainer.config import Between, SmoothStep, VaryingFloat, eval_varying
 
-@tensorclass
-class PointStatistics:
+class PointStatistics(TensorClass):
   split_score : torch.Tensor  # (N, ) - averaged split score
   prune_cost : torch.Tensor  # (N, ) - max prune cost
   max_scale : torch.Tensor # (N, ) - max scale
@@ -42,7 +40,7 @@ class PointStatistics:
 class TargetConfig(ControllerConfig):
 
   # target point cloud size - if None then optimize for the current size
-  target_count:Optional[int] = None
+  target_count:int
 
   # base rate (relative to count) to prune points 
   prune_rate:float = 0.05
@@ -162,7 +160,7 @@ class TargetController(Controller):
     return stats
 
 
-  def step(self, rendering:Rendering, step:int)  -> Dict[str, float]: 
+  def step(self, rendering:Rendering, t:float)  -> Dict[str, float]: 
     idx = rendering.points_in_view
     points = self.points
 

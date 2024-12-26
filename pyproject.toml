@@ -34,6 +34,9 @@ dependencies = [
   'debugpy',
   'wonderwords',
   'splatview>=0.2.0',
+
+  'tensordict >= 0.6.2',
+  'pykeops'
 ]
 
 
@@ -65,7 +68,7 @@ checkpoint-visualize = "splat_trainer.scripts.checkpoint:visualize"
 checkpoint-write-sh = "splat_trainer.scripts.checkpoint:write_sh_gaussians"
 
 checkpoint-show-batch = "splat_trainer.scripts.view_batching:main"
-checkpoint-cluster-views = "splat_trainer.scripts.cluster_views:main"
+checkpoint-benchmark = "splat_trainer.scripts.benchmark:main"
 checkpoint-view-clusters = "splat_trainer.scripts.view_clusters:main"
 
 
@@ -73,6 +76,9 @@ checkpoint-view-clusters = "splat_trainer.scripts.view_clusters:main"
 
 [tool.pyright]
 reportInvalidTypeForm = "none"
+reportGeneralTypeIssues = "none"
+# typeCheckingMode = "off"
+
 
 [tool.ruff]
 indent-width = 2

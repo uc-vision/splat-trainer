@@ -75,7 +75,7 @@ class Camera:
 
   @property
   def fov(self) -> Tuple[float, float]:
-    return tuple(2.0 * np.arctan(0.5 * size / f) 
+    return tuple(2.0 * math.atan(0.5 * size / f) 
                  for f, size in zip(self.intrinsics[:2], self.image_size))
   
   @property
@@ -359,12 +359,12 @@ class CameraViewer:
     # show selected cameras as small sphere at camera centre
     if selected is not None:
 
-      yellow = torch.tensor([1.0, 1.0, 0.0], device=selected.device)
+      purple = torch.tensor([0.5, 0.0, 0.7], device=selected.device)
       red = torch.tensor([1.0, 0.0, 0.0], device=selected.device)
 
       color_map = torch.zeros(selected.shape[0], 3, device=selected.device)
 
-      color_map[1:, :] = yellow
+      color_map[1:, :] = purple
       color_map[0, :] = red
 
       markers = make_spheres(radius=self.marker_size * 0.2, 

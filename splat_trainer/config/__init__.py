@@ -2,7 +2,7 @@ from abc import abstractmethod, ABCMeta
 
 from dataclasses import asdict, fields, replace
 import math
-from os import path
+from os import PathLike, path
 from omegaconf import OmegaConf 
 
 import termcolor
@@ -244,8 +244,7 @@ def number_folders(path:Path, name:str):
   return path / f"{name}_{i}"
 
 @beartype
-def setup_project(project_name:str, run_name:str | None, base_path:str | None) -> Tuple[Path, Path, str]:
-    base_path = Path(base_path) if base_path is not None else Path.cwd()
+def setup_project(project_name:str, run_name:str | None, base_path:PathLike) -> Tuple[Path, Path, str]:
 
     run_name = run_name or random_folder(base_path)
     run_path = base_path / project_name / run_name

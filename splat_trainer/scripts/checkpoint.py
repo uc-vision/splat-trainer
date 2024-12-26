@@ -96,7 +96,7 @@ def with_trainer(f:Callable[[Trainer], None], args:Namespace):
 
 
   args.base_path, run_path, args.run = setup_project(config.project, args.run or config.run_name, 
-        config.base_path if args.base_path is None else args.base_path)
+        workspace_path.parent.parent if args.base_path is None else args.base_path)
   os.chdir(str(run_path))
   
   overrides += make_overrides(run_name=args.run,  base_path=args.base_path)
@@ -118,6 +118,9 @@ def with_trainer(f:Callable[[Trainer], None], args:Namespace):
     dataset = config.dataset
     if dataset.image_scale is not None:
       dataset.image_scale *= scale_images
+
+    if dataset.resize_longest is not None:
+      dataset.resize_longest = int(dataset.resize_longest * scale_images)
 
   if resize_longest is not None:
     dataset.resize_longest = int(dataset.resize_longest * resize_longest)

@@ -1,4 +1,4 @@
-from typing import List, Tuple
+from typing import List, Sequence, Tuple
 
 import cv2
 import numpy as np
@@ -24,7 +24,7 @@ def display_image(title:str, image:np.ndarray):
     pass
 
 
-def transpose_batch(views:List[CameraView]) -> Tuple[List[str], List[np.ndarray], List[int]]:
+def transpose_batch(views:Sequence[CameraView]) -> Tuple[List[str], List[torch.Tensor], List[int]]:
   fields = {k:[] for k in CameraView._fields}
   for view in views:
     for k, v in zip(CameraView._fields, view):
@@ -33,14 +33,15 @@ def transpose_batch(views:List[CameraView]) -> Tuple[List[str], List[np.ndarray]
   return fields["filename"], fields["image"], fields["index"]
 
 
-def image_grid(images:List[np.ndarray], rows:int):
-  rows = []
+def image_grid(images:List[torch.Tensor], rows:int):
+  image_row = []
   for i in range(0, len(images), rows):
     row = torch.concatenate(images[i:i+rows], dim=0)
-    rows.append(row)
+    image_row.append(row)
   
-  image = torch.concatenate(rows, dim=1)
+  image = torch.concatenate(image_row, dim=1)
   image = image.cpu().numpy()
+  return image
 
 
 
@@ -57,62 +58,37 @@ def show_batch(window:str, trainer:Trainer, batch_indexes:torch.Tensor, rows:int
   display_image(window, grid)
 
 
-def sh_gaussians_to_cloud(gaussians:Gaussians3D) -> PointCloud:
-  sh_features = gaussians.feature[:, :, 0] # N, 3
-  positions = gaussians.position # N, 3
-  colors = sh_to_rgb(sh_features) # N, 3
-
-  return PointCloud(positions, colors, batch_size=(positions.shape[0],))
-
-
 
 
 def main():
   parser = arguments()
-  parser.add_argument("--batch_size", type=int, default=8, help="Batch size to show")
-  parser.add_argument("--rows", type=int, default=2, help="Number of rows to show")
+  parser.add_argument("--min_batch", type=int, default=8, help="Minimum batch size to show")
+  parser.add_argument("--threshold", type=float, default=1.0, help="Threshold for selecting views")
   
   parser.add_argument("--temperature", type=float, default=1.0, help="Temperature for sampling")
-  parser.add_argument("--show_images", action="store_true", help="Show images")
-  parser.add_argument("--recalculate", action="store_true", help="Recalculate visibility")
   args = parser.parse_args()
 
 
 
   def f(trainer:Trainer):
-    paths = trainer.paths()
+    point_cloud = sh_gaussians_to_cloud(trainer.load_cloud())
 
-    if paths.point_cloud.exists():  
-      gaussians = read_gaussians(paths.point_cloud, with_sh=True)
-    else:
-      gaussians = trainer.scene.to_sh_gaussians()
-    gaussians = gaussians.to(trainer.device)
-
-    point_cloud = sh_gaussians_to_cloud(gaussians)
     cameras = trainer.camera_table.cameras
 
-    # fg_mask = foreground_points(cameras, point_cloud.points)
-    # point_cloud = point_cloud[fg_mask]
+    fg_mask = foreground_points(cameras, point_cloud.points)
+    point_cloud = point_cloud[fg_mask]
 
     camera_viewer = CameraViewer(cameras, point_cloud)
-
-
     view_similarity = trainer.view_clustering.view_similarity
-    # view_overlaps.fill_diagonal_(0.0)
-
 
     while camera_viewer.is_active():
-      # batch_indexes = cluster.select_batch_grouped(args.batch_size, view_overlaps, temperature=args.temperature)
-      batch_indexes = trainer.select_batch(args.batch_size, temperature=args.temperature)
-  
+      batch_indexes = trainer.select_batch(args.min_batch, temperature=args.temperature)
 
-      master_index = batch_indexes[0]
-      master_overlaps = view_similarity[master_index]
+      # batch_indexes = select_group(view_similarity, threshold=args.threshold, min_size=args.min_batch)
+      master_overlaps = view_similarity[batch_indexes[0]]
 
-      print(master_overlaps.max(0), master_index.item())
-
-      if args.temperature > 0:
-        master_overlaps = F.softmax(master_overlaps.log() * 1/args.temperature, dim=0)
+      # if args.temperature > 0:
+      #   master_overlaps = F.softmax(master_overlaps.log() * 1/args.temperature, dim=0)
 
       camera_viewer.show_batch_selection(master_overlaps.squeeze(0), batch_indexes)
       camera_viewer.wait_key()

@@ -37,12 +37,7 @@ def main():
 
   def f(trainer:Trainer):
     paths = trainer.paths()
-
-    if paths.point_cloud.exists():  
-      gaussians = read_gaussians(paths.point_cloud, with_sh=True)
-    else:
-      gaussians = trainer.scene.to_sh_gaussians()
-    gaussians = gaussians.to(trainer.device)
+    gaussians = trainer.load_cloud()
 
     batch_indexes = trainer.select_batch(args.batch_size, temperature=args.temperature)
     cameras = trainer.camera_table.cameras[batch_indexes]

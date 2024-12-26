@@ -94,7 +94,15 @@ class TrainConfig:
 
   # view similarity
   vis_clusters: int = 1024 # number of point clusters to use
-  overlap_temperature: float = 1.0
+
+  # amount of randomness in batch view selection, 0 is deterministic, 1 is quite random
+  overlap_temperature: float = 0.2
+
+  # minimum cluster size
+  min_group_size: int = 25
+
+  # minimum overlap between master view and other views 
+  overlap_threshold: float = 0.5
 
 
   # renderer settings
@@ -347,9 +355,17 @@ class Trainer(Dispatcher):
 
     self.print(f"Checkpoint saved to {colored(paths.checkpoint, 'light_green')}")
 
-  def load_cloud(self, step:Optional[int]=None) -> Gaussians3D:
-    paths = self.paths(step)
-    return read_gaussians(paths.point_cloud)
+  
+
+
+  def load_cloud(self) -> Gaussians3D:
+    paths = self.paths()
+    if paths.point_cloud.exists():  
+      gaussians = read_gaussians(paths.point_cloud, with_sh=True)
+    else:
+      gaussians = self.scene.to_sh_gaussians()
+
+    return gaussians.to(self.device)
 
   @property
   def t(self):
@@ -501,31 +517,34 @@ class Trainer(Dispatcher):
     return {**train, **val, **val_cc}
   
 
-  def select_batch(self, batch_size:int, temperature:Optional[float]=None) -> torch.Tensor:
-    """ Select a batch of camera indexes from the training set.
+  @property
+  def view_weighting(self):
+    return 1 / (self.view_counts + 1)
+
+  def select_cluster(self) -> torch.Tensor:
+    """ Select a cluster of cameras to train on for one densify/prune cycle.
     """
-    if self.view_clustering is None:
-      raise ValueError("View clustering not initialized, call evaluate() first")
+    assert self.view_clustering is not None, "View clustering not initialized, call evaluate() first"
 
-    if temperature is None:
-      temperature = self.config.overlap_temperature
-
-    weighting = 1 / (self.view_counts + 1)
-
-    train_idx = self.view_clustering.select_batch(batch_size, temperature, weighting=weighting)
-    self.view_counts[train_idx] += 1
+    cluster_idx = self.view_clustering.select_batch(self.view_weighting, 
+              self.config.min_group_size, self.config.overlap_threshold)
 
     # Lookup camera table to get camera indexes 
     all_train_idx = self.camera_table.has_label(Label.Training)
-    return all_train_idx[train_idx]
+    return all_train_idx[cluster_idx]
+  
+  # def sample_batch(self, batch_size:int) -> torch.Tensor:
+  #   return self.view_clustering.sample_batch(self.view_counts, 
+  #             batch_size, self.config.overlap_temperature)
 
-  def iter_batch(self, batch_indexes:torch.Tensor):
-    return self.iter_data(self.dataset.loader(batch_indexes.cpu().numpy()))
 
-  def iter_batches(self, batch_size:int):
-    while True:
-      batch_indexes = self.select_batch(batch_size)
-      yield from self.iter_batch(batch_indexes)
+  # def iter_batch(self, batch_indexes:torch.Tensor):
+  #   return self.iter_data(self.dataset.loader(batch_indexes.cpu().numpy()))
+
+  # def iter_batches(self, batch_size:int):
+  #   while True:
+  #     batch_indexes = self.select_batch(batch_size)
+  #     yield from self.iter_batch(batch_indexes)
 
 
   def iter_train(self):
