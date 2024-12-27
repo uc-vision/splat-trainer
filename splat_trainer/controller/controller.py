@@ -37,3 +37,29 @@ class Controller(metaclass=ABCMeta):
   def state_dict(self) -> dict:
     """ Return controller state for checkpointing """
     raise NotImplementedError
+
+
+
+class DisabledConfig(ControllerConfig):
+  def make_controller(self, scene:GaussianScene) -> 'Controller':
+    return DisabledController()
+  
+  def from_state_dict(self, state_dict:dict, scene:GaussianScene) -> 'Controller':
+    return DisabledController()
+  
+
+
+class DisabledController(Controller):
+  def densify_and_prune(self, t:float) -> Dict[str, float]:
+    return {}
+  
+  def step(self, rendering:Rendering, t:float) -> Dict[str, float]:
+    return {}
+  
+  def log_histograms(self, logger:Logger, step:int):
+    pass
+
+  def state_dict(self) -> dict:
+    return {}
+
+  

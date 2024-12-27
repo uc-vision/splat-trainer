@@ -1,8 +1,0 @@
-# @package _global_
-
-
-trainer:
-  controller:
-    _target_: splat_trainer.controller.ThresholdConfig
-    enabled: False
-  
