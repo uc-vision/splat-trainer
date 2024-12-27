@@ -275,7 +275,7 @@ class Trainer(Dispatcher):
         image_idx = np.random.randint(0, self.camera_table.num_images)
         camera_params = self.camera_params(image_idx)
 
-        rendering = self.render(camera_params, image_idx, compute_split_heuristic=True)
+        rendering = self.render(camera_params, image_idx, compute_point_heuristic=True)
         rendering = replace(rendering, image=self.color_corrector.correct(rendering, image_idx))
 
         loss, losses = self.losses(rendering, torch.zeros_like(rendering.image, device=self.device))
@@ -625,7 +625,7 @@ class Trainer(Dispatcher):
 
   def training_step(self, filename:str, camera_params:CameraParams, image_idx:int, image:torch.Tensor) -> dict:
 
-    rendering = self.render(camera_params, image_idx, compute_split_heuristic=True)
+    rendering = self.render(camera_params, image_idx, compute_point_heuristic=True)
     rendering = replace(rendering, image=self.color_corrector.correct(rendering, image_idx))
 
     loss, losses = self.losses(rendering, image)

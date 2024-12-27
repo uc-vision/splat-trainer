@@ -21,7 +21,7 @@ class PointClusters:
 
   @staticmethod
   def cluster (points:torch.Tensor, num_clusters:int) -> 'PointClusters':
-    centroids, point_labels = kmeans(points, min(num_clusters, points.shape[0]))
+    point_labels, centroids = kmeans(points, min(num_clusters, points.shape[0]))
     return PointClusters(point_labels, centroids)
 
   def assign_clusters(self, points:torch.Tensor) -> torch.Tensor:
@@ -144,6 +144,7 @@ def kmeans_iter(x:torch.Tensor, centroids:torch.Tensor, iters:int=100) -> tuple[
         cluster_counts = torch.bincount(cluster_labels, minlength=k).type_as(centroids).view(k, 1)
         centroids /= cluster_counts  
 
+    
     return cluster_labels, centroids  
 
 

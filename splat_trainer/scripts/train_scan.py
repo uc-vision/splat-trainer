@@ -150,7 +150,8 @@ def cfg_from_args():
   if args.checkpoint:
     overrides.append("trainer.save_checkpoints=true")
   
-  args.base_path, run_path, args.run = config.setup_project(args.project, args.run, base_path=args.base_path)
+  base_path = Path(args.base_path) if args.base_path is not None else Path.cwd()
+  args.base_path, run_path, args.run = config.setup_project(args.project, args.run, base_path=base_path)
   os.chdir(str(run_path))
 
   overrides += config.make_overrides(run_name=args.run, project=args.project, base_path=args.base_path)

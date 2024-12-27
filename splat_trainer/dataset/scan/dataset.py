@@ -110,7 +110,7 @@ class ScanDataset(Dataset):
 
   def pointcloud(self) -> Optional[PointCloud]:
     pcd_filename = self.pointcloud_file()  
-    return PointCloud.load(pcd_filename) if pcd_filename is not None else None
+    return PointCloud.load_cloud(pcd_filename) if pcd_filename is not None else None
 
 
 
