@@ -161,8 +161,6 @@ def cfg_from_args():
   hydra.initialize(config_path="../config", version_base="1.2")
   cfg = hydra.compose(config_name="config", overrides=overrides)
 
-  print(f"{termcolor.colored(cfg.base_path, 'red')}", type(cfg.base_path))
-
   if args.show_config:
     print(config.pretty(cfg))
 

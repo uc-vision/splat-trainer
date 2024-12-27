@@ -294,7 +294,6 @@ class Trainer(Dispatcher):
     else:
       color_corrector = NilCorrector(config.device)
 
-    print(state_dict.keys())
     view_clustering = None
     if 'view_clustering' in state_dict:
       view_clustering = cluster.ViewClustering.from_state_dict(state_dict['view_clustering'])

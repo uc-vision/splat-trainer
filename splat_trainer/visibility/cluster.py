@@ -4,7 +4,6 @@ from enum import Enum, auto
 from functools import cached_property
 from typing import List, Optional
 from beartype import beartype
-from matplotlib import pyplot as plt
 import numpy as np
 from taichi_splatting import Rendering
 import torch
@@ -261,6 +260,8 @@ def sinkhorn(matrix: torch.Tensor, num_iter: int, epsilon: float = 1e-8) -> torc
 
 
 def plot_visibility(rendering:Rendering, min_vis:int = 12):
+  from matplotlib import pyplot as plt
+
   n = rendering.visible_indices.shape[0]
   print(", ".join([f"vis < {10**-x}: {((rendering.point_visibility < 10**-x).sum() * 100 / n):.1f}%" for x in range(min_vis)]))
   

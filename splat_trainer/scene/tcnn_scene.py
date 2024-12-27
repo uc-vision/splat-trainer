@@ -262,17 +262,4 @@ class TCNNScene(GaussianScene):
     else:
       return raster
     
-    # visibility = query_visibility(gaussians2d, depth, camera_params.image_size, raster_config)
-    # thresh_mask = visibility > 0.1
-    # indexes = in_view_indexes[thresh_mask]
-
-    # # print(indexes.shape, in_view_indexes.shape, gaussians2d.shape, visibility.shape, indexes.max().item())
-
-    # colour = TaichiQueue.run_sync(self.eval_colors, indexes, camera_params, image_idx)
-    # # colour = self.eval_colors(indexes, camera_params, image_idx)
-    # raster = render_projected(indexes, gaussians2d[thresh_mask], colour, depth[thresh_mask], 
-    #                         camera_params, replace(raster_config, compute_visibility=False), **options)
-
-
-    # return replace(raster, point_visibility=visibility[thresh_mask], config=raster_config)
 
