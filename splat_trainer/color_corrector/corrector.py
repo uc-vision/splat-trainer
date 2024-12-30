@@ -25,7 +25,10 @@ class Corrector(metaclass=ABCMeta):
   def step(self, t:float) -> Dict[str, float]:
     """ perform one step of optimization, returns dict of metrics to log """
     raise NotImplementedError
-  
+
+  @abstractmethod
+  def zero_grad(self):
+    raise NotImplementedError
 
   @abstractmethod
   def state_dict(self) -> Dict[str, Any]:

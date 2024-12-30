@@ -39,6 +39,11 @@ class Logger(metaclass=ABCMeta):
   def log_histogram(self, name:str, values:torch.Tensor | Histogram, step:int):
     raise NotImplementedError
 
+
+  @abstractmethod
+  def log_json(self, name:str, data:dict, step:int):
+    raise NotImplementedError
+
   @abstractmethod
   def close(self):
     raise NotImplementedError
@@ -80,6 +85,10 @@ class CompositeLogger(Logger):
     for logger in self.loggers:
       logger.log_histogram(name, values, step)
 
+  def log_json(self, name:str, data:dict, step:int):
+    for logger in self.loggers:
+      logger.log_json(name, data, step)
+
   def close(self):
     for logger in self.loggers:
       logger.close()
@@ -108,6 +117,9 @@ class NullLogger(Logger):
     pass
 
   def log_histogram(self, name:str, values:torch.Tensor | Histogram, step:int):
+    pass
+
+  def log_json(self, name:str, data:dict, step:int):
     pass
 
   def close(self):

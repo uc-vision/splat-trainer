@@ -15,12 +15,13 @@ from splat_trainer.logger.logger import Logger
 from splat_trainer.scene.io import write_gaussians
 from splat_trainer.scene.scene import GaussianSceneConfig, GaussianScene
 from splat_trainer.gaussians.split import  point_basis, split_gaussians_uniform
-from splat_trainer.scene.util import parameters_from_gaussians, pop_raster_config
+from splat_trainer.scene.util import pop_raster_config
 from splat_trainer.util.misc import   rgb_to_sh
 
 from taichi_splatting import Gaussians3D, render_gaussians, Rendering
 from taichi_splatting.perspective import CameraParams
-from taichi_splatting.optim import SparseAdam, ParameterClass
+from taichi_splatting.optim import SparseAdam, ParameterClass, VisibilityAwareLaProp
+
 
 
 @beartype
@@ -38,7 +39,12 @@ class SHConfig(GaussianSceneConfig):
   beta1:float = 0.9
   beta2:float = 0.999
 
+  vis_beta:float = 0.9
 
+
+  def optim_options(self):
+    return dict(optimizer=VisibilityAwareLaProp, betas=(self.beta1, self.beta2), vis_beta=self.vis_beta,
+                bias_correction=False)
 
   def from_color_gaussians(self, gaussians:Gaussians3D, camera_table:CameraTable, device:torch.device):
 
@@ -47,13 +53,12 @@ class SHConfig(GaussianSceneConfig):
 
     gaussians = gaussians.replace(feature=sh_feature).to(device)
 
-    points = parameters_from_gaussians(gaussians, self.parameters, betas=(self.beta1, self.beta2))
+    points = ParameterClass( gaussians.to_tensordict(), parameter_groups=self.parameters, **self.optim_options())   
     return SHScene(points, self, camera_table)
 
   
   def from_state_dict(self, state:dict, camera_table:CameraTable):
-    points = ParameterClass.from_state_dict(state['points'], 
-          optimizer=SparseAdam, betas=(self.beta1, self.beta2))
+    points = ParameterClass.from_state_dict(state['points'], **self.optim_options())
     
     return SHScene(points, self, camera_table)
 

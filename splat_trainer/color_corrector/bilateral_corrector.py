@@ -67,6 +67,9 @@ class BilateralCorrector(Corrector):
     """ Fit an affine color transform between the two images and return corrected image """
     return fit_affine_colors(rendering.image.unsqueeze(0), source_image.unsqueeze(0)).squeeze(0)
 
+  def zero_grad(self):
+    self.bil_grid_optimizer.zero_grad()
+
   def step(self, t:float) -> Dict[str, float]:
     # update learning rate 
     schedule_lr(self.config.lr, t, self.bil_grid_optimizer)
@@ -76,7 +79,7 @@ class BilateralCorrector(Corrector):
       tvloss.backward()
 
     self.bil_grid_optimizer.step()
-    self.bil_grid_optimizer.zero_grad()
+    self.zero_grad()
 
     return {'tv_loss': tvloss.item()}
 

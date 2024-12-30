@@ -1,4 +1,5 @@
 from functools import partial
+import json
 from numbers import Number
 from beartype.typing import Dict, List
 from beartype import beartype
@@ -122,3 +123,8 @@ class WandbLogger(Logger):
         print(f"Error logging histogram {name}: {e}")
 
     self.queue.put(log)
+
+
+  @beartype
+  def log_json(self, name:str, data:dict, step:int):
+    self.log_data({name:json.dumps(data, indent=2)}, step=step)

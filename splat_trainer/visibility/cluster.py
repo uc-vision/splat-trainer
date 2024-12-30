@@ -60,7 +60,8 @@ class PointClusters:
   @classmethod
   def from_state_dict(cls, state_dict):
     return cls(state_dict['point_labels'], state_dict['centroids'])
-
+  
+@beartype
 class ViewClustering:
   def __init__(self, point_clusters:PointClusters, cluster_visibility:torch.Tensor, metric:str='cosine'):
     assert metric in ['cosine', 'euclidean'], f"Unknown metric: {metric}, expected 'cosine' or 'euclidean'"
@@ -83,13 +84,23 @@ class ViewClustering:
     elif self.metric == 'euclidean':
       return torch.cdist(cluster_visibility, cluster_visibility, p=2)
 
-  def select_batch(self, weighting:torch.Tensor, min_batch_size:int, overlap_threshold:float=0.5) -> torch.Tensor:
-    return select_batch(self.view_similarity, weighting, min_batch_size, overlap_threshold)
+  @beartype
+  def select_batch(self, weighting:torch.Tensor,      # (N,) weighting to bias selection towards less used views
+                   min_batch_size:int, 
+                   overlap_threshold:float=0.5
+                   ) -> torch.Tensor:                 # (K,) camera indices
+    return select_batch(self.view_similarity, weighting, min_size=min_batch_size, threshold=overlap_threshold)
 
-  def sample_batch(self, weighting:torch.Tensor, batch_size:int, temperature:float=1.0) -> torch.Tensor:
+  @beartype
+  def sample_batch(self, 
+                   weighting:torch.Tensor,  # (N,) weighting to bias selection towards less used views
+                   batch_size:int, 
+                   temperature:float=1.0
+                   ) -> torch.Tensor:       # (batch_size,) camera indices
     return sample_batch(self.view_similarity, weighting, batch_size, temperature)
   
-  
+  @beartype
+
   def visible_points(self, batch_indices:torch.Tensor) -> torch.Tensor:
     cluster_visibility = self.cluster_visibility[batch_indices].sum(dim=0)
     visible_mask = cluster_visibility[self.point_clusters.point_labels] > 0
@@ -112,6 +123,7 @@ class ViewClustering:
     return cls(point_clusters, cluster_visibility, metric)
 
 
+@beartype
 def assign_clusters(x:torch.Tensor, centroids:torch.Tensor) -> torch.Tensor:
   assert x.dim() == 2 and centroids.dim() == 2 and x.shape[1] == centroids.shape[1], \
     f"Expected x and centroids to have the same number of features, got: {x.shape} and {centroids.shape}"
@@ -122,7 +134,7 @@ def assign_clusters(x:torch.Tensor, centroids:torch.Tensor) -> torch.Tensor:
   D_ij = ((x_i - c_j) ** 2).sum(-1)  # (N, K) symbolic squared distances
   return D_ij.argmin(dim=1).long().view(-1)  # Points -> Nearest cluster
 
-
+@beartype
 def kmeans_iter(x:torch.Tensor, centroids:torch.Tensor, iters:int=100) -> tuple[torch.Tensor, torch.Tensor]:
     N, D = x.shape  # Number of samples, dimension
     k = centroids.shape[0]
@@ -158,6 +170,7 @@ def kmeans(x:torch.Tensor, k:int=10, iters:int=100) -> tuple[torch.Tensor, torch
 
 
 
+@beartype
 def sample_with_temperature(p:torch.Tensor, temperature:float=1.0, n:int=1, weighting:Optional[torch.Tensor]=None):
   # select other cameras with probability proportional to view overlap with the selected camera
   # temperature > 1 means more uniform sampling
@@ -174,6 +187,7 @@ def sample_with_temperature(p:torch.Tensor, temperature:float=1.0, n:int=1, weig
       p = F.normalize(p * weighting, dim=0, p=1)
     return torch.multinomial(p, n, replacement=False)
 
+@beartype
 def select_weighted(weighting:Optional[torch.Tensor], n:int) -> torch.Tensor:
   if weighting is not None:
     return 
@@ -181,6 +195,7 @@ def select_weighted(weighting:Optional[torch.Tensor], n:int) -> torch.Tensor:
     return torch.randint(0, weighting.shape[0], (n,))
 
 
+@beartype
 def select_batch(view_similarity:torch.Tensor,
                 weighting:torch.Tensor,
                 threshold:float=0.4, min_size:int=25) -> torch.Tensor:
@@ -193,8 +208,9 @@ def select_batch(view_similarity:torch.Tensor,
 
   group_mask = view_similarity[index] > threshold
   n =  max(group_mask.sum().item(), min_size)
-  return torch.topk(view_similarity[index], k=n, sorted=True).indices
+  return torch.topk(view_similarity[index], k=n, sorted=True).indices.squeeze(0)
 
+@beartype
 def sample_batch(view_overlaps:torch.Tensor, 
                   weighting:torch.Tensor,
                   batch_size:int,
@@ -212,6 +228,7 @@ def sample_batch(view_overlaps:torch.Tensor,
   
 
 
+@beartype
 def sample_batch_grouped(batch_size:int,  
                   view_overlaps:torch.Tensor, 
                   weighting:torch.Tensor,
@@ -235,6 +252,7 @@ def sample_batch_grouped(batch_size:int,
 
 
 
+@beartype
 def sinkhorn(matrix: torch.Tensor, num_iter: int, epsilon: float = 1e-8) -> torch.Tensor:
     """Applies Sinkhorn-Knopp algorithm to make matrix doubly stochastic.
     
@@ -259,6 +277,7 @@ def sinkhorn(matrix: torch.Tensor, num_iter: int, epsilon: float = 1e-8) -> torc
     return matrix
 
 
+@beartype
 def plot_visibility(rendering:Rendering, min_vis:int = 12):
   from matplotlib import pyplot as plt
 

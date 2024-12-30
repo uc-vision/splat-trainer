@@ -15,7 +15,7 @@ from splat_trainer.scene.mlp.torch_mlp import DirectionalMLP
 
 
 def torch_model(args):
-  model = DirectionalMLP(args.inputs, args.outputs, args.hidden, args.layers, 
+  model = DirectionalMLP(args.inputs, args.outputs, args.hidden, args.hidden_layers, 
             norm=partial(torch.nn.LayerNorm, elementwise_affine=False) if args.norm else nn.Identity, 
             activation=nn.ReLU, 
             output_activation=nn.Sigmoid,
@@ -46,7 +46,7 @@ def mlp_tcnn(args):
       activation = "ReLU",
       output_activation = "Sigmoid",
       n_neurons = args.hidden,
-      n_hidden_layers = args.layers,
+      n_hidden_layers = args.hidden_layers,
     )
   )
 
@@ -118,7 +118,7 @@ def main():
   parser = argparse.ArgumentParser("Benchmark tcnn")
   parser.add_argument("--n", type=int, default=1000000, help="Number of points")
   parser.add_argument("--hidden", type=int, default=64, help="Number of hidden neurons")
-  parser.add_argument("--layers", type=int, default=3, help="Number of hidden layers")
+  parser.add_argument("--hidden_layers", type=int, default=3, help="Number of hidden layers")
 
   parser.add_argument("--inputs", type=int, default=32, help="Number of features")
   parser.add_argument("--outputs", type=int, default=3, help="Output dimensions")

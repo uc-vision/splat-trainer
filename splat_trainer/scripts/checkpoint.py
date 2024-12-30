@@ -55,8 +55,8 @@ def load_checkpoint(splat_path:Path, step:Optional[int]=None):
 
 
 def init_from_checkpoint(config, state_dict):
-  dataset = hydra.utils.instantiate(config.dataset)  
-  train_config = hydra.utils.instantiate(config.trainer)
+  dataset = hydra.utils.instantiate(config.dataset, _convert_="object")  
+  train_config = hydra.utils.instantiate(config.trainer, _convert_="object")
 
   logger = hydra.utils.instantiate(config.logger)
 
@@ -90,6 +90,7 @@ def with_trainer(f:Callable[[Trainer], None], args:Namespace):
 
   state_dict, workspace_path = load_checkpoint(args.splat_path, args.step)
   config = OmegaConf.load(workspace_path / "config.yaml")
+  
 
   if not args.enable_logging:
     config.logger = OmegaConf.create({"_target_": "splat_trainer.logger.NullLogger"})
@@ -97,7 +98,6 @@ def with_trainer(f:Callable[[Trainer], None], args:Namespace):
 
   args.base_path, run_path, args.run = setup_project(config.project, args.run or config.run_name, 
         workspace_path.parent.parent if args.base_path is None else args.base_path)
-  os.chdir(str(run_path))
   
   overrides += make_overrides(run_name=args.run,  base_path=args.base_path)
 
@@ -126,6 +126,8 @@ def with_trainer(f:Callable[[Trainer], None], args:Namespace):
     dataset.resize_longest = int(dataset.resize_longest * resize_longest)
 
   trainer = init_from_checkpoint(config, state_dict)
+  os.chdir(str(run_path))
+
 
   try:
     f(trainer)

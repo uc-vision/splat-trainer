@@ -98,6 +98,7 @@ VaryingInt = Varying[int] | int
 
 
 def eval_varyings(value, t:float):
+  
   if isinstance(value, IsDataclass):
     return resolve_varying(value, t, deep=True)
   if isinstance(value, Mapping):
@@ -148,12 +149,16 @@ def schedule_lr(v:Varying[float] | float, t:float,  optimizer:Optimizer):
 
 @beartype
 def schedule_groups(groups:dict[str, VaryingFloat], t:float, optimizer:Optimizer):
-    for param_group in optimizer.param_groups:
-      if param_group['name'] in groups:
-        param_group['lr'] = eval_varying(groups[param_group['name']], t)
+  group_dict = {param_group['name']: param_group for param_group in optimizer.param_groups}
 
+  for name, lr in groups.items(): 
+      if not name in group_dict:
+          raise KeyError(f"Group {name} not found in optimizer")
+      
+      group_dict[name]['lr'] = eval_varying(lr, t)
 
-
+  # reutrn all the learning rates
+  return {param_group['name']: param_group['lr'] for param_group in optimizer.param_groups}
 
 
 def target(name:str, **kwargs):

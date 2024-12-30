@@ -16,6 +16,7 @@ class GLOTable(torch.nn.Module):
   def __init__(self, n:int, glo_features:int):
     super().__init__()
     self.embeddings = nn.Embedding(n, glo_features, sparse=True)
+    torch.nn.init.normal_(self.embeddings.weight, mean=0.0, std=1.0)
 
   def interpolated(self, weights:torch.Tensor):
     assert weights.shape[0] == self.embeddings.num_embeddings
@@ -36,10 +37,10 @@ class GLOTable(torch.nn.Module):
       dict(params=self.embeddings.parameters(), lr=lr_glo, name="glo"),
     ]
 
-    return torch.optim.SparseAdam(param_groups, betas=(0.9, 0.999))
+    return torch.optim.SparseAdam(param_groups, betas=(0.8, 0.95))
 
   def schedule(self, optimizer, lr_glo: VaryingFloat, t:float):
-    schedule_groups(dict(glo=lr_glo), t, optimizer)
+    return schedule_groups(dict(glo=lr_glo), t, optimizer)
 
 
 
@@ -54,7 +55,7 @@ class ColorModel(torch.nn.Module):
                point_features:int       = 16,
 
                hidden_features:int     = 64,
-               layers:int             = 2,
+               hidden_layers:int             = 2,
 
                color_channels:int     = 3,
                sh_degree:int          = 3):
@@ -65,7 +66,7 @@ class ColorModel(torch.nn.Module):
     
     self.color_model = AffineMLP( 
         inputs=self.feature_size, outputs=color_channels,
-        layers=layers, 
+        hidden_layers=hidden_layers, 
         hidden=hidden_features,
         sh_degree=sh_degree,
         output_activation=nn.Sigmoid,
@@ -86,12 +87,12 @@ class ColorModel(torch.nn.Module):
     return self.color_model(dir, feature).to(torch.float32)
   
 
-  def optimizer(self, lr_nn:VaryingFloat):
+  def optimizer(self, lr_nn:VaryingFloat) -> torch.optim.Optimizer:
     lr_nn = eval_varying(lr_nn, 0.)
     param_groups = [
       dict(params=self.color_model.parameters(), lr=lr_nn, name="nn"),
     ]
-    return torch.optim.Adam(param_groups, betas=(0.9, 0.999))
+    return torch.optim.Adam(param_groups, betas=(0.9, 0.99))
   
-  def schedule(self, optimizer, lr_nn: VaryingFloat, t:float):
-    schedule_groups(dict(nn=lr_nn), t, optimizer)
+  def schedule(self, optimizer:torch.optim.Optimizer, lr_nn: VaryingFloat, t:float):
+    return schedule_groups(dict(nn=lr_nn), t, optimizer)

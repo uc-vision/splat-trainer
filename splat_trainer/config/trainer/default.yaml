@@ -27,10 +27,13 @@ trainer:
   l1_weight: 1.0
   ssim_levels: 4
 
-  scale_reg: ${log_decay:1.0, 0.1}
-  opacity_reg: ${log_decay:0.1, 0.01}
+  scale_reg: ${log_decay:0.01, 0.01}
+  opacity_reg: ${log_decay:0.001, 0.01}
   
-  aspect_reg: 0.0
+  # scale_reg: 0.0
+  # opacity_reg: 0.0
+  
+  aspect_reg: 0.0001
 
   blur_cov: 0.3 # only used if antialias is false
   antialias: False

@@ -1,8 +1,0 @@
-# @package _global_
-
-trainer:
-  color_corrector: 
-    _target_: splat_trainer.color_corrector.BilateralCorrectorConfig
-    tv_weight: 1.0
-    bilateral_grid_shape: [16, 16, 8]
-    lr: ${log_decay:0.0002, 0.1}

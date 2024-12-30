@@ -6,7 +6,6 @@ defaults:
   - logger: none
   - controller: target
   - scene: tcnn
-  - color_corrector: nil
   - trainer: default
   - viewer: none
 

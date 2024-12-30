@@ -110,6 +110,8 @@ class TargetController(Controller):
     # prune_rate = (config.prune_rate * config.densify_interval/100)
     n_prune = math.ceil(config.prune_rate * n * (1 - t))
 
+    # n_prune = math.ceil(config.prune_rate * n)
+
     
 
     n = self.points.split_score.shape[0]
@@ -165,11 +167,11 @@ class TargetController(Controller):
     points = self.points
 
     # Some alternative update rule
-    # points.split_score[idx] += rendering.split_score
-    # points.prune_cost[idx] +=  rendering.prune_cost
+    points.split_score[idx] += rendering.split_score
+    points.prune_cost[idx] +=  rendering.prune_cost
 
-    points.split_score[idx] = exp_lerp(self.config.split_alpha, rendering.split_score, points.split_score[idx])    
-    points.prune_cost[idx] = exp_lerp(self.config.prune_alpha, rendering.prune_cost, points.prune_cost[idx])
+    # points.split_score[idx] = exp_lerp(self.config.split_alpha, rendering.split_score, points.split_score[idx])    
+    # points.prune_cost[idx] = exp_lerp(self.config.prune_alpha, rendering.prune_cost, points.prune_cost[idx])
 
     # points.split_score[idx] = max_decaying(points.split_score[idx], rendering.split_score, self.config.split_alpha)
     # points.prune_cost[idx] = max_decaying(points.prune_cost[idx], rendering.prune_cost, self.config.prune_alpha)

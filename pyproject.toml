@@ -71,6 +71,8 @@ checkpoint-show-batch = "splat_trainer.scripts.view_batching:main"
 checkpoint-benchmark = "splat_trainer.scripts.benchmark:main"
 checkpoint-view-clusters = "splat_trainer.scripts.view_clusters:main"
 
+checkpoint-eval-pruning = "splat_trainer.scripts.eval_pruning:main"
+
 
 [tool.setuptools.package-data]
 

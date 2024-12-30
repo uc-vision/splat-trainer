@@ -1,7 +1,7 @@
 from typing import Dict, Tuple, Any
 from taichi_splatting import Gaussians3D, RasterConfig, Rendering
 
-from taichi_splatting.optim import SparseAdam, ParameterClass
+from taichi_splatting.optim import SparseAdam, ParameterClass, VisibilityAwareLaProp
 
 from tensordict import TensorDict
 import torch
@@ -49,18 +49,3 @@ def update_depth(points:ParameterClass, rendering:Rendering, depth_ema:float):
 
   return running_depth
 
-
-
-def parameters_from_gaussians(gaussians:Gaussians3D, parameters:Dict[str, float], betas:Tuple[float, float]) -> ParameterClass:
-
-    points_dict:TensorDict = gaussians.to_tensordict().update(dict(
-      running_depth = torch.zeros(gaussians.batch_size[0], device=gaussians.position.device)))
-  
-    # parameter_groups = {k:dict(lr=lr, type='vector' if k == 'position' else 'scalar') 
-    #                     for k, lr in learning_rates.items()}
-
-      
-    return ParameterClass(points_dict, 
-          parameter_groups=parameters, 
-          optimizer=SparseAdam,
-          betas=betas)   

@@ -1,55 +1,62 @@
+# Python standard library
 from dataclasses import dataclass, replace
 from enum import Enum
 from functools import cached_property, partial
 import heapq
 import json
 from pathlib import Path
+import time
 from types import SimpleNamespace
-from typing import Callable, Tuple
+from typing import Callable, Iterator, Optional, Tuple
 
-from tqdm import tqdm 
-from termcolor import colored
-
+# Third party packages
 from beartype import beartype
 from beartype.typing import Optional
-import numpy as np
-import torch
-
 from fused_ssim import fused_ssim
-import torch.nn.functional as F
-
+import numpy as np
+import pandas as pd
 from pydispatch import Dispatcher
- 
-from splat_trainer.camera_table.camera_table import Camera, Label, camera_adjacency_matrix, camera_json
-from splat_trainer.color_corrector.nil_corrector import NilCorrector
-from splat_trainer.controller.controller import Controller
-from splat_trainer.logger.logger import CompositeLogger
-from splat_trainer.scene.io import read_gaussians, write_gaussians
-from splat_trainer.scene.scene import GaussianScene
-from splat_trainer.config import VaryingFloat, VaryingInt, eval_varying
-from splat_trainer.util.pointcloud import PointCloud
-from splat_trainer.color_corrector.util.lib_bilagrid import fit_affine_colors
 
+from tensordict import TensorDict
+from termcolor import colored
+import torch
+import torch.nn.functional as F
+from tqdm import tqdm
 
-from splat_trainer.visibility.query_points import crop_cloud, random_cloud
 from taichi_splatting import Gaussians3D, RasterConfig, Rendering
 from taichi_splatting.perspective import CameraParams
 
+# Local imports
+from splat_trainer.camera_table.camera_table import Camera, Label, camera_json
 from splat_trainer.dataset import Dataset
-from splat_trainer.gaussians.loading import from_pointcloud
+from splat_trainer.dataset.dataset import CameraView
 
-from splat_trainer.logger import Logger
+from splat_trainer.color_corrector.util.lib_bilagrid import fit_affine_colors
 
-from splat_trainer.scene.sh_scene import  GaussianSceneConfig
-from splat_trainer.util.colorize import colorize, get_cv_colormap
-from splat_trainer.util.containers import transpose_rows
-from splat_trainer.util.misc import CudaTimer, next_multiple, strided_indexes
-from splat_trainer.visibility import cluster, query_points
-
+from splat_trainer.config import VaryingFloat, VaryingInt, clamp, eval_varying
 from splat_trainer.controller import ControllerConfig
-from splat_trainer.color_corrector import CorrectorConfig, Corrector
+from splat_trainer.controller.controller import Controller
 
-import time
+from splat_trainer.debug.optim import print_stats, print_table
+from splat_trainer.logger import Logger
+from splat_trainer.logger.logger import CompositeLogger
+
+from splat_trainer.gaussians.loading import from_pointcloud
+from splat_trainer.util.pointcloud import PointCloud
+
+from splat_trainer.scene.io import read_gaussians, write_gaussians
+from splat_trainer.scene.scene import GaussianScene, PointHeuristics
+from splat_trainer.scene.sh_scene import GaussianSceneConfig
+
+from splat_trainer.visibility import cluster
+from splat_trainer.visibility.query_points import crop_cloud, random_cloud
+
+from splat_trainer.util.colorize import colorize, get_cv_colormap
+from splat_trainer.util.containers import mean_rows, transpose_rows
+
+from splat_trainer.util.misc import CudaTimer, next_multiple, strided_indexes
+
+
 
 
 @beartype
@@ -59,7 +66,6 @@ class TrainConfig:
 
   steps: int 
   scene: GaussianSceneConfig
-  color_corrector: CorrectorConfig
   controller: ControllerConfig
 
   load_model: Optional[str] = None
@@ -158,7 +164,6 @@ class Trainer(Dispatcher):
 
   def __init__(self, config:TrainConfig,
                 scene:GaussianScene, 
-                color_corrector: Corrector,
                 controller:Controller,
                 dataset:Dataset,              
                 logger:Logger,
@@ -170,7 +175,6 @@ class Trainer(Dispatcher):
     self.device = torch.device(config.device)
     self.controller = controller
     self.scene = scene
-    self.color_corrector = color_corrector
     self.dataset = dataset
 
     self.camera_table = dataset.camera_table().to(self.device)
@@ -255,7 +259,6 @@ class Trainer(Dispatcher):
     controller = config.controller.make_controller(scene)
 
     num_images = camera_table.num_images
-    color_corrector = config.color_corrector.make_corrector(num_images, config.device)
 
     if config.save_output:
       output_path = Path.cwd()
@@ -264,7 +267,7 @@ class Trainer(Dispatcher):
       with open(output_path / "cameras.json", "w") as f:
         json.dump(camera_json(camera_table), f)
 
-    return Trainer(config, scene, color_corrector, controller, dataset, logger)
+    return Trainer(config, scene, controller, dataset, logger)
       
 
   def warmup(self):
@@ -276,7 +279,6 @@ class Trainer(Dispatcher):
         camera_params = self.camera_params(image_idx)
 
         rendering = self.render(camera_params, image_idx, compute_point_heuristic=True)
-        rendering = replace(rendering, image=self.color_corrector.correct(rendering, image_idx))
 
         loss, losses = self.losses(rendering, torch.zeros_like(rendering.image, device=self.device))
         loss.backward()
@@ -287,33 +289,32 @@ class Trainer(Dispatcher):
     camera_table = dataset.camera_table().to(device)
 
     scene = config.scene.from_state_dict(state_dict['scene'], camera_table)
-    controller = config.controller.from_state_dict(state_dict['controller'], scene)
+    controller = config.controller.from_state_dict(state_dict['controller'], scene) 
 
-    if 'color_corrector' in state_dict:
-      color_corrector = config.color_corrector.from_state_dict(state_dict['color_corrector'], device=config.device)
-    else:
-      color_corrector = NilCorrector(config.device)
-
-    view_clustering = None
-    if 'view_clustering' in state_dict:
+    if state_dict['view_clustering'] is not None:
       view_clustering = cluster.ViewClustering.from_state_dict(state_dict['view_clustering'])
+    else:
+      view_clustering = None
 
-    return Trainer(config, scene, color_corrector, controller, dataset, logger, 
+    return Trainer(config, scene, controller, dataset, logger, 
                    step=state_dict['step'],
                    view_clustering=view_clustering,
                    view_counts=state_dict.get('view_counts', None))
 
   def state_dict(self):
-    assert self.view_clustering is not None, "View clustering not initialized, call evaluate() first"
 
     return dict(step=self.step, 
                 scene=self.scene.state_dict(), 
                 controller=self.controller.state_dict(),
-                color_corrector=self.color_corrector.state_dict(),
                 
                 view_clustering=self.view_clustering.state_dict(),
                 view_counts=self.view_counts)
   
+
+
+  def clone(self) -> 'Trainer':
+    state = self.state_dict()
+    return self.from_state_dict(self.config, self.dataset, self.logger, state)
 
   @property
   def output_path(self):
@@ -344,7 +345,6 @@ class Trainer(Dispatcher):
 
   def write_checkpoint(self):
     paths = self.paths()
-    write_gaussians(paths.point_cloud, self.scene.to_sh_gaussians(), with_sh=True)  
     
     with open(paths.cameras, "w") as f:
       json.dump(camera_json(self.camera_table), f)
@@ -352,9 +352,10 @@ class Trainer(Dispatcher):
     checkpoint = self.state_dict()
     torch.save(checkpoint, paths.checkpoint)
 
+    write_gaussians(paths.point_cloud, self.scene.to_sh_gaussians(), with_sh=True)  
     self.print(f"Checkpoint saved to {colored(paths.checkpoint, 'light_green')}")
 
-  
+
 
 
   def load_cloud(self) -> Gaussians3D:
@@ -368,7 +369,7 @@ class Trainer(Dispatcher):
 
   @property
   def t(self):
-    return self.step / self.total_steps
+    return clamp(self.step / self.total_steps, 0.0, 1.0)
   
   @property
   def total_steps(self):
@@ -482,17 +483,19 @@ class Trainer(Dispatcher):
     self.logger.log_evaluations(f"eval_{name}/evals", rows, step=self.step)
     totals = transpose_rows(list(rows.values()))
 
+    means = {k:float(np.mean(v)) for k, v in totals.items()}
+
     for k, v in totals.items():
-      self.log_value(f"eval_{name}/{k}", np.mean(v))
+      self.log_value(f"eval_{name}/{k}", means[k])
       self.log_histogram(f"eval_{name}/{k}_hist", torch.tensor(v))
 
     view_clusters = cluster.ViewClustering(point_clusters, torch.stack(vis_features))
     
-    return {f"{name}_psnr": float(np.mean(totals['psnr']))}, view_clusters
+    return {f"{name}_psnr": means['psnr'],
+            f"{name}_ssim": means['ssim']
+           }, view_clusters
 
 
-  def evaluate_trained(self, rendering, source_image, image_idx):
-    return self.color_corrector.correct(rendering, image_idx)
   
   def evaluate_fit(self, rendering, source_image):
     return fit_affine_colors(rendering.image, source_image)
@@ -500,10 +503,8 @@ class Trainer(Dispatcher):
 
   def evaluate(self):
     train, self.view_clustering = self.evaluate_dataset("train", self.dataset.train(shuffle=False), 
-        correct_image=self.evaluate_trained,
         log_count=self.config.num_logged_images, 
         worst_count=self.config.log_worst_images)
-    
     
     val, _ = self.evaluate_dataset("val", self.dataset.val(), 
       log_count=self.config.num_logged_images, worst_count=self.config.log_worst_images)
@@ -527,6 +528,7 @@ class Trainer(Dispatcher):
 
     cluster_idx = self.view_clustering.select_batch(self.view_weighting, 
               self.config.min_group_size, self.config.overlap_threshold)
+    
 
     # Lookup camera table to get camera indexes 
     all_train_idx = self.camera_table.has_label(Label.Training)
@@ -537,31 +539,35 @@ class Trainer(Dispatcher):
   #             batch_size, self.config.overlap_temperature)
 
 
-  # def iter_batch(self, batch_indexes:torch.Tensor):
-  #   return self.iter_data(self.dataset.loader(batch_indexes.cpu().numpy()))
+
+
+
+
+
+  def iter_train(self, shuffle:bool=True):
+    while True:
+      train = self.iter_data(self.dataset.train(shuffle=shuffle))
+      yield from train
+
+
+  def load_data(self, camera_view:CameraView) -> Tuple[str, CameraParams, int, torch.Tensor]:
+    filename, image, image_idx = camera_view
+    
+    image = image.to(self.device, non_blocking=True) 
+    image = image.to(dtype=torch.float) / 255.0
+    camera_params = self.camera_params(image_idx)
+
+    return filename, camera_params, image_idx, image
+  
+  def iter_data(self, iter:Iterator[CameraView]) -> Iterator[Tuple[str, CameraParams, int, torch.Tensor]]:
+    for camera_view in iter:
+      yield self.load_data(camera_view)
+
 
   # def iter_batches(self, batch_size:int):
   #   while True:
   #     batch_indexes = self.select_batch(batch_size)
   #     yield from self.iter_batch(batch_indexes)
-
-
-  def iter_train(self):
-    while True:
-      train = self.iter_data(self.dataset.train(shuffle=True))
-      yield from train
-
-  
-  def iter_data(self, iter):
-    for filename, image, image_idx in iter:
-      image = image.to(self.device, non_blocking=True) 
-      
-      image = image.to(dtype=torch.float) / 255.0
-      camera_params = self.camera_params(image_idx)
-
-      yield filename, camera_params, image_idx, image
-
-  
 
 
   def compute_ssim_loss(self, pred:torch.Tensor, ref:torch.Tensor, levels:int=4):
@@ -582,14 +588,16 @@ class Trainer(Dispatcher):
 
 
   def reg_loss(self, rendering:Rendering) -> Tuple[torch.Tensor, dict]:
-    scale_term = (rendering.point_scale / rendering.camera.focal_length[0]).pow(2)
-    aspect_term = (rendering.point_scale.max(-1).values / rendering.point_scale.min(-1).values)
-    opacity_term = rendering.point_opacity
+    vis = rendering.point_visibility 
+
+    scale_term = vis.unsqueeze(-1) * (rendering.point_scale / rendering.camera.focal_length[0]).pow(2)
+    aspect_term = vis * (rendering.point_scale.max(-1).values / (rendering.point_scale.min(-1).values + 1e-6))
+    opacity_term = vis * (rendering.point_opacity)
 
     regs = dict(
-      opacity_reg   =  opacity_term.mean() * eval_varying(self.config.opacity_reg, self.t),  
-      scale_reg     =  scale_term.mean() * eval_varying(self.config.scale_reg, self.t),
-      aspect_reg    =  aspect_term.mean() * eval_varying(self.config.aspect_reg, self.t),
+      opacity_reg   =  (opacity_term).mean() * eval_varying(self.config.opacity_reg, self.t),  
+      scale_reg     =  (scale_term).mean() * eval_varying(self.config.scale_reg, self.t),
+      aspect_reg    =  (aspect_term).mean() * eval_varying(self.config.aspect_reg, self.t),
     )
 
     # include total as "reg"
@@ -621,25 +629,50 @@ class Trainer(Dispatcher):
 
     return loss, metrics
 
+  def evaluate_batch(self, batch_idx:torch.Tensor) -> Tuple[PointHeuristics, dict]:
+    iter_batch = self.iter_data(self.dataset.loader(batch_idx.cpu().numpy()))
+    heuristics = PointHeuristics.new_zeros(self.scene.num_points, self.device)
 
+    loss_metrics = []
+    for filename, camera_params, image_idx, image in iter_batch:
+
+      with torch.enable_grad():
+        rendering = self.render(camera_params, image_idx, compute_point_heuristic=True)
+
+        loss, metrics = self.losses(rendering, image)
+        loss.backward()
+
+      heuristics.add_rendering(rendering) 
+      loss_metrics.append(metrics)
+
+    return heuristics, loss_metrics
+  
+  @property
+  def all_parameters(self) -> TensorDict:
+    return self.scene.all_parameters.to_dict()
+  
+  def zero_grad(self):
+    self.scene.zero_grad()
+
+  def batch_summary(self):
+    heuristics, metrics = self.evaluate_batch(torch.arange(len(self.camera_table), device=self.device))
+    print_stats(self.all_parameters)
+    print_stats(heuristics.to_tensordict())
+    print_table(pd.DataFrame([mean_rows(metrics)]))
+
+  
   def training_step(self, filename:str, camera_params:CameraParams, image_idx:int, image:torch.Tensor) -> dict:
-
     rendering = self.render(camera_params, image_idx, compute_point_heuristic=True)
-    rendering = replace(rendering, image=self.color_corrector.correct(rendering, image_idx))
 
     loss, losses = self.losses(rendering, image)
     loss.backward()
 
     metrics_scene = self.scene.step(rendering, self.t)
-    metrics_cc = self.color_corrector.step(self.t)
-
     with torch.no_grad():
       metrics =  self.controller.step(rendering, self.t)
 
-    del loss
-
     self.step += 1
-    return dict(**losses, **metrics, **metrics_scene, **metrics_cc)
+    return dict(**losses, **metrics, **metrics_scene,  t = self.t)
 
 
   def is_training(self):
@@ -651,13 +684,13 @@ class Trainer(Dispatcher):
     self.pbar.set_description_str(self.state.name)    
 
   
-  def eval_checkpoints(self, save:bool=True):
-      eval_metrics = self.evaluate()
-      if save and self.config.save_output:
-        self.write_checkpoint()
+  def checkpoint(self, save:bool=True):
+    self.scene.log(self.logger, self.step)
 
-      torch.cuda.empty_cache()
-      return eval_metrics
+    if save and self.config.save_output:
+      self.write_checkpoint()
+
+    torch.cuda.empty_cache()
 
   def train(self, state:TrainerState = TrainerState.Training):
     self.state = state
@@ -690,7 +723,8 @@ class Trainer(Dispatcher):
         next_densify += eval_varying(self.config.densify_interval, self.t)
 
       if self.step % self.config.eval_steps == 0:
-        eval_metrics = self.eval_checkpoints(self.config.save_checkpoints)
+        eval_metrics = self.evaluate()
+        self.checkpoint(self.config.save_checkpoints)
 
 
       with torch.enable_grad():
@@ -699,26 +733,25 @@ class Trainer(Dispatcher):
                   for timer in self.render_timers]
 
       torch.cuda.empty_cache()
-
       
       if self.step % self.config.log_interval  == 0:
-        steps = transpose_rows(steps)
-
+        steps = mean_rows(steps)
         self.pbar.update(self.config.log_interval)
 
-        means = {k:np.mean(v) for k, v in steps.items()}
-        metrics = {k:f"{means[k]:.4f}" for k in ['l1', 'ssim', 'reg'] if k in means}
+        metrics = {k:f"{steps[k]:.4f}" for k in ['l1', 'ssim', 'reg'] if k in steps}
         densify_pbar = {k:f"{densify_metrics[k]}" for k in ['split', 'prune', 'n'] if k in densify_metrics}
 
         self.pbar.set_postfix(**metrics, **eval_metrics, **densify_pbar)        
-        self.log_values("train", means)
+        self.log_values("train", steps)
 
-    eval_metrics = self.eval_checkpoints(True)  # always save final checkpoint unless saving is disabled
+    eval_metrics = self.evaluate()
+    self.pbar.set_postfix(**metrics, **eval_metrics)        
+
+
+    self.checkpoint(True)  # always save final checkpoint unless saving is disabled
     self.state = TrainerState.Stopped
 
-    self.pbar.set_postfix(**metrics, **eval_metrics)        
     self.pbar.close()
-
 
     return eval_metrics
     

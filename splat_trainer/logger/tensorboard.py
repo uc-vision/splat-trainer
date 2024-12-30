@@ -1,4 +1,5 @@
 from functools import partial
+import json
 from pprint import pformat
 import subprocess
 from beartype.typing import Dict, List
@@ -102,6 +103,10 @@ class TensorboardLogger(Logger):
       self.enqueue(write_histogram, self.writer, name, values, step)  
 
 
+  @beartype
+  def log_json(self, name:str, data:dict, step:int):
+    self.enqueue(self.writer.add_text, name, json.dumps(data, indent=2), global_step=step)
+
 def write_histogram(writer:SummaryWriter, name:str, hist:Histogram, step:int):
   writer.add_histogram_raw(
     name, 
@@ -112,3 +117,6 @@ def write_histogram(writer:SummaryWriter, name:str, hist:Histogram, step:int):
     bucket_limits=hist.bins[1:],
     bucket_counts=hist.counts,  
     global_step=step)
+
+
+    
