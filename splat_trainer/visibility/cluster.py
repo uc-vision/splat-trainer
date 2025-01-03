@@ -219,11 +219,15 @@ def sample_batch(view_overlaps:torch.Tensor,
   # select initial camera with probability proportional to weighting
   index = torch.multinomial(weighting, 1, replacement=False)
 
-  probs = view_overlaps[index.squeeze(0)] 
-  probs[index.squeeze(0)] = 0 
+  if batch_size > 1:
+    probs = view_overlaps[index.squeeze(0)] 
+    probs[index.squeeze(0)] = 0 
 
-  other_index = sample_with_temperature(probs, temperature=temperature, n=batch_size - 1, weighting=weighting)
-  return torch.cat([index, other_index], dim=0)
+    other_index = sample_with_temperature(probs, temperature=temperature, n=batch_size - 1, weighting=weighting)
+    return torch.cat([index, other_index], dim=0)
+  else:
+    return index
+
 
   
 

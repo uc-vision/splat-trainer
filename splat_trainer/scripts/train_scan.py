@@ -195,7 +195,6 @@ def train_with_config(cfg) -> dict | str:
     dataset = hydra.utils.instantiate(cfg.dataset)
   
     trainer = Trainer.initialize(train_config, dataset, logger)
-    trainer.warmup()
 
     viewer:Viewer = hydra.utils.instantiate(cfg.viewer).create_viewer(trainer, enable_training=True)
 

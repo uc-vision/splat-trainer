@@ -1,6 +1,7 @@
 from abc import ABCMeta, abstractmethod
 from dataclasses import dataclass
 from typing import Any, Dict, Optional, Tuple
+from beartype import beartype
 from beartype.typing import  List
 import torch
 
@@ -57,8 +58,13 @@ class Logger(metaclass=ABCMeta):
   
 
 class CompositeLogger(Logger):
+  @beartype
   def __init__(self, *loggers:Logger):
     self.loggers = list(loggers)
+
+  def step(self, progress:Progress):
+    for logger in self.loggers:
+      logger.step(progress)
 
   def add_logger(self, logger:Logger):
     self.loggers.append(logger)

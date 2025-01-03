@@ -1,13 +1,12 @@
 # Python standard library
-from dataclasses import dataclass, replace
+from dataclasses import replace
 from enum import Enum
-from functools import cached_property, partial
-import heapq
+from functools import partial
 import json
 from pathlib import Path
 import time
 from types import SimpleNamespace
-from typing import Callable, Iterable, Iterator, Optional, Tuple, Any, Union, Protocol
+from typing import Callable, Iterable, Iterator, Optional, Tuple
 
 # Third party packages
 from beartype import beartype
@@ -23,7 +22,7 @@ import torch
 import torch.nn.functional as F
 from tqdm import tqdm
 
-from taichi_splatting import Gaussians3D, RasterConfig, Rendering
+from taichi_splatting import Gaussians3D, Rendering
 from taichi_splatting.perspective import CameraParams
 
 # Local imports
@@ -31,10 +30,8 @@ from splat_trainer.camera_table.camera_table import Camera, Label, camera_json
 from splat_trainer.dataset import Dataset
 from splat_trainer.dataset.dataset import CameraView
 
-from splat_trainer.color_corrector.util.lib_bilagrid import fit_affine_colors
 
-from splat_trainer.config import Progress, VaryingFloat, VaryingInt, clamp, eval_varying
-from splat_trainer.controller import ControllerConfig
+from splat_trainer.config import Progress, eval_varying
 from splat_trainer.controller.controller import Controller
 
 from splat_trainer.debug.optim import print_stats, print_table
@@ -43,11 +40,11 @@ from splat_trainer.logger.logger import CompositeLogger, StateLogger
 
 from splat_trainer.gaussians.loading import from_pointcloud
 from splat_trainer.trainer.config import TrainConfig
-from splat_trainer.trainer.evaluation import DatasetEvaluator, Evaluation, ViewClusteringEvaluator
+from splat_trainer.trainer.evaluation import Evaluation
 from splat_trainer.util.pointcloud import PointCloud
 
 from splat_trainer.scene.io import read_gaussians, write_gaussians
-from splat_trainer.scene.scene import GaussianScene, GaussianSceneConfig
+from splat_trainer.scene.scene import GaussianScene
 
 from splat_trainer.visibility import cluster
 from splat_trainer.visibility.query_points import crop_cloud, random_cloud
@@ -55,7 +52,7 @@ from splat_trainer.visibility.query_points import crop_cloud, random_cloud
 from splat_trainer.util.colorize import colorize, get_cv_colormap
 from splat_trainer.util.containers import mean_rows, transpose_rows
 
-from splat_trainer.util.misc import Heap, next_multiple, strided_indexes
+from splat_trainer.util.misc import Heap, next_multiple
 
 
 
@@ -94,7 +91,7 @@ class Trainer(Dispatcher):
 
 
     self.state_logger = StateLogger()
-    self.logger = CompositeLogger([self.state_logger, logger])
+    self.logger = CompositeLogger(self.state_logger, logger)
 
 
     self.color_map = get_cv_colormap().to(self.device)
@@ -327,7 +324,7 @@ class Trainer(Dispatcher):
         worst.push(-eval.metrics['psnr'], eval)
 
         metrics[eval.filename] = eval.metrics
-        view_features.append(point_clusters.features(eval.rendering.point_visibility))
+        view_features.append(point_clusters.view_features(*eval.rendering.visible))
         
         pbar.update(1)
         pbar.set_postfix(**{k:f"{v:.3f}" for k, v in eval.metrics.items()})
@@ -411,8 +408,11 @@ class Trainer(Dispatcher):
     return all_train_idx[cluster_idx]
   
   
+  @beartype
   def sample_batch(self, batch_size:int) -> torch.Tensor:
-    batch_idx = self.view_clustering.sample_batch(self.view_counts, 
+
+    weighting = F.normalize(1 / (self.view_counts + 1), p=1, dim=0)
+    batch_idx = self.view_clustering.sample_batch(weighting, 
               batch_size, self.config.overlap_temperature)
     
     self.view_counts[batch_idx] += 1
@@ -458,14 +458,18 @@ class Trainer(Dispatcher):
   def reg_loss(self, rendering:Rendering) -> Tuple[torch.Tensor, dict]:
     vis = rendering.point_visibility 
 
-    scale_term = vis.unsqueeze(-1) * (rendering.point_scale / rendering.camera.focal_length[0]).pow(2)
+    scale_term =  (rendering.point_scale / rendering.camera.focal_length[0]).pow(2)
     aspect_term = vis * (rendering.point_scale.max(-1).values / (rendering.point_scale.min(-1).values + 1e-6))
     opacity_term = vis * (rendering.point_opacity)
 
+    scale, opacity, aspect = [eval_varying(x, self.progress) 
+          for x in [self.config.scale_reg, self.config.opacity_reg, self.config.aspect_reg]]
+
+    
     regs = dict(
-      opacity_reg   =  (opacity_term).mean() * eval_varying(self.config.opacity_reg, self.t),  
-      scale_reg     =  (scale_term).mean() * eval_varying(self.config.scale_reg, self.t),
-      aspect_reg    =  (aspect_term).mean() * eval_varying(self.config.aspect_reg, self.t),
+      scale_reg     =  (vis.unsqueeze(-1) * scale_term).mean() * scale,
+      opacity_reg   =  (vis * opacity_term).mean() * opacity,  
+      aspect_reg    =  (vis * aspect_term).mean() * aspect
     )
 
     # include total as "reg"
@@ -526,7 +530,7 @@ class Trainer(Dispatcher):
     self.logger.step(self.progress)
 
     self.step += batch_idx.shape[0]
-    return dict(**mean_rows(loss_metrics),  t = self.t)
+    return dict(**mean_rows(loss_metrics),  t = self.progress.t)
 
 
 
@@ -558,8 +562,8 @@ class Trainer(Dispatcher):
   def checkpoint(self, save:bool=True):
     self.evaluate()
 
-    self.scene.log_checkpoint(self.logger, self.progress)
-    self.controller.log_checkpoint(self.logger, self.progress)
+    self.scene.log_checkpoint()
+    self.controller.log_checkpoint()
 
     if save and self.config.save_output:
       self.write_checkpoint()
@@ -571,18 +575,18 @@ class Trainer(Dispatcher):
     desc = []
 
     if "densify" in self.state_logger:
-      pruned, split = [self.state_logger[k].value for k in ["densify/n_pruned", "densify/n_split"]]
-      desc.append(f"pruned:{pruned:d} split:{split:d}")
+      pruned, split, n = [self.state_logger[k].value for k in ["densify/n_pruned", "densify/n_split", "densify/n_total"]]
+      desc.append(f"points(-{pruned:d} +{split*2:d} = {n:d})")
 
     if "train" in self.state_logger:
       l1, ssim, reg = [self.state_logger[k].value for k in ["train/l1", "train/ssim", "train/reg"]]
-      desc.append(f"train(l1:{l1:.2f} ssim:{ssim:.2f} reg:{reg:.2f})")
+      desc.append(f"train(l1:{l1:.2f} ssim:{ssim:.2f} reg:{reg:.4f})")
 
     if "eval_train" in self.state_logger:
       psnr, ssim = [self.state_logger[k].value for k in ["eval_train/psnr", "eval_train/ssim"]]
       desc.append(f"eval(psnr:{psnr:.2f} ssim:{ssim:.2f})")
 
-    self.pbar.set_description_str(" ".join(desc))
+    self.pbar.set_postfix_str(" ".join(desc))
 
 
   def train(self, state:TrainerState = TrainerState.Training):
@@ -611,7 +615,7 @@ class Trainer(Dispatcher):
               for _ in range(self.config.log_interval)]
 
       self.logger.log_values("train", mean_rows(steps))
-      self.logger.log_values("train", dict(t=self.t, step=self.step, batch_size=batch_size))
+      self.logger.log_values("train", dict(step=self.step, batch_size=batch_size))
       self.update_progress()
 
 

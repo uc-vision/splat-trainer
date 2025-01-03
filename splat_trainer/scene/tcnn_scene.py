@@ -8,7 +8,7 @@ import torch
 import torch.nn.functional as F
 
 from splat_trainer.camera_table.camera_table import CameraTable, camera_scene_extents, camera_similarity
-from splat_trainer.config import VaryingFloat,  eval_varyings
+from splat_trainer.config import Progress, VaryingFloat,  eval_varyings
 from splat_trainer.logger.logger import Logger
 from splat_trainer.debug.optim import compare_tensors
 from splat_trainer.scene.transfer_sh import transfer_sh
@@ -155,8 +155,7 @@ class TCNNScene(GaussianScene):
     self.glo_opt.zero_grad()
 
   @beartype
-  def step(self, t:float):
-
+  def step(self, _:Progress):
     visibility = self.points.visible
 
     vis_idx = visibility.nonzero().squeeze(1)
@@ -169,8 +168,9 @@ class TCNNScene(GaussianScene):
     self.color_opt.step()
     self.glo_opt.step()
 
-    self.points.rotation = torch.nn.Parameter(
-      F.normalize(self.points.rotation.detach(), dim=1), requires_grad=True)
+    # with torch.no_grad():
+    #   self.points.rotation.data = F.normalize(self.points.rotation.data, dim=1)
+    #   self.points.log_scaling.data.clamp_(min=-6)
       
     self.zero_grad()
   
@@ -209,7 +209,7 @@ class TCNNScene(GaussianScene):
     return self.config.from_state_dict(self.state_dict(), self.camera_table)
     
 
-  def log_checkpoint(self, step:int):
+  def log_checkpoint(self):
     pass
 
 

@@ -2,9 +2,9 @@ from abc import ABCMeta, abstractmethod
 from typing import Dict
 from taichi_splatting import Rendering
 
+from splat_trainer.config import Progress
 from splat_trainer.logger.logger import Logger
 from splat_trainer.scene import GaussianScene
-from splat_trainer.trainer.scheduler import Progress
 
 class ControllerConfig(metaclass=ABCMeta):
 
@@ -34,7 +34,7 @@ class Controller(metaclass=ABCMeta):
     raise NotImplementedError
   
   @abstractmethod
-  def log_checkpoint(self, step:int):
+  def log_checkpoint(self):
     """ Log more detailed statistics when checkpointing """
     raise NotImplementedError
 
@@ -65,7 +65,7 @@ class DisabledController(Controller):
   def step(self, progress:Progress):
     pass
   
-  def log_checkpoint(self, step:int):
+  def log_checkpoint(self):
     pass
 
   def state_dict(self) -> dict:

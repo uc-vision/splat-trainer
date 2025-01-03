@@ -6,12 +6,11 @@ from taichi_splatting import Gaussians3D, Rendering
 from taichi_splatting.perspective import CameraParams
 
 from splat_trainer.camera_table.camera_table import CameraTable
+from splat_trainer.config import Progress
 from splat_trainer.logger.logger import Logger
 
 
 from tensordict import TensorDict
-
-from splat_trainer.trainer.scheduler import Progress
 
 
 
@@ -43,7 +42,7 @@ class GaussianScene(metaclass=ABCMeta):
     raise NotImplementedError
 
   @abstractmethod
-  def log_checkpoint(self, logger:Logger, step:int):
+  def log_checkpoint(self, logger:Logger, progress:Progress):
     raise NotImplementedError
   
   @property

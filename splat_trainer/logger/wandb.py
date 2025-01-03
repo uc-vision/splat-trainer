@@ -67,7 +67,7 @@ class WandbLogger(Logger):
     for k, row in rows.items():
       table.add_data(k, *row.values())
                         
-    self.log_data({name:table}, step=self.current_step)
+    self.log_data({name:table})
 
 
   @beartype

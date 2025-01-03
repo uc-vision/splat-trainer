@@ -27,10 +27,10 @@ class Progress:
 
   @property
   def t(self) -> float:
-    return clamp(self.step / self.total_steps, 0, 1)
+    return clamp(self.step / self.total_steps, 0.0, 1.0)
   
   def __float__(self) -> float:
-    return self.t
+    return float(self.t)
 
 
 

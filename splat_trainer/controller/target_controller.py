@@ -8,11 +8,10 @@ from taichi_splatting import Rendering
 import torch
 
 from splat_trainer.logger.logger import Logger
-from splat_trainer.trainer.scheduler import Progress
 from .controller import Controller, ControllerConfig
 from splat_trainer.scene import GaussianScene
 
-from splat_trainer.config import Between, SmoothStep, VaryingFloat, eval_varying
+from splat_trainer.config import Between, Progress, SmoothStep, VaryingFloat, eval_varying
 from tensordict import TensorClass
 
 class PointState  (TensorClass):
