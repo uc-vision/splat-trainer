@@ -66,8 +66,9 @@ class CompositeLogger(Logger):
     for logger in self.loggers:
       logger.step(progress)
 
-  def add_logger(self, logger:Logger):
+  def add_logger(self, logger:Logger) -> 'CompositeLogger':
     self.loggers.append(logger)
+    return self
 
   def log_evaluations(self, name:str, data:Dict[str, Dict]):
     for logger in self.loggers:

@@ -6,7 +6,7 @@ import torch
 import torch.nn.functional as F
 from taichi_splatting import Gaussians3D
 
-from splat_trainer.dataset.dataset import CameraView
+from splat_trainer.dataset.dataset import ImageView
 from splat_trainer.scene.io import read_gaussians
 from splat_trainer.scripts.checkpoint import arguments, with_trainer
 from splat_trainer.trainer import Trainer
@@ -24,10 +24,10 @@ def display_image(title:str, image:np.ndarray):
     pass
 
 
-def transpose_batch(views:Sequence[CameraView]) -> Tuple[List[str], List[torch.Tensor], List[int]]:
-  fields = {k:[] for k in CameraView._fields}
+def transpose_batch(views:Sequence[ImageView]) -> Tuple[List[str], List[torch.Tensor], List[int]]:
+  fields = {k:[] for k in ImageView._fields}
   for view in views:
-    for k, v in zip(CameraView._fields, view):
+    for k, v in zip(ImageView._fields, view):
       fields[k].append(v)
 
   return fields["filename"], fields["image"], fields["index"]

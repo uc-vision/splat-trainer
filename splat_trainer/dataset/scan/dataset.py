@@ -12,7 +12,7 @@ import numpy as np
 import torch
 from tqdm import tqdm
 from splat_trainer.camera_table.camera_table import CameraRigTable, Label
-from splat_trainer.dataset.dataset import  CameraView, Dataset
+from splat_trainer.dataset.dataset import  ImageView, Dataset
 from splat_trainer.util.misc import split_stride
 
 
@@ -84,16 +84,16 @@ class ScanDataset(Dataset):
     return self.scan.num_frames * len(self.cameras)
 
   @beartype
-  def loader(self, idx:np.ndarray, shuffle:bool=False) -> Sequence[CameraView]:
-    images = [self._images[i] for i in idx]
+  def loader(self, idx:torch.Tensor, shuffle:bool=False) -> Sequence[ImageView]:
+    images = [self._images[i] for i in idx.cpu().numpy()]
     return PreloadedImages(images, shuffle=shuffle)
     
 
-  def train(self, shuffle=False) -> Sequence[CameraView]:
+  def train(self, shuffle=False) -> Sequence[ImageView]:
     return self.loader(self.train_idx, shuffle=shuffle)
 
     
-  def val(self) -> Sequence[CameraView]:
+  def val(self) -> Sequence[ImageView]:
     return self.loader(self.val_idx)
   
   def camera_table(self) -> CameraRigTable:

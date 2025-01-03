@@ -10,7 +10,7 @@ import torch
 import numpy as np
 from splat_trainer.camera_table.camera_table import Label, Projections, MultiCameraTable
 from splat_trainer.dataset.colmap.loading import load_images
-from splat_trainer.dataset.dataset import  CameraView, Dataset
+from splat_trainer.dataset.dataset import  ImageView, Dataset
 
 from splat_trainer.util.misc import split_stride
 from splat_trainer.util.pointcloud import PointCloud
@@ -131,14 +131,14 @@ class COLMAPDataset(Dataset):
     return cameras
 
   @beartype
-  def loader(self, idx:np.ndarray, shuffle:bool=False) -> Sequence[CameraView]:
-    images = [self.camera_images[i] for i in idx]
+  def loader(self, idx:torch.Tensor, shuffle:bool=False) -> Sequence[ImageView]:
+    images = [self.camera_images[i] for i in idx.cpu().numpy()]
     return Images(images, shuffle=shuffle)
 
-  def train(self, shuffle=False) -> Sequence[CameraView]:
+  def train(self, shuffle=False) -> Sequence[ImageView]:
     return self.loader(self.train_idx, shuffle=shuffle)
   
-  def val(self) -> Sequence[CameraView]:
+  def val(self) -> Sequence[ImageView]:
     return self.loader(self.val_idx)
 
 
@@ -166,7 +166,7 @@ class COLMAPDataset(Dataset):
 
 
 
-class Images(Sequence[CameraView]):
+class Images(Sequence[ImageView]):
   @beartype
   def __init__(self, camera_images:List[CameraImage], shuffle:bool=False):
     self.camera_images = camera_images
@@ -175,11 +175,11 @@ class Images(Sequence[CameraView]):
   def __len__(self):
       return len(self.camera_images)
 
-  def __getitem__(self, index) -> CameraView:
+  def __getitem__(self, index) -> ImageView:
     camera_image:CameraImage = self.camera_images[index]
-    return CameraView(camera_image.filename, camera_image.image, camera_image.image_id)
+    return ImageView(camera_image.filename, camera_image.image_id, camera_image.image)
      
-  def __iter__(self) -> Iterator[CameraView]:
+  def __iter__(self) -> Iterator[ImageView]:
     order = torch.randperm(len(self)) if self.shuffle else torch.arange(len(self))
     for idx in order:
       yield self[idx]  

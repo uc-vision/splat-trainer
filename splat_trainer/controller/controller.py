@@ -19,7 +19,7 @@ class ControllerConfig(metaclass=ABCMeta):
 
 class Controller(metaclass=ABCMeta):
   @abstractmethod
-  def densify_and_prune(self, t:float):
+  def densify_and_prune(self, progress:Progress):
     """ Perform densification and pruning """
     raise NotImplementedError
 
@@ -56,7 +56,7 @@ class DisabledConfig(ControllerConfig):
 
 
 class DisabledController(Controller):
-  def densify_and_prune(self, t:float):
+  def densify_and_prune(self, progress:Progress):
     return {}
   
   def add_rendering(self, image_idx:int, rendering:Rendering):

@@ -1,12 +1,13 @@
 # Python standard library
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from enum import Enum
 from functools import partial
 import json
 from pathlib import Path
+from pprint import pprint
 import time
 from types import SimpleNamespace
-from typing import Callable, Iterable, Iterator, Optional, Tuple
+from typing import Callable, Iterable, Iterator, Optional, Sequence, Tuple
 
 # Third party packages
 from beartype import beartype
@@ -28,7 +29,7 @@ from taichi_splatting.perspective import CameraParams
 # Local imports
 from splat_trainer.camera_table.camera_table import Camera, Label, camera_json
 from splat_trainer.dataset import Dataset
-from splat_trainer.dataset.dataset import CameraView
+from splat_trainer.dataset.dataset import ImageView
 
 
 from splat_trainer.config import Progress, eval_varying
@@ -39,6 +40,7 @@ from splat_trainer.logger import Logger
 from splat_trainer.logger.logger import CompositeLogger, StateLogger
 
 from splat_trainer.gaussians.loading import from_pointcloud
+from splat_trainer.scene.point_statistics import PointStatistics
 from splat_trainer.trainer.config import TrainConfig
 from splat_trainer.trainer.evaluation import Evaluation
 from splat_trainer.util.pointcloud import PointCloud
@@ -63,6 +65,9 @@ class TrainerState(Enum):
   Training = 1
   Paused = 2
 
+
+
+
 class Trainer(Dispatcher):
   _events_ = ["on_update"]
 
@@ -70,7 +75,7 @@ class Trainer(Dispatcher):
                 scene:GaussianScene, 
                 controller:Controller,
                 dataset:Dataset,              
-                logger:Logger,
+                logger:CompositeLogger,
                 step = 0,
                 view_clustering:Optional[cluster.ViewClustering] = None,
                 view_counts:Optional[torch.Tensor] = None
@@ -91,7 +96,7 @@ class Trainer(Dispatcher):
 
 
     self.state_logger = StateLogger()
-    self.logger = CompositeLogger(self.state_logger, logger)
+    self.logger = logger.add_logger(self.state_logger)
 
 
     self.color_map = get_cv_colormap().to(self.device)
@@ -157,6 +162,7 @@ class Trainer(Dispatcher):
                                           num_neighbors=config.num_neighbors)
     
 
+    logger = CompositeLogger(logger)
 
     scene = config.scene.from_color_gaussians(initial_gaussians, camera_table, device, logger)
     controller = config.controller.make_controller(scene, logger)
@@ -177,6 +183,8 @@ class Trainer(Dispatcher):
     device = torch.device(config.device)
     camera_table = dataset.camera_table().to(device)
 
+    logger = CompositeLogger(logger)
+
     scene = config.scene.from_state_dict(state_dict['scene'], camera_table, logger)
     controller = config.controller.from_state_dict(state_dict['controller'], scene, logger) 
 
@@ -184,6 +192,7 @@ class Trainer(Dispatcher):
       view_clustering = cluster.ViewClustering.from_state_dict(state_dict['view_clustering'])
     else:
       view_clustering = None
+
 
     return Trainer(config, scene, controller, dataset, logger, 
                    step=state_dict['step'],
@@ -294,13 +303,15 @@ class Trainer(Dispatcher):
 
 
   @beartype
-  def evaluate_image(self, filename:str, camera_params:CameraParams, image_idx:int, source_image:torch.Tensor):
-    rendering = self.render(camera_params, image_idx, render_median_depth=True).detach()
-    return Evaluation(filename, rendering, source_image)
+  def evaluate_image(self, image_view:ImageView):
+    image_view, camera_params = self.load_data(image_view)
+
+    rendering = self.render(camera_params, image_view.image_idx, render_median_depth=True).detach()
+    return Evaluation(image_view.filename, rendering, image_view.image)
 
 
 
-  def evaluate_training(self, name: str, data: Iterable[CameraView]):
+  def evaluate_training(self, name: str, image_views: Sequence[ImageView]):
     """Evaluate training set, log a selection of images, and worst performing images by psnr
        Compute view clustering
     """
@@ -312,11 +323,11 @@ class Trainer(Dispatcher):
     metrics = {}
 
     point_clusters = cluster.PointClusters.cluster(self.scene.points['position'], self.config.vis_clusters)
-    log_interval = len(data) // (self.config.num_logged_images + 1)
+    log_interval = len(image_views) // (self.config.num_logged_images + 1)
 
-    pbar = tqdm(total=len(data), desc=f"rendering {name}", leave=False)
-    for i, image_data in enumerate(self.iter_data(data)):
-        eval = self.evaluate_image(*image_data)
+    pbar = tqdm(total=len(image_views), desc=f"rendering {name}", leave=False)
+    for i, image_view in enumerate(image_views):
+        eval = self.evaluate_image(image_view)
 
         if (i + 1) % log_interval == 0:
             self.log_evaluation_images(f"{name}_images/{eval.image_id}", eval, log_source=self.step == 0)
@@ -336,14 +347,14 @@ class Trainer(Dispatcher):
     self.view_clustering = cluster.ViewClustering(point_clusters, torch.stack(view_features))
 
   
-  def evaluate_dataset(self, name:str, data:Iterable[CameraView]):
+  def evaluate_dataset(self, name:str, image_views:Sequence[ImageView]):
     # Track metrics for all images
     metrics = {}
     metrics_cc = {}
 
-    pbar = tqdm(total=len(data), desc=f"rendering {name}", leave=False)
-    for i, image_data in enumerate(self.iter_data(data)):
-        eval = self.evaluate_image(*image_data)
+    pbar = tqdm(total=len(image_views), desc=f"rendering {name}", leave=False)
+    for i, image_view in enumerate(image_views):
+        eval = self.evaluate_image(image_view)
         eval_cc = eval.color_corrected()
 
         metrics[eval.filename] = eval.metrics
@@ -384,9 +395,13 @@ class Trainer(Dispatcher):
 
 
   def evaluate(self):
-    self.evaluate_training("train", self.dataset.train(shuffle=False))
-    if self.camera_table.count_label(Label.Validation) > 0:
-      self.evaluate_dataset("val", self.dataset.val())
+    train_idx = self.camera_table.has_label(Label.Training)
+    val_idx = self.camera_table.has_label(Label.Validation)
+
+    
+    self.evaluate_training("train", self.dataset.loader(train_idx))
+    if len(val_idx) > 0:
+      self.evaluate_dataset("val", self.dataset.loader(val_idx))
 
   
 
@@ -408,35 +423,33 @@ class Trainer(Dispatcher):
     return all_train_idx[cluster_idx]
   
   
-  @beartype
-  def sample_batch(self, batch_size:int) -> torch.Tensor:
+  def iter_batches(self) -> Iterator[torch.Tensor]:
+    while True:
+      batch_size = eval_varying(self.config.batch_size, self.progress)
 
-    weighting = F.normalize(1 / (self.view_counts + 1), p=1, dim=0)
-    batch_idx = self.view_clustering.sample_batch(weighting, 
-              batch_size, self.config.overlap_temperature)
-    
-    self.view_counts[batch_idx] += 1
+      weighting = F.normalize(1 / (self.view_counts + 1), p=1, dim=0)
+      batch_idx = self.view_clustering.sample_batch(weighting, 
+                batch_size, self.config.overlap_temperature)
+      
+      self.view_counts[batch_idx] += 1
+      yield batch_idx
 
-    return batch_idx
+  def iter_permutations(self) -> Iterator[torch.Tensor]:
+    train_idx = self.camera_table.has_label(Label.Training)
+    while True:
+      p = torch.randperm(len(train_idx))
+      for i in train_idx[p]:
+        yield i.unsqueeze(0)
 
 
+  def load_data(self, image_view:ImageView) -> Tuple[ImageView, CameraParams]:
+    camera_params = self.camera_params(image_view.image_idx)
 
-
-
-  def load_data(self, camera_view:CameraView) -> Tuple[str, CameraParams, int, torch.Tensor]:
-    filename, image, image_idx = camera_view
-    
-    image = image.to(self.device, non_blocking=True) 
+    image = image_view.image.to(self.device, non_blocking=True) 
     image = image.to(dtype=torch.float) / 255.0
-    camera_params = self.camera_params(image_idx)
 
-    return filename, camera_params, image_idx, image
+    return ImageView(image_view.filename, image_view.image_idx, image), camera_params
   
-  def iter_data(self, iter:Iterator[CameraView]) -> Iterator[Tuple[str, CameraParams, int, torch.Tensor]]:
-    for camera_view in iter:
-      yield self.load_data(camera_view)
-
-
 
   def compute_ssim_loss(self, pred:torch.Tensor, ref:torch.Tensor, levels:int=4):
       ref = ref.unsqueeze(0).permute(0, 3, 1, 2).to(memory_format=torch.channels_last)
@@ -452,15 +465,14 @@ class Trainer(Dispatcher):
         loss += (1.0 - self.ssim(pred, ref)) 
 
       return loss / levels, ssim.item()
-  
 
 
   def reg_loss(self, rendering:Rendering) -> Tuple[torch.Tensor, dict]:
     vis = rendering.point_visibility 
 
     scale_term =  (rendering.point_scale / rendering.camera.focal_length[0]).pow(2)
-    aspect_term = vis * (rendering.point_scale.max(-1).values / (rendering.point_scale.min(-1).values + 1e-6))
-    opacity_term = vis * (rendering.point_opacity)
+    aspect_term = (rendering.point_scale.max(-1).values / (rendering.point_scale.min(-1).values + 1e-6))
+    opacity_term = rendering.point_opacity
 
     scale, opacity, aspect = [eval_varying(x, self.progress) 
           for x in [self.config.scale_reg, self.config.opacity_reg, self.config.aspect_reg]]
@@ -502,18 +514,19 @@ class Trainer(Dispatcher):
     return loss, metrics
 
   def evaluate_batch_with(self, batch_idx:torch.Tensor, f:Callable[[int, Rendering], None]) -> dict:
-    iter_batch = self.iter_data(self.dataset.loader(batch_idx.cpu().numpy()))
+    iter_batch = self.dataset.loader(batch_idx)
 
     loss_metrics = []
-    for filename, camera_params, image_idx, image in iter_batch:
+    for image_view in iter_batch:
+      image_view, camera_params = self.load_data(image_view)
 
       with torch.enable_grad():
-        rendering = self.render(camera_params, image_idx, compute_point_heuristic=True)
+        rendering = self.render(camera_params, image_view.image_idx, compute_point_heuristic=True)
 
-        loss, metrics = self.losses(rendering, image)
+        loss, metrics = self.losses(rendering, image_view.image)
         loss.backward()
 
-      f(image_idx, rendering)
+      f(image_view.image_idx, rendering)
       loss_metrics.append(metrics)
 
     return loss_metrics
@@ -533,21 +546,12 @@ class Trainer(Dispatcher):
     return dict(**mean_rows(loss_metrics),  t = self.progress.t)
 
 
-
-
   @property
   def all_parameters(self) -> TensorDict:
     return self.scene.all_parameters.to_dict()
   
   def zero_grad(self):
     self.scene.zero_grad()
-
-  def batch_summary(self):
-    heuristics, metrics = self.evaluate_batch(torch.arange(len(self.camera_table), device=self.device))
-    print_stats(self.all_parameters)
-    print_stats(heuristics.to_tensordict())
-    print_table(pd.DataFrame([mean_rows(metrics)]))
-
 
 
   def is_training(self):
@@ -575,8 +579,8 @@ class Trainer(Dispatcher):
     desc = []
 
     if "densify" in self.state_logger:
-      pruned, split, n = [self.state_logger[k].value for k in ["densify/n_pruned", "densify/n_split", "densify/n_total"]]
-      desc.append(f"points(-{pruned:d} +{split*2:d} = {n:d})")
+      pruned, split, n = [self.state_logger[k].value for k in ["densify/prune", "densify/split", "densify/n"]]
+      desc.append(f"points(+{split:d} -{pruned:d} = {n:d})")
 
     if "train" in self.state_logger:
       l1, ssim, reg = [self.state_logger[k].value for k in ["train/l1", "train/ssim", "train/reg"]]
@@ -594,6 +598,9 @@ class Trainer(Dispatcher):
     self.pbar = tqdm(initial=self.step, total=self.config.steps, desc=self.state.name)
 
     next_densify = next_multiple(self.step, eval_varying(self.config.densify_interval, self.progress))
+    # iter_train = self.iter_permutations()
+    iter_train = self.iter_batches()
+
     while self.step < self.config.steps:
 
       self.emit("on_update")
@@ -603,7 +610,6 @@ class Trainer(Dispatcher):
       
       if self.step - next_densify > 0:
 
-        torch.cuda.empty_cache()
         self.controller.densify_and_prune(self.progress)
         next_densify += eval_varying(self.config.densify_interval, self.progress)
 
@@ -611,20 +617,17 @@ class Trainer(Dispatcher):
         self.checkpoint(self.config.save_checkpoints)
 
       batch_size = eval_varying(self.config.batch_size, self.progress)
-      steps = [self.training_step(self.sample_batch(batch_size)) 
+      steps = [self.training_step(next(iter_train)) 
               for _ in range(self.config.log_interval)]
 
       self.logger.log_values("train", mean_rows(steps))
       self.logger.log_values("train", dict(step=self.step, batch_size=batch_size))
       self.update_progress()
 
-
     self.checkpoint(True)
 
     self.state = TrainerState.Stopped
     self.pbar.close()
-
-    
 
   def close(self):
     self.logger.close()

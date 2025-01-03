@@ -1,30 +1,35 @@
 
 from abc import ABCMeta, abstractmethod
 from collections import namedtuple
+from dataclasses import dataclass
 from typing import Sequence
+from beartype import beartype
 from beartype.typing import Iterator
 import numpy as np
+import torch
 
 
 from splat_trainer.camera_table.camera_table import CameraTable
 from splat_trainer.util.pointcloud import PointCloud
 
-
-CameraView = namedtuple('CameraView', 
-  ('filename', 'image', 'index'))
-
+@beartype
+@dataclass
+class ImageView:
+  filename:str
+  image_idx:int
+  image:torch.Tensor
 
 class Dataset(metaclass=ABCMeta):
   @abstractmethod
-  def loader(self, idx:np.ndarray, shuffle:bool=False) -> Sequence[CameraView]:
+  def loader(self, idx:torch.Tensor, shuffle:bool=False) -> Sequence[ImageView]:
     raise NotImplementedError
     
   @abstractmethod
-  def train(self, shuffle=True) -> Sequence[CameraView]:
+  def train(self, shuffle=True) -> Sequence[ImageView]:
     raise NotImplementedError
     
   @abstractmethod
-  def val(self) -> Sequence[CameraView]:
+  def val(self) -> Sequence[ImageView]:
     raise NotImplementedError
 
   

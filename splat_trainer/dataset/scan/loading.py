@@ -16,7 +16,7 @@ import numpy as np
 from tqdm import tqdm
 
 from splat_trainer.camera_table.camera_table import CameraRigTable, Projections
-from splat_trainer.dataset import CameraView
+from splat_trainer.dataset import ImageView
 
 @dataclass
 class CameraImage:
@@ -114,7 +114,7 @@ def preload_images(scan:FrameSet, undistorted:Dict[str, Camera]) -> List[CameraI
   frames = load_frames_with(scan, undistortions, load)
   return concat_lists(frames)
 
-class PreloadedImages(Sequence[CameraView]):
+class PreloadedImages(Sequence[ImageView]):
   @beartype
   def __init__(self, camera_images:List[CameraImage], shuffle:bool=False):
     self.camera_images = camera_images
@@ -123,11 +123,11 @@ class PreloadedImages(Sequence[CameraView]):
   def __len__(self):
       return len(self.camera_images)
 
-  def __getitem__(self, index) -> CameraView:
+  def __getitem__(self, index) -> ImageView:
     camera_image:CameraImage = self.camera_images[index]
-    return CameraView(camera_image.filename, camera_image.image, camera_image.image_id)
+    return ImageView(camera_image.filename, camera_image.image_id, camera_image.image)
      
-  def __iter__(self) -> Iterator[CameraView]:
+  def __iter__(self) -> Iterator[ImageView]:
     order = torch.randperm(len(self)) if self.shuffle else torch.arange(len(self))
     for idx in order:
       yield self[idx]  

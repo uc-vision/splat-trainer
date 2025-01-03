@@ -1,4 +1,4 @@
-from .dataset import Dataset, CameraView
+from .dataset import Dataset, ImageView
 from .colmap.dataset import COLMAPDataset
 
 def ScanDataset(*args, **kwargs):
@@ -7,7 +7,7 @@ def ScanDataset(*args, **kwargs):
 
 
 __all__ = [
-    "CameraView",
+    "ImageView",
     "Dataset",
     
     "ScanDataset",  
