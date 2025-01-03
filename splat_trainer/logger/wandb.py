@@ -9,6 +9,7 @@ from pathlib import Path
 from threading import Thread
 from queue import Queue
 
+from splat_trainer.config import Progress
 from splat_trainer.logger.histogram import Histogram
 from splat_trainer.util.pointcloud import PointCloud
 
@@ -32,9 +33,11 @@ class WandbLogger(Logger):
     self.queue = Queue()
     self.log_thread = Thread(target=self.worker)
     self.log_thread.start()
+    self.current_step = 0
 
   
-
+  def step(self, progress:Progress):
+    self.current_step = progress.step
 
   def worker(self):
     item = self.queue.get()
@@ -53,9 +56,10 @@ class WandbLogger(Logger):
   @beartype
   def log_config(self, config:Dict):
     self.run.config.update(config)
-    
+
+  
   @beartype
-  def log_evaluations(self, name, rows:Dict[str, Dict], step):
+  def log_evaluations(self, name, rows:Dict[str, Dict]):
     first_row = next(iter(rows.values()))
     columns = list(first_row.keys())
 
@@ -63,51 +67,48 @@ class WandbLogger(Logger):
     for k, row in rows.items():
       table.add_data(k, *row.values())
                         
-    self.log_data({name:table}, step=step)
+    self.log_data({name:table}, step=self.current_step)
 
 
   @beartype
-  def log_data(self, data:dict, step:int):
-    self.queue.put(partial(self.run.log, data, step=step) )
+  def log_data(self, data:dict):
+    self.queue.put(partial(self.run.log, data, step=self.current_step) )
 
   @beartype
-  def log_value(self, name:str, value:Number, step:int):
-    self.log_data({name:value}, step=step)
+  def log_value(self, name:str, value:Number):
+    self.log_data({name:value})
 
   @beartype
-  def log_values(self, name:str, data:dict, step:int):
-    self.log_data({f"{name}/{k}":value for k, value in data.items()}, step=step)
+  def log_values(self, name:str, data:dict):
+    self.log_data({f"{name}/{k}":value for k, value in data.items()})
 
 
   @beartype
-  def log_image(self, name:str, image:torch.Tensor, compressed:bool = True, caption:str | None = None, step:int = 0):
+  def log_image(self, name:str, image:torch.Tensor, compressed:bool = True, caption:str | None = None):
     
-    def log():
-      nonlocal image, step
+    def log(image:torch.Tensor, step:int):
       
       image = (image * 255).to(torch.uint8).cpu().numpy()
       image = wandb.Image(image, mode="RGB", caption=caption, file_type="jpg" if compressed else "png")
       self.run.log({name : image}, step=step)
 
-    self.queue.put(log)
+    self.queue.put(partial(log, image, self.current_step))
 
 
-  def log_cloud(self, name:str, points:PointCloud, step:int):
+  def log_cloud(self, name:str, points:PointCloud):
 
-    def log():
-      nonlocal points, step
-      
+    def log(points:PointCloud, step:int):
       data = torch.cat([points.points, points.colors * 255], dim=1).cpu().numpy()
 
       image = wandb.Object3D(data)
       self.run.log({name : image}, step=step)
 
-    self.queue.put(log)
+    self.queue.put(partial(log, points, self.current_step))
 
 
   @beartype
-  def log_histogram(self, name:str, values:torch.Tensor | Histogram, step:int):
-    def log():
+  def log_histogram(self, name:str, values:torch.Tensor | Histogram):
+    def log(values:torch.Tensor | Histogram, step:int):
       try:
         if isinstance(values, Histogram):
           counts_norm = values.counts / values.counts.sum()
@@ -122,9 +123,9 @@ class WandbLogger(Logger):
       except Exception as e:
         print(f"Error logging histogram {name}: {e}")
 
-    self.queue.put(log)
+    self.queue.put(partial(log, values, self.current_step))
 
 
   @beartype
-  def log_json(self, name:str, data:dict, step:int):
-    self.log_data({name:json.dumps(data, indent=2)}, step=step)
+  def log_json(self, name:str, data:dict):
+    self.log_data({name:json.dumps(data, indent=2)})

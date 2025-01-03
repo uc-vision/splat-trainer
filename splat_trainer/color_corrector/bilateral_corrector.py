@@ -4,14 +4,14 @@ from typing import Any, Dict, Tuple
 
 import torch
 
-from splat_trainer.config import VaryingFloat, eval_varying, schedule_lr
+from splat_trainer.config import Progress, VaryingFloat, eval_varying, schedule_lr
 from taichi_splatting import Rendering
-from .corrector import CorrectorConfig, Corrector
+
+from .corrector import Corrector, CorrectorConfig
 
 from splat_trainer.color_corrector.util.lib_bilagrid import (
     BilateralGrid,
     color_affine_transform,
-    fit_affine_colors,
     total_variation_loss,
 )
 
@@ -63,16 +63,13 @@ class BilateralCorrector(Corrector):
     return correct_grid(self.bil_grids, rendering.image, image_idx)
   
 
-  def fit_image(self, rendering:Rendering, source_image:torch.Tensor) -> torch.Tensor:
-    """ Fit an affine color transform between the two images and return corrected image """
-    return fit_affine_colors(rendering.image.unsqueeze(0), source_image.unsqueeze(0)).squeeze(0)
 
   def zero_grad(self):
     self.bil_grid_optimizer.zero_grad()
 
-  def step(self, t:float) -> Dict[str, float]:
+  def step(self, progress:Progress) -> Dict[str, float]:
     # update learning rate 
-    schedule_lr(self.config.lr, t, self.bil_grid_optimizer)
+    schedule_lr(self.config.lr, progress.t, self.bil_grid_optimizer)
 
     with torch.enable_grad():
       tvloss = self.config.tv_weight * total_variation_loss(self.bil_grids.grids)

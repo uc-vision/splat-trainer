@@ -1,3 +1,4 @@
+import heapq
 import numpy as np
 import torch
 
@@ -79,3 +80,23 @@ class CudaTimer:
     with self:
       return f(*args, **kwargs)
   
+
+
+class Heap:
+  def __init__(self, max_size:int):
+    self.max_size = max_size
+    self.heap = []
+
+  def push(self, value, item):
+    heapq.heappush(self.heap, (value, item))
+    if len(self.heap) > self.max_size:
+      heapq.heappop(self.heap)
+
+  def pop(self):
+    return heapq.heappop(self.heap)
+
+  def __len__(self):
+    return len(self.heap)
+
+  def __iter__(self):
+    return iter(self.heap)

@@ -3,36 +3,46 @@ from dataclasses import  dataclass
 import math
 from typing import Dict
 from beartype import beartype
-from beartype.typing import Optional
 
-from splat_trainer.util.misc import exp_lerp
 from taichi_splatting import Rendering
-from tensordict import TensorClass
 import torch
 
 from splat_trainer.logger.logger import Logger
+from splat_trainer.trainer.scheduler import Progress
 from .controller import Controller, ControllerConfig
 from splat_trainer.scene import GaussianScene
 
 from splat_trainer.config import Between, SmoothStep, VaryingFloat, eval_varying
+from tensordict import TensorClass
 
-class PointStatistics(TensorClass):
-  split_score : torch.Tensor  # (N, ) - averaged split score
-  prune_cost : torch.Tensor  # (N, ) - max prune cost
-  max_scale : torch.Tensor # (N, ) - max scale
+class PointState  (TensorClass):
+    prune_cost:torch.Tensor  
+    split_score:torch.Tensor
+    max_scale:torch.Tensor        # (N,) - maximum scale seen for each near point (fraction of focal length)
+    points_in_view:torch.Tensor   # (N,) - number of times each point was in view
+
+    @staticmethod
+    def new_zeros(num_points:int, device:torch.device) -> 'PointState':
+        return PointState(
+            prune_cost=torch.zeros(num_points, device=device),
+            split_score=torch.zeros(num_points, device=device),
+            max_scale=torch.zeros(num_points, device=device),
+            points_in_view=torch.zeros(num_points, dtype=torch.int16, device=device),
+            batch_size=(num_points,)
+        )
 
 
-  @staticmethod
-  def zeros(batch_size, device:Optional[torch.device] = None):
-    return PointStatistics(
-      split_score=torch.zeros(batch_size, dtype=torch.float32, device=device),
-      prune_cost=torch.zeros(batch_size, dtype=torch.float32, device=device),
-      max_scale=torch.zeros(batch_size, dtype=torch.float32, device=device),
+    def state_dict(self) -> dict:
+      return dict(prune_cost=self.prune_cost, 
+                  split_score=self.split_score, 
+                  max_scale=self.max_scale, 
+                  points_in_view=self.points_in_view)
 
-      # in_view=torch.zeros(batch_size, dtype=torch.bool, device=device),
-
-      batch_size=(batch_size,)
-    )
+    def from_state_dict(self, state_dict:dict):
+      self.prune_cost = state_dict['prune_cost']
+      self.split_score = state_dict['split_score']
+      self.max_scale = state_dict['max_scale']
+      self.points_in_view = state_dict['points_in_view']
 
 
 @beartype
@@ -55,11 +65,11 @@ class TargetConfig(ControllerConfig):
 
 
 
-  def make_controller(self, scene:GaussianScene):
-    return TargetController(self, scene)
+  def make_controller(self, scene:GaussianScene, logger:Logger):
+    return TargetController(self, scene, logger)
 
-  def from_state_dict(self, state_dict:dict, scene:GaussianScene) -> Controller:
-    controller = TargetController(self, scene)
+  def from_state_dict(self, state_dict:dict, scene:GaussianScene, logger:Logger) -> Controller:
+    controller = TargetController(self, scene, logger)
     
     controller.points.load_state_dict(state_dict['points'])
     controller.start_count = state_dict['start_count']
@@ -68,28 +78,27 @@ class TargetConfig(ControllerConfig):
 
 class TargetController(Controller):
   def __init__(self, config:TargetConfig, 
-               scene:GaussianScene):
+               scene:GaussianScene, logger:Logger):
     
     self.config = config
     self.scene = scene
-
+    self.logger = logger
     self.target_count = config.target_count or scene.num_points
     self.start_count = scene.num_points 
 
-    self.points = PointStatistics.zeros(scene.num_points, device=scene.device)
-
-
+    self.points = PointState.new_zeros(scene.num_points, device=scene.device)
 
   def __repr__(self):
     return f"TargetController(points={self.points.batch_size[0]})"
 
-  def log_histograms(self, logger:Logger, step:int):
+  def log_checkpoint(self):
 
-    split_score, prune_cost = self.points.split_score.log(), self.points.prune_cost.log()
+    # split_score, prune_cost = self.points.split_score.log(), self.points.prune_cost.log()
 
-    logger.log_histogram("points/log_split_score", split_score[split_score.isfinite()], step)
-    logger.log_histogram("points/log_prune_cost",  prune_cost[prune_cost.isfinite()], step)
-    logger.log_histogram("points/max_scale", self.points.max_scale, step)
+    # self.logger.log_histogram("points/log_split_score", split_score[split_score.isfinite()])
+    # self.logger.log_histogram("points/log_prune_cost",  prune_cost[prune_cost.isfinite()])
+    # self.logger.log_histogram("points/max_scale", self.points.max_scale)
+    pass
 
   def state_dict(self) -> dict:
     return dict(points=self.points.state_dict(), 
@@ -129,10 +138,10 @@ class TargetController(Controller):
     both = (split_mask & prune_mask)
     return split_mask ^ both, prune_mask ^ both
 
-  def densify_and_prune(self, t:float) -> Dict[str, float]:
+  def densify_and_prune(self, progress:Progress):
 
     points = self.points
-    split_mask, prune_mask = self.find_split_prune_indexes(t)
+    split_mask, prune_mask = self.find_split_prune_indexes(progress.t)
     split_idx = split_mask.nonzero().squeeze(1)
 
     n_prune = prune_mask.sum().item()
@@ -145,36 +154,28 @@ class TargetController(Controller):
     self.split_thresh = points.split_score[split_idx].min().item() if n_split > 0 else 0.
 
     keep_mask = ~(split_mask | prune_mask)
+
   # maximum scale for a point to not be pruned
     self.scene.split_and_prune(keep_mask, split_idx)
 
-
-    self.points = PointStatistics.zeros(self.scene.num_points, device=self.scene.device)
+    self.points = PointState.new_zeros(self.scene.num_points, device=self.scene.device)
     # self.points.prune_cost[:keep_mask.sum().item()] = points.prune_cost[keep_mask]
 
-    stats = dict(n=self.points.batch_size[0], 
+    self.logger.log_values("densify", dict(n=self.points.batch_size[0], 
             prune=n_prune,       
             split=n_split,
             max_prune_score=self.prune_thresh, 
             min_split_score=self.split_thresh,
-            unseen = n_unseen)
+            unseen = n_unseen))
     
-    return stats
 
 
-  def step(self, rendering:Rendering, t:float)  -> Dict[str, float]: 
-    idx = rendering.points_in_view
+  def add_rendering(self, image_idx:int, rendering:Rendering):
     points = self.points
+    in_view_idx = rendering.points_in_view
 
-    # Some alternative update rule
-    points.split_score[idx] += rendering.split_score
-    points.prune_cost[idx] +=  rendering.prune_cost
-
-    # points.split_score[idx] = exp_lerp(self.config.split_alpha, rendering.split_score, points.split_score[idx])    
-    # points.prune_cost[idx] = exp_lerp(self.config.prune_alpha, rendering.prune_cost, points.prune_cost[idx])
-
-    # points.split_score[idx] = max_decaying(points.split_score[idx], rendering.split_score, self.config.split_alpha)
-    # points.prune_cost[idx] = max_decaying(points.prune_cost[idx], rendering.prune_cost, self.config.prune_alpha)
+    points.prune_cost[in_view_idx] += rendering.prune_cost
+    points.split_score[in_view_idx] += rendering.split_score
 
     image_size = max(rendering.camera.image_size)
     far_points = rendering.point_depth.squeeze(1) > rendering.point_depth.quantile(0.75)
@@ -183,11 +184,13 @@ class TargetController(Controller):
     image_scale = rendering.point_scale.max(1).values / image_size
     image_scale[far_points] = 0.
 
-    points.max_scale[idx] = torch.maximum(points.max_scale[idx], image_scale)
+    points.max_scale[in_view_idx] = torch.maximum(points.max_scale[in_view_idx], image_scale)
+    points.points_in_view[in_view_idx] += 1
 
-    return dict(in_view = rendering.points_in_view.shape[0], 
-                visible = rendering.visible_indices.shape[0],
-                )      
+  def step(self, progress:Progress): 
+    pass
+
+
 
 
 

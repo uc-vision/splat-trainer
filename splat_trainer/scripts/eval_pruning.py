@@ -9,7 +9,7 @@ from tqdm import tqdm
 
 from splat_trainer.controller.controller import DisabledConfig, DisabledController
 from splat_trainer.debug.optim import dump_optimizer, optimizer_state, print_params, print_stats
-from splat_trainer.scene.scene import GaussianScene, PointHeuristics
+from splat_trainer.scene.scene import GaussianScene, PointStatistics
 from splat_trainer.scripts.checkpoint import arguments, with_trainer
 from splat_trainer.trainer import Trainer
 
@@ -18,7 +18,7 @@ from tensordict import TensorClass
 import pandas as pd
 
 
-def prune_with(scene:GaussianScene, heuristics:PointHeuristics, n_prune:int, min_views:int=5):
+def prune_with(scene:GaussianScene, heuristics:PointStatistics, n_prune:int, min_views:int=5):
   
   # prune_cost = heuristics.prune_cost  / heuristics.points_in_view
   prune_cost = heuristics.prune_cost
@@ -77,7 +77,7 @@ def main():
     trainer.controller = DisabledController()
     trainer.config = replace(trainer.config, controller=DisabledConfig())
     
-    heuristics:PointHeuristics = PointHeuristics.new_zeros(n, device=trainer.device)
+    heuristics:PointStatistics = PointStatistics.new_zeros(n, device=trainer.device)
 
     if args.clustered:
       batch_idx = trainer.select_cluster()

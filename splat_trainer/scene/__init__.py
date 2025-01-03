@@ -1,14 +1,13 @@
 from .scene import GaussianSceneConfig, GaussianScene
-from .sh_scene import SHScene, Gaussians3D, SHConfig
 from .tcnn_scene import TCNNScene, TCNNConfig
 
+from taichi_splatting import Gaussians3D
 
 __all__ = [
   "GaussianScene",
   "GaussianSceneConfig",
 
-  "SHScene",
-  "SHConfig",
+
   
   "TCNNScene",
   "TCNNConfig",

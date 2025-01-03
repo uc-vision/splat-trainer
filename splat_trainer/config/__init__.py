@@ -1,6 +1,6 @@
 from abc import abstractmethod, ABCMeta
 
-from dataclasses import asdict, fields, replace
+from dataclasses import asdict, dataclass, fields, replace
 import math
 from os import PathLike, path
 from omegaconf import OmegaConf 
@@ -18,6 +18,21 @@ class IsDataclass(Protocol):
     __dataclass_fields__: dict
 
 T = TypeVar('T')
+
+
+@dataclass(kw_only=True, frozen=True)
+class Progress:
+  step:int
+  total_steps:int
+
+  @property
+  def t(self) -> float:
+    return clamp(self.step / self.total_steps, 0, 1)
+  
+  def __float__(self) -> float:
+    return self.t
+
+
 
 class Varying(Generic[T], metaclass=ABCMeta):
   @abstractmethod
@@ -120,7 +135,10 @@ def resolve_varying(cfg:IsDataclass, t:float, deep:bool = False):
     return replace(cfg, **varying)
   
 @beartype
-def eval_varying(value:Varying[T] | T, t:float) -> T:
+def eval_varying(value:Varying[T] | T, t:float | Progress) -> T:
+
+  t = float(t)
+
   if isinstance(value, Varying):
     return value(t)
   else:

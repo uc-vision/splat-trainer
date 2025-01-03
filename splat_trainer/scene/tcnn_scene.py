@@ -56,23 +56,28 @@ class TCNNConfig(GaussianSceneConfig):
 
   def from_color_gaussians(self, gaussians:Gaussians3D, 
                            camera_table:CameraTable, 
-                           device:torch.device):
+                           device:torch.device,
+                           logger:Logger):
     
 
     feature = torch.zeros(gaussians.batch_size[0], self.point_features)
     torch.nn.init.normal_(feature, std=0.5)
 
-    gaussians = gaussians.replace(feature=feature).to(device)
-    points = ParameterClass(gaussians.to_tensordict(), 
-              parameter_groups=eval_varyings(self.parameters, 0.), **self.optim_options())   
 
-    return TCNNScene(points, self, camera_table)
+    point_tensors:TensorDict = (gaussians.to_tensordict().replace(
+        visible=torch.zeros(gaussians.batch_size[0], device=device), 
+        feature=feature)
+    ).to(device)
+
+    points = ParameterClass(point_tensors, parameter_groups=eval_varyings(self.parameters, 0.), **self.optim_options())   
+
+    return TCNNScene(points, self, camera_table, logger)
 
   
-  def from_state_dict(self, state:dict, camera_table:CameraTable):
+  def from_state_dict(self, state:dict, camera_table:CameraTable, logger:Logger):
 
     points = ParameterClass.from_state_dict(state['points'], **self.optim_options())
-    scene = TCNNScene(points, self, camera_table)
+    scene = TCNNScene(points, self, camera_table, logger)
 
     scene._color_model.load_state_dict(state['color_model'])
     scene.color_table.load_state_dict(state['color_table'])
@@ -87,10 +92,13 @@ class TCNNScene(GaussianScene):
   def __init__(self, 
           points: ParameterClass, 
           config: TCNNConfig,       
-          camera_table:CameraTable,     
+          camera_table:CameraTable,   
+          logger:Logger,
     ):
+
     self.config = config
     self.points = points
+    self.logger = logger
 
     self.camera_table = camera_table
     num_glo_embeddings = camera_table.num_images if config.per_image else camera_table.num_cameras
@@ -104,7 +112,7 @@ class TCNNScene(GaussianScene):
       sh_degree=config.sh_degree).to(self.device)
     
     self.color_opt = self._color_model.optimizer(config.lr_nn)
-    self.color_model = torch.compile(self._color_model, options=dict(max_autotune=True), dynamic=True)
+    self.color_model = self._color_model #torch.compile(self._color_model, options=dict(max_autotune=True), dynamic=True)
 
     self.color_table = GLOTable(num_glo_embeddings, config.image_features).to(self.device)
     self.glo_opt = self.color_table.optimizer(config.lr_image_feature)
@@ -140,15 +148,20 @@ class TCNNScene(GaussianScene):
     
 
   def zero_grad(self):
+    self.points.visible.zero_()
+
     self.points.zero_grad()
     self.color_opt.zero_grad()
     self.glo_opt.zero_grad()
 
   @beartype
-  def step(self, rendering:Rendering, t:float) -> Dict[str, float]:
+  def step(self, t:float):
 
-    learning_rates = self.update_learning_rate(t)
-    vis_idx, vis_weight = rendering.visible
+    visibility = self.points.visible
+
+    vis_idx = visibility.nonzero().squeeze(1)
+    vis_weight = visibility[vis_idx]
+
     basis = point_basis(self.points.log_scaling[vis_idx], self.points.rotation[vis_idx]).contiguous()
 
     self.points.step(visibility=vis_weight, indexes=vis_idx, basis=basis)
@@ -160,8 +173,9 @@ class TCNNScene(GaussianScene):
       F.normalize(self.points.rotation.detach(), dim=1), requires_grad=True)
       
     self.zero_grad()
-    return learning_rates
   
+  def add_rendering(self, image_idx:int, rendering:Rendering):
+    self.points.visible[rendering.points_in_view] += rendering.point_visibility
 
   @property
   def all_parameters(self) -> TensorDict:
@@ -195,14 +209,8 @@ class TCNNScene(GaussianScene):
     return self.config.from_state_dict(self.state_dict(), self.camera_table)
     
 
-  def log(self, logger:Logger, step:int):
-
-
-    test = self.clone()
-
-
-    compare_tensors(self.points.tensor_state, test.points.tensor_state)
-
+  def log_checkpoint(self, step:int):
+    pass
 
 
   @beartype
