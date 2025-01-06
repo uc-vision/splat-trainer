@@ -9,11 +9,10 @@ trainer:
     # rate of splitting proportional to current size
     prune_rate: 0.1
 
-    # min visbility to be considered for splitting/pruning
-    split_alpha: 0.99
-    prune_alpha: 0.1
+    # minimum number of times point is in view before it is able to be pruned
+    min_views: 10
 
     # threshold (of screen width) for pruning large points
-    max_scale: 0.2
+    max_scale: 0.4
     
   

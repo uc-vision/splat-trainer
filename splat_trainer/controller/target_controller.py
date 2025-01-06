@@ -54,9 +54,8 @@ class TargetConfig(ControllerConfig):
   # base rate (relative to count) to prune points 
   prune_rate:float = 0.05
 
-  # ema half life
-  split_alpha:float = 0.1
-  prune_alpha:float = 0.01
+  # minimum number of times point is in view before it is able to be pruned
+  min_views:int = 10
 
   # maximum screen-space size for a floater point (otherwise pruned)
   max_scale:float = 0.2
@@ -92,12 +91,14 @@ class TargetController(Controller):
 
   def log_checkpoint(self):
 
-    # split_score, prune_cost = self.points.split_score.log(), self.points.prune_cost.log()
+    split_score, prune_cost = self.points.split_score.log(), self.points.prune_cost.log()
 
-    # self.logger.log_histogram("points/log_split_score", split_score[split_score.isfinite()])
-    # self.logger.log_histogram("points/log_prune_cost",  prune_cost[prune_cost.isfinite()])
-    # self.logger.log_histogram("points/max_scale", self.points.max_scale)
-    pass
+    self.logger.log_histogram("points/log_split_score", split_score[split_score.isfinite()])
+    self.logger.log_histogram("points/log_prune_cost",  prune_cost[prune_cost.isfinite()])
+    self.logger.log_histogram("points/max_scale", self.points.max_scale)
+
+    self.logger.log_histogram("points/points_in_view", self.points.points_in_view)
+    
 
   def state_dict(self) -> dict:
     return dict(points=self.points.state_dict(), 
@@ -120,13 +121,17 @@ class TargetController(Controller):
 
     # n_prune = math.ceil(config.prune_rate * n)
 
-    
-
     n = self.points.split_score.shape[0]
-    prune_mask = (take_n(self.points.prune_cost, n_prune, descending=False) 
-                  | (~torch.isfinite(self.points.prune_cost))
-                  | (self.points.max_scale > self.config.max_scale))
+    exceeds_scale = self.points.max_scale > self.config.max_scale
+    num_large = exceeds_scale.sum().item()
+    prune_cost = torch.where(self.points.points_in_view > config.min_views,
+                             self.points.prune_cost, 
+                             torch.inf)
 
+    prune_mask = take_n(prune_cost, 
+              n_prune - num_large, descending=False) | exceeds_scale
+
+                  
     # number of split points is directly set to achieve the target count 
     # (and compensate for pruned points)
     target_split = ((target - n) + n_prune) 

@@ -39,8 +39,7 @@ def cfg_from_args():
   # Training group
   training_group = parser.add_argument_group("Training")
   training_group.add_argument("--target", type=int, default=None, help="Target point count")
-  training_group.add_argument("--no_alpha", action="store_true", help="Fix point alpha=1.0 in training")
-  training_group.add_argument("--steps", type=int, default=None, help="Number of training steps")
+  training_group.add_argument("--total_steps", type=int, default=None, help="Number of total training steps")
   training_group.add_argument("--training_scale", type=float, default=1.0, help="Scale the number of steps by a constant factor")
   
   training_group.add_argument("--add_points", type=int, default=None, help="Add random background points")
@@ -48,7 +47,6 @@ def cfg_from_args():
   training_group.add_argument("--random_points", type=int, default=None, help="Initialise with N random points only")
 
   training_group.add_argument("--tcnn", action="store_true", help="Use tcnn scene")
-  training_group.add_argument("--sh", action="store_true", help="Use spherical harmonics scene")
   training_group.add_argument("--bilateral", action="store_true", help="Use bilateral color correction")
 
   training_group.add_argument("--vis", action="store_true", help="Enable web viewer")
@@ -101,38 +99,34 @@ def cfg_from_args():
   if args.target is not None:
     overrides.append("controller=target")
     overrides.append(f"trainer.controller.target_count={args.target}")
-  
-  if args.no_alpha:
-    overrides.append("trainer.initial_alpha=1.0")
-    overrides.append("trainer.scene.learning_rates.alpha_logit=0.0")
 
-  if args.steps is not None:
-    overrides.append(f"trainer.steps={args.steps}")
+
+  if args.total_steps is not None:
+    overrides.append(f"trainer.total_steps={args.total_steps}")
 
   if args.training_scale is not None:
     overrides.append(f"training_scale={args.training_scale}")
 
+  # Pointcloud initialisation from dataset
   assert args.add_points is None or args.random_points is None, "Cannot specify both background and random points"
   assert args.limit_points is None or args.random_points is None, "Cannot specify both limit and random points"
 
   if args.add_points is not None:
-    overrides.append(f"trainer.initial_points={args.add_points}")
-    overrides.append("trainer.add_initial_points=true")
+    overrides.append(f"trainer.cloud_init.initial_points={args.add_points}")
+    overrides.append("trainer.cloud_init.add_initial_points=true")
 
   if args.limit_points is not None:
-    overrides.append(f"trainer.limit_points={args.limit_points}")
-
+    overrides.append(f"trainer.cloud_init.limit_points={args.limit_points}")
 
   if args.random_points is not None:
-    overrides.append(f"trainer.initial_points={args.random_points}")
-    overrides.append("trainer.load_dataset_cloud=false")
+    overrides.append(f"trainer.cloud_init.initial_points={args.random_points}")
+    overrides.append("trainer.cloud_init.load_dataset_cloud=false")
 
 
+  # Scene
   if args.tcnn:
     overrides.append("scene=tcnn")
 
-  if args.sh:
-    overrides.append("scene=sh")
 
   if args.bilateral:
     overrides.append("color_corrector=bilateral")

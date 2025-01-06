@@ -69,7 +69,7 @@ def transfer_sh(eval_colors:Callable[[torch.Tensor, CameraParams, int], torch.Te
                 epochs:int = 2,
                 sh_degree:int = 3):
   
-  train_idx = camera_table.has_label(Label.Training)
+  train_idx = camera_table.cameras.has_label(Label.Training)
   sh_model = TransferSH(num_points=positions.shape[0], sh_degree=sh_degree)
   sh_model.to(positions.device)
 

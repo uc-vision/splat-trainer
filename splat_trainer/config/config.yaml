@@ -8,6 +8,7 @@ defaults:
   - scene: tcnn
   - trainer: default
   - viewer: none
+  - view_selection: random
 
 hydra:
   job: 

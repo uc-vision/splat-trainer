@@ -144,13 +144,13 @@ class Camera:
       image_size=self.image_size
     )
 
-
+  
 
 class Cameras(TensorClass):
   """ Represents either a single camera or a batch of cameras."""
 
   camera_t_world:torch.Tensor  # (..., 4, 4) float
-  projection:Projections      # (..., ) Projection-
+  projection:Projections       
 
   camera_idx: torch.Tensor     # (..., 1) int
   frame_idx: torch.Tensor      # (..., 1) int
@@ -195,9 +195,27 @@ class Cameras(TensorClass):
   def image_sizes(self) -> torch.Tensor:
     return self.projection.image_size
   
+
+  def has_label(self, label:Label) -> torch.Tensor:
+    """ Get indices of cameras with the given label. 
+    Labels are bitwise encoded, so we use bitwise AND to get the indices.
+    """
+    label_mask = self.labels & label.value
+    return torch.nonzero(label_mask, as_tuple=True)[0]
+  
+  @beartype
+  def with_label(self, label:Label) -> 'Cameras':
+    """ Get cameras with the given label."""
+    return self[self.has_label(label)]
+  
+  @beartype
+  def count_label(self, label:Label) -> int:
+    """ Get number of cameras with the given label."""
+    return self.has_label(label).shape[0]
+
+
   def item(self) -> Camera:
-    n = self.batch_size
-    assert np.prod(n) == 1, f"Expected batch size 1, got shape: {self.batch_size}"
+    assert np.prod(self.batch_size) == 1, f"Expected batch size 1, got shape: {self.batch_size}"
 
 
     return Camera(
@@ -224,7 +242,7 @@ class CameraTable(nn.Module, metaclass=abc.ABCMeta):
   
   @property
   def num_projections(self) -> int:
-    return self.projections.shape[0]
+    return self.projections.batch_size[0]
 
   @property
   @abstractmethod
@@ -258,22 +276,7 @@ class CameraTable(nn.Module, metaclass=abc.ABCMeta):
   def cameras(self) -> Cameras:
     return self.forward(torch.arange(self.num_images))
   
-  def has_label(self, label:Label) -> torch.Tensor:
-    """ Get indices of cameras with the given label. 
-    Labels are bitwise encoded, so we use bitwise AND to get the indices.
-    """
-    label_mask = self._labels & label.value
-    return torch.nonzero(label_mask, as_tuple=True)[0]
-  
-  @beartype
-  def with_label(self, label:Label) -> Cameras:
-    """ Get cameras with the given label."""
-    return self.forward(self.has_label(label))
-  
-  @beartype
-  def count_label(self, label:Label) -> int:
-    """ Get number of cameras with the given label."""
-    return self.has_label(label).shape[0]
+
   
 
 
@@ -444,7 +447,6 @@ class MultiCameraTable(CameraTable):
     self._camera_t_world = PoseTable(camera_t_world)
     self._camera_t_world.requires_grad_(False)
 
-    self._labels = labels
     self._image_names = image_names
 
     self._labels = labels

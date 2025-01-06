@@ -17,7 +17,7 @@ from splat_trainer.scene.scene import GaussianSceneConfig, GaussianScene
 from splat_trainer.gaussians.split import point_basis, split_gaussians_uniform
 
 
-from taichi_splatting.optim import ParameterClass, VisibilityAwareLaProp
+from taichi_splatting.optim import ParameterClass, VisibilityAwareAdam
 from taichi_splatting import Gaussians3D, RasterConfig, Rendering, TaichiQueue, query_visibility
 
 from taichi_splatting.renderer import render_projected, project_to_image
@@ -51,7 +51,7 @@ class TCNNConfig(GaussianSceneConfig):
 
 
   def optim_options(self):
-    return dict(optimizer=VisibilityAwareLaProp, betas=(self.beta1, self.beta2), vis_beta=self.vis_beta,
+    return dict(optimizer=VisibilityAwareAdam, betas=(self.beta1, self.beta2), vis_beta=self.vis_beta,
                 bias_correction=True, vis_smooth=0.01)
 
   def from_color_gaussians(self, gaussians:Gaussians3D, 
@@ -112,7 +112,7 @@ class TCNNScene(GaussianScene):
       sh_degree=config.sh_degree).to(self.device)
     
     self.color_opt = self._color_model.optimizer(config.lr_nn)
-    self.color_model = self._color_model #torch.compile(self._color_model, options=dict(max_autotune=True), dynamic=True)
+    self.color_model = torch.compile(self._color_model, options=dict(max_autotune=True), dynamic=True)
 
     self.color_table = GLOTable(num_glo_embeddings, config.image_features).to(self.device)
     self.glo_opt = self.color_table.optimizer(config.lr_image_feature)
@@ -168,9 +168,9 @@ class TCNNScene(GaussianScene):
     self.color_opt.step()
     self.glo_opt.step()
 
-    # with torch.no_grad():
-    #   self.points.rotation.data = F.normalize(self.points.rotation.data, dim=1)
-    #   self.points.log_scaling.data.clamp_(min=-6)
+    with torch.no_grad():
+      self.points.rotation.data = F.normalize(self.points.rotation.data, dim=1)
+      self.points.log_scaling.data.clamp_(min=-10)
       
     self.zero_grad()
   
@@ -272,6 +272,10 @@ class TCNNScene(GaussianScene):
   def _gaussians(self) -> Gaussians3D:
       points = self.points.tensors.select('position', 'rotation', 'log_scaling', 'alpha_logit', 'feature')
       return Gaussians3D.from_tensordict(points)
+
+  @property
+  def positions(self) -> torch.Tensor:
+    return self.points.position
 
   @beartype
   def render(self, camera_params:CameraParams,  

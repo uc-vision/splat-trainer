@@ -26,6 +26,11 @@ def from_pointcloud(pcd:PointCloud,
     batch_size=(pcd.points.shape[0],)
   )
 
+def to_pointcloud(gaussians:Gaussians3D) -> PointCloud:
+  return PointCloud(
+    points=gaussians.position,
+    colors=gaussians.feature
+  )
   
 def estimate_scale(pointcloud : PointCloud, num_neighbors:int = 3):
   points = pointcloud.points.cpu().numpy()

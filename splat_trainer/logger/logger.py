@@ -111,6 +111,9 @@ class NullLogger(Logger):
   def __init__(self):
     pass
 
+  def step(self, progress:Progress):
+    pass
+
   def log_config(self, config:dict):
     pass
   

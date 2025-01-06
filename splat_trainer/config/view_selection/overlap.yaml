@@ -1,0 +1,9 @@
+# @package _global_
+
+trainer:
+  view_selection:
+    _target_: splat_trainer.trainer.OverlapSamplerConfig
+    batch_size: 1
+
+    overlap_threshold: 0.5
+    overlap_temperature: 0.1

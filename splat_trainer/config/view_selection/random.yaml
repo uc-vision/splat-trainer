@@ -1,0 +1,6 @@
+# @package _global_
+
+trainer:
+  view_selection:
+    _target_: splat_trainer.trainer.RandomSamplerConfig
+    batch_size: 1

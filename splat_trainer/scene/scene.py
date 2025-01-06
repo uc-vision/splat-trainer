@@ -49,6 +49,11 @@ class GaussianScene(metaclass=ABCMeta):
   @abstractmethod
   def num_points(self) -> int:
     raise NotImplementedError
+  
+  @property
+  @abstractmethod
+  def positions(self) -> torch.Tensor:
+    raise NotImplementedError
 
 
   @abstractmethod
