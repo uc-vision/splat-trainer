@@ -84,13 +84,13 @@ class TrainConfig:
   opacity_reg: VaryingFloat = 0.01
   aspect_reg: VaryingFloat = 0.01
 
-  vis_clusters: int = 1024 # number of point clusters to use for view similarity
+  # vis_clusters: int = 1024 # number of point clusters to use for view similarity
 
   blur_cov: float
   antialias: bool = True
 
   save_checkpoints: bool = False
-  save_output: bool = True
+  save_output: bool = False
   save_visibility: bool = False
   
   optimizer: str = 'SparseAdam'
@@ -377,10 +377,10 @@ class Trainer:
     log_indexes = strided_indexes(log_count, len(data)) 
 
     
-    clusters = cluster_points(position = self.scene.points['position'], 
-                                  num_clusters = min(self.config.vis_clusters, self.scene.num_points))
+    # clusters = cluster_points(position = self.scene.points['position'], 
+    #                               num_clusters = min(self.config.vis_clusters, self.scene.num_points))
 
-    visibility = []
+    # visibility = []
 
     pbar = tqdm(total=len(data), desc=f"rendering {name}", leave=False)
     for i, image_data in enumerate(self.iter_data(data)):
@@ -394,7 +394,7 @@ class Trainer:
       add_worst(worst, (-eval.metrics['psnr'], eval))    
       rows[eval.filename] = eval.metrics
 
-      visibility.append(self.vis_vector(eval.rendering, clusters))
+      # visibility.append(self.vis_vector(eval.rendering, clusters))
       
       pbar.update(1)
       pbar.set_postfix(**{k:f"{v:.3f}" for k, v in eval.metrics.items()})
@@ -409,13 +409,13 @@ class Trainer:
       self.log_value(f"eval_{name}/{k}", np.mean(v))
       self.log_histogram(f"eval_{name}/{k}_hist", torch.tensor(v))
 
-    visibility = torch.stack(visibility, dim=0)   
+    # visibility = torch.stack(visibility, dim=0)   
 
-    self.view_overlaps = (visibility @ visibility.T).to_dense().fill_diagonal_(0.0)
-    self.view_overlaps = sinkhorn(self.view_overlaps, 10)
+    # self.view_overlaps = (visibility @ visibility.T).to_dense().fill_diagonal_(0.0)
+    # self.view_overlaps = sinkhorn(self.view_overlaps, 10)
 
-    avg_max = self.view_overlaps.max(dim=1).values.median()
-    self.log_colormapped(f"eval_{name}/view_overlaps", self.view_overlaps / avg_max)
+    # avg_max = self.view_overlaps.max(dim=1).values.median()
+    # self.log_colormapped(f"eval_{name}/view_overlaps", self.view_overlaps / avg_max)
 
     return {f"{name}_psnr": float(np.mean(totals['psnr']))}
 
@@ -540,7 +540,7 @@ class Trainer:
     with timer:
       config = replace(self.config.raster_config, compute_point_heuristics=True, compute_visibility=True,
                        antialias=self.config.antialias,
-                       blur_cov=self.blur_cov)  
+                       blur_cov=self.blur_cov)
       
       rendering = self.scene.render(camera_params, config, image_idx)
       rendering = replace(rendering, image=self.color_corrector.correct(rendering, image_idx))
@@ -550,7 +550,7 @@ class Trainer:
       
       loss, losses = self.losses(rendering, image)
       loss.backward()
-
+      
       metrics_scene = self.scene.step(rendering, self.t)
       metrics_cc = self.color_corrector.step(self.t)
 
@@ -582,7 +582,6 @@ class Trainer:
     while self.step < self.config.steps:
       if self.step - next_densify > 0:
         self.controller.log_histograms(self.logger, self.step)
-
         torch.cuda.empty_cache()
         densify_metrics = self.controller.densify_and_prune(self.t)
 
@@ -631,7 +630,7 @@ class Trainer:
     self.pbar.set_postfix(**metrics, **eval_metrics)        
     self.pbar.close()
 
-    return eval_metrics
+    return eval_metrics['train_psnr']
     
 
   def close(self):

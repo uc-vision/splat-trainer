@@ -58,6 +58,8 @@ grid-search-trainer = "splat_trainer.scripts.grid_search:main"
 evaluate-trainer = "splat_trainer.scripts.evaluate:evaluate"
 resume-trainer = "splat_trainer.scripts.evaluate:resume"
 
+bayesian-optimize-trainer = "splat_trainer.scripts.bayesian_optimize:main"
+
 
 
 [tool.setuptools.package-data]
