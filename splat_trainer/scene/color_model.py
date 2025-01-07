@@ -43,11 +43,6 @@ class GLOTable(torch.nn.Module):
     return schedule_groups(dict(glo=lr_glo), t, optimizer)
 
 
-
-
-
-
-  
 class ColorModel(torch.nn.Module):
   def __init__(self, 
                
@@ -55,7 +50,7 @@ class ColorModel(torch.nn.Module):
                point_features:int       = 16,
 
                hidden_features:int     = 64,
-               hidden_layers:int             = 2,
+               hidden_layers:int       = 2,
 
                color_channels:int     = 3,
                sh_degree:int          = 3):
@@ -69,7 +64,7 @@ class ColorModel(torch.nn.Module):
         hidden_layers=hidden_layers, 
         hidden=hidden_features,
         sh_degree=sh_degree,
-        output_activation=nn.Sigmoid,
+        # output_activation=nn.Sigmoid,
         norm=partial(nn.LayerNorm, elementwise_affine=False),
     )
 

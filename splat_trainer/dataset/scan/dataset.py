@@ -56,8 +56,8 @@ class ScanDataset(Dataset):
 
     # Evenly distribute validation images
     train_idx, val_idx = split_stride(np.arange(scan.num_frames * len(cameras)), val_stride)
-    self.train_idx = np.array(train_idx)
-    self.val_idx = np.array(val_idx)
+    self.train_idx = torch.tensor(train_idx, dtype=torch.long)
+    self.val_idx = torch.tensor(val_idx, dtype=torch.long)
     
     
   def __repr__(self) -> str:

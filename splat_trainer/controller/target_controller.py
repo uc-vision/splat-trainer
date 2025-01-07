@@ -31,19 +31,6 @@ class PointState  (TensorClass):
         )
 
 
-    def state_dict(self) -> dict:
-      return dict(prune_cost=self.prune_cost, 
-                  split_score=self.split_score, 
-                  max_scale=self.max_scale, 
-                  points_in_view=self.points_in_view)
-
-    def from_state_dict(self, state_dict:dict):
-      self.prune_cost = state_dict['prune_cost']
-      self.split_score = state_dict['split_score']
-      self.max_scale = state_dict['max_scale']
-      self.points_in_view = state_dict['points_in_view']
-
-
 @beartype
 @dataclass
 class TargetConfig(ControllerConfig):

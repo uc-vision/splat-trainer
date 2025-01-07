@@ -9,13 +9,16 @@ from tqdm import tqdm
 
 from splat_trainer.controller.controller import DisabledConfig, DisabledController
 from splat_trainer.debug.optim import dump_optimizer, optimizer_state, print_params, print_stats
-from splat_trainer.scene.scene import GaussianScene, PointStatistics
+from splat_trainer.scene.point_statistics import PointStatistics
+from splat_trainer.scene.scene import GaussianScene
 from splat_trainer.scripts.checkpoint import arguments, with_trainer
 from splat_trainer.trainer import Trainer
 
 from tensordict import TensorClass
 
 import pandas as pd
+
+from splat_trainer.util.containers import mean_rows, sum_rows
 
 
 def prune_with(scene:GaussianScene, heuristics:PointStatistics, n_prune:int, min_views:int=5):
@@ -34,24 +37,26 @@ def prune_with(scene:GaussianScene, heuristics:PointStatistics, n_prune:int, min
   return heuristics[keep_mask]
   
 
-def evaluate_with_steps(trainer:Trainer, train:bool):
+def evaluate_with_training(trainer:Trainer, train:bool) -> dict:
   # Train for a few steps
 
-  if train:
+  if train is True:
     trainer = trainer.clone()
 
     pbar = tqdm(trainer.dataset.train(shuffle=True), desc="Training")
     with torch.enable_grad():
       for camera_view in pbar:
-      
-        filename, camera_params, image_idx, image = trainer.load_data(camera_view)
-        metrics =  trainer.training_step(filename, camera_params, image_idx, image)
+        camera_view = trainer.load_data(camera_view)      
+        metrics = trainer.training_step([camera_view])
 
         metrics = {k:f"{v:.4f}" for k, v in metrics.items() if k in ['l1', 'ssim', 'reg', 't']}
         pbar.set_postfix(**metrics)
 
-  metrics = trainer.evaluate()
-  return metrics
+
+  train = trainer.dataset.train(shuffle=False)
+  metrics = [eval.metrics for eval in tqdm(trainer.evaluations(train), desc="Evaluating", total=len(train))]
+  return mean_rows(metrics)
+
 
 
 def main():
@@ -60,6 +65,7 @@ def main():
   parser.add_argument("--max_prune", type=float, default=0.25, help="Total proportion of points to prune")
   parser.add_argument("--prune_steps", type=int, default=5, help="Number of steps to evaluate")
   parser.add_argument("--train", action="store_true", help="Train after pruning")
+  parser.add_argument("--opacity", action="store_true", help="Use opacity for pruning")
 
   parser.add_argument("--clustered", action="store_true", help="Use clustered views")
 
@@ -77,15 +83,17 @@ def main():
     trainer.controller = DisabledController()
     trainer.config = replace(trainer.config, controller=DisabledConfig())
     
+
+    batch_idx = torch.randint(0, len(trainer.camera_table), (args.batch_size,))
+
+    # Compute pruning heuristics in the backward pass
     heuristics:PointStatistics = PointStatistics.new_zeros(n, device=trainer.device)
-
-    if args.clustered:
-      batch_idx = trainer.select_cluster()
-    else:
-      batch_idx = torch.randint(0, len(trainer.camera_table), (args.batch_size,))
-
-    heuristics, metrics = trainer.evaluate_batch(batch_idx)
-
+    trainer.evaluate_backward_with(trainer.load_batch(batch_idx), 
+                  lambda _, rendering: heuristics.add_rendering(rendering))
+    
+    if args.opacity:
+      gaussians = trainer.scene.gaussians
+      heuristics.prune_cost[:] = (1 - gaussians.alpha.squeeze(1))
 
     num_seen = (heuristics.points_in_view > 0).sum().item()
     num_above_min = (heuristics.points_in_view >= args.min_views).sum().item()
@@ -98,8 +106,11 @@ def main():
     evals = []
     for step in range(args.prune_steps + 1):
 
-      metrics = evaluate_with_steps(trainer, args.train) #step > 0 and args.train)
-      print(f"Pruned {levels[step]:.1f}% points, {metrics}")
+      metrics = evaluate_with_training(trainer, args.train)
+
+      metrics_str = [f"{k}={v:.4f}" for k, v in metrics.items()]
+      print(f"Pruned {levels[step]:.1f}% points, {', '.join(metrics_str)}")
+
       evals.append({**metrics, "n": trainer.scene.num_points, "level": levels[step]})
 
       heuristics = prune_with(trainer.scene, heuristics, prune_size, min_views=args.min_views)

@@ -52,7 +52,7 @@ class GaussianScene(metaclass=ABCMeta):
   
   @property
   @abstractmethod
-  def positions(self) -> torch.Tensor:
+  def gaussians(self) -> Gaussians3D:
     raise NotImplementedError
 
 

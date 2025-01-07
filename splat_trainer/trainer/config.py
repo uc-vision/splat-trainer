@@ -54,8 +54,9 @@ class TrainConfig:
   log_worst_images: int  = 2
 
   # Loss function settings
-  ssim_weight: float
-  l1_weight: float
+  ssim_weight: float = 0.0
+  mse_weight: float = 0.0
+  l1_weight: float = 0.0
   ssim_levels: int = 4
   
   scale_reg: VaryingFloat = 0.0

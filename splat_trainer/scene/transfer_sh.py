@@ -1,7 +1,4 @@
-
-
-from functools import partial
-from typing import Callable, Iterator, Tuple
+from typing import Callable, Tuple
 from beartype import beartype
 from taichi_splatting import evaluate_sh_at
 from taichi_splatting.perspective import CameraParams
@@ -10,10 +7,7 @@ from torch import nn
 import torch.nn.functional as F
 from tqdm import tqdm
 
-from splat_trainer.camera_table.camera_table import CameraTable, Cameras, Label, Camera
-from splat_trainer.config import LogDecay, Varying, VaryingFloat, eval_varying
-from splat_trainer.scene.mlp.torch_mlp import BasicMLP
-from splat_trainer.scene.scene import GaussianScene
+from splat_trainer.camera_table.camera_table import CameraTable, Label
 from splat_trainer.util.misc import sh_to_rgb
 
 

@@ -1,4 +1,4 @@
-from dataclasses import  dataclass
+from dataclasses import  dataclass, replace
 from typing import Dict, Optional
 from beartype import beartype
 from omegaconf import DictConfig
@@ -19,6 +19,7 @@ from splat_trainer.gaussians.split import point_basis, split_gaussians_uniform
 
 from taichi_splatting.optim import ParameterClass, VisibilityAwareAdam
 from taichi_splatting import Gaussians3D, RasterConfig, Rendering, TaichiQueue, query_visibility
+from taichi_splatting.misc.morton_sort import argsort
 
 from taichi_splatting.renderer import render_projected, project_to_image
 from taichi_splatting.perspective import CameraParams
@@ -192,6 +193,9 @@ class TCNNScene(GaussianScene):
       self.points[split_idx].detach(), n=2, random_axis=True)
 
     self.points = self.points[keep_mask].append_tensors(splits)
+
+    idx = argsort(self.points.position, 0.001)
+    self.points = self.points[idx]
  
 
 
@@ -210,7 +214,10 @@ class TCNNScene(GaussianScene):
     
 
   def log_checkpoint(self):
-    pass
+    gaussians = self.gaussians
+    self.logger.log_histogram("opacity", gaussians.alpha.detach())
+    self.logger.log_histogram("log_scale", gaussians.log_scaling.detach())
+    self.logger.log_histogram("feature", gaussians.feature.detach())
 
 
   @beartype
@@ -248,7 +255,7 @@ class TCNNScene(GaussianScene):
   def query_visibility(self, camera_params:CameraParams, threshold:float = 0.001):
     config = RasterConfig()
     
-    gaussians2d, depth, indexes = project_to_image(self._gaussians, camera_params, config)
+    gaussians2d, depth, indexes = project_to_image(self.gaussians, camera_params, config)
     visibility = query_visibility(gaussians2d, depth, camera_params.image_size, config)
 
     visible = visibility > threshold
@@ -256,8 +263,11 @@ class TCNNScene(GaussianScene):
 
 
   def evaluate_sh_features(self):
+      def eval_colors(point_indexes, camera_params, image_idx):
+        return self.eval_colors(point_indexes, camera_params, image_idx).sigmoid()
+
       glo_features = self.lookup_glo_feature(torch.arange(self.camera_table.num_images, device=self.device))
-      return transfer_sh(self.eval_colors, self.query_visibility, self.camera_table, 
+      return transfer_sh(eval_colors, self.query_visibility, self.camera_table, 
                          self.points.position, glo_features, epochs=2, sh_degree=2)
         
 
@@ -269,27 +279,27 @@ class TCNNScene(GaussianScene):
   
 
   @property
-  def _gaussians(self) -> Gaussians3D:
+  def gaussians(self) -> Gaussians3D:
       points = self.points.tensors.select('position', 'rotation', 'log_scaling', 'alpha_logit', 'feature')
       return Gaussians3D.from_tensordict(points)
 
-  @property
-  def positions(self) -> torch.Tensor:
-    return self.points.position
+
 
   @beartype
   def render(self, camera_params:CameraParams,  
              image_idx:Optional[int] = None, **options) -> Rendering:
 
     config = pop_raster_config(options)
-    gaussians2d, depth, indexes = project_to_image(self._gaussians, camera_params, config)
+    gaussians2d, depth, indexes = project_to_image(self.gaussians, camera_params, config)
 
 
     colour = TaichiQueue.run_sync(self.eval_colors, indexes, camera_params, image_idx)
-    raster = render_projected(indexes, gaussians2d, colour, depth, 
+    rendering = render_projected(indexes, gaussians2d, colour, depth, 
                             camera_params, config, **options)
-
-
-    return raster
     
+
+    rendering = replace(rendering, image = rendering.image.sigmoid())
+    return rendering
+    
+
 

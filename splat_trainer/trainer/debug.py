@@ -12,7 +12,7 @@ def batch_summary(trainer:Trainer):
     def get_heuristics(image_idx:int, rendering:Rendering):
       stats.add_rendering(rendering)
 
-    metrics = trainer.evaluate_batch_with(torch.arange(len(trainer.camera_table), device=trainer.device), get_heuristics)
+    metrics = trainer.evaluate_backward_with(torch.arange(len(trainer.camera_table), device=trainer.device), get_heuristics)
 
     print_stats(trainer.all_parameters)
     print_stats(stats.to_tensordict())

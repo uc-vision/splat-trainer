@@ -12,7 +12,7 @@ trainer:
   cloud_init:
     _target_: splat_trainer.trainer.CloudInitConfig
     num_neighbors: 5
-    initial_alpha: 0.2
+    initial_alpha: 0.5
     initial_point_scale: 0.5
     initial_points: 200000
     limit_points: null
@@ -26,10 +26,10 @@ trainer:
 
   densify_interval:
     _target_: splat_trainer.config.Piecewise
-    start: 60
+    start: 100
     steps:
-      - [0.2, 100]
-      - [0.5, 200]
+      - [0.2, 200]
+      - [0.5, 400]
     scale: ${training_scale}
 
   # Evaluation settings
@@ -39,11 +39,12 @@ trainer:
   # Loss function settings
   ssim_weight: 1.0 # ssim is expensive but converges faster than just l1 loss
   l1_weight: 1.0
+  # mse_weight: 10.0
   ssim_levels: 4
 
   scale_reg: ${log_decay:0.01, 0.01}
   opacity_reg: ${log_decay:0.001, 0.01}
-  aspect_reg: 0.0001
+  # aspect_reg: 0.0001
 
   # view similarity
   vis_clusters: 1024
