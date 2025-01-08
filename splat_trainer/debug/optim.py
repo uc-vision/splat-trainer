@@ -2,14 +2,13 @@ import json
 from numbers import Number
 from pathlib import Path
 from pprint import pprint
-from typing import Dict, Mapping, Sequence
+from typing import Any, Dict, Mapping, Sequence
 from beartype import beartype
 import pandas as pd
-from ..logger.logger import Logger
+from splat_trainer.logger import Logger
 
 from tensordict import TensorDict
 
-from pyparsing import Any
 import torch
 
 def log_histograms(logger:Logger, name:str, value:Any, step:int):

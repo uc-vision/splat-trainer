@@ -5,9 +5,10 @@ import torch
 from taichi_splatting import Rendering
 
 
-from tensordict import TensorClass
+from tensordict import tensorclass
 
-class PointStatistics(TensorClass):
+@tensorclass
+class PointStatistics:
   """ Accumulated point heuristics and visibility information 
       similar to Rendering, but accumulated over multiple renderings
   """

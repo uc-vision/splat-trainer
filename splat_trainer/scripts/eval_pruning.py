@@ -1,24 +1,16 @@
 from dataclasses import replace
-import itertools
 import json
-from pathlib import Path
-from time import time
-from typing import List
 import torch
 from tqdm import tqdm
 
 from splat_trainer.controller.controller import DisabledConfig, DisabledController
-from splat_trainer.debug.optim import dump_optimizer, optimizer_state, print_params, print_stats
 from splat_trainer.scene.point_statistics import PointStatistics
 from splat_trainer.scene.scene import GaussianScene
 from splat_trainer.scripts.checkpoint import arguments, with_trainer
 from splat_trainer.trainer import Trainer
 
-from tensordict import TensorClass
-
 import pandas as pd
-
-from splat_trainer.util.containers import mean_rows, sum_rows
+from splat_trainer.util.containers import mean_rows
 
 
 def prune_with(scene:GaussianScene, heuristics:PointStatistics, n_prune:int, min_views:int=5):

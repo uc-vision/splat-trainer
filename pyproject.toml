@@ -24,6 +24,8 @@ dependencies = [
 
   'python-dispatch',
   'markdown_strings',
+  'colored_traceback',
+  'pandas',
   
   'opencv-python',
   'pycolmap',

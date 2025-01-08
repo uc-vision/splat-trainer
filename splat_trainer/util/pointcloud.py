@@ -1,4 +1,4 @@
-from tensordict.tensorclass import TensorClass
+from tensordict.tensorclass import tensorclass
 from pathlib import Path
 
 import torch
@@ -9,7 +9,8 @@ import pypcd4
 import plyfile
 
 
-class PointCloud(TensorClass): 
+@tensorclass
+class PointCloud: 
   points : torch.Tensor # (N, 3)
   colors : torch.Tensor # (N, 3)
 

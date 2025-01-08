@@ -7,7 +7,7 @@ import math
 from typing import List, Tuple
 
 import numpy as np
-from tensordict import TensorClass
+from tensordict import tensorclass
 from tensordict import TensorDictParams
 import torch
 from torch import nn
@@ -39,7 +39,8 @@ def to_matrix(intrinsics:torch.Tensor) -> torch.Tensor:
   return m
 
 
-class Projections(TensorClass):
+@tensorclass
+class Projections:
   """ Projection parameters for a camera or a batch of cameras."""
   intrinsics:torch.Tensor      # (..., 4) fx, fy, cx, cy
   image_size:torch.Tensor      # (..., 2) int
@@ -146,7 +147,8 @@ class Camera:
 
   
 
-class Cameras(TensorClass):
+@tensorclass
+class Cameras:
   """ Represents either a single camera or a batch of cameras."""
 
   camera_t_world:torch.Tensor  # (..., 4, 4) float

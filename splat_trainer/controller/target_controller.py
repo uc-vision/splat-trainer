@@ -12,9 +12,10 @@ from .controller import Controller, ControllerConfig
 from splat_trainer.scene import GaussianScene
 
 from splat_trainer.config import Between, Progress, SmoothStep, VaryingFloat, eval_varying
-from tensordict import TensorClass
+from tensordict import tensorclass
 
-class PointState  (TensorClass):
+@tensorclass
+class PointState:
     prune_cost:torch.Tensor  
     split_score:torch.Tensor
     max_scale:torch.Tensor        # (N,) - maximum scale seen for each near point (fraction of focal length)
