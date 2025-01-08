@@ -17,8 +17,8 @@ from splat_trainer.scene.scene import GaussianSceneConfig, GaussianScene
 from splat_trainer.gaussians.split import point_basis, split_gaussians_uniform
 
 
-from taichi_splatting.optim import ParameterClass, VisibilityAwareAdam
-from taichi_splatting import Gaussians3D, RasterConfig, Rendering, TaichiQueue, query_visibility
+from taichi_splatting.optim import ParameterClass, SparseLaProp
+from taichi_splatting import Gaussians3D, RasterConfig, Rendering, TaichiQueue
 from taichi_splatting.misc.morton_sort import argsort
 
 from taichi_splatting.renderer import render_projected, project_to_image
@@ -51,9 +51,12 @@ class TCNNConfig(GaussianSceneConfig):
 
 
 
+  # def optim_options(self):
+  #   return dict(optimizer=VisibilityAwareAdam, betas=(self.beta1, self.beta2), vis_beta=self.vis_beta,
+  #               bias_correction=True, vis_smooth=0.01)
+
   def optim_options(self):
-    return dict(optimizer=VisibilityAwareAdam, betas=(self.beta1, self.beta2), vis_beta=self.vis_beta,
-                bias_correction=True, vis_smooth=0.01)
+    return dict(optimizer=SparseLaProp, betas=(self.beta1, self.beta2), bias_correction=True)
 
   def from_color_gaussians(self, gaussians:Gaussians3D, 
                            camera_table:CameraTable, 
@@ -160,11 +163,11 @@ class TCNNScene(GaussianScene):
     visibility = self.points.visible
 
     vis_idx = visibility.nonzero().squeeze(1)
-    vis_weight = visibility[vis_idx]
+    # vis_weight = visibility[vis_idx]
 
     basis = point_basis(self.points.log_scaling[vis_idx], self.points.rotation[vis_idx]).contiguous()
 
-    self.points.step(visibility=vis_weight, indexes=vis_idx, basis=basis)
+    self.points.step(indexes=vis_idx, basis=basis)
 
     self.color_opt.step()
     self.glo_opt.step()
@@ -252,14 +255,15 @@ class TCNNScene(GaussianScene):
       return self.color_model(self.points.feature[point_indexes], self.points.position[point_indexes], 
                                                         camera_params.camera_position, glo_feature)
 
-  def query_visibility(self, camera_params:CameraParams, threshold:float = 0.001):
-    config = RasterConfig()
+  def query_visibility(self, camera_params:CameraParams):
+    config = RasterConfig(compute_visibility=True)
     
     gaussians2d, depth, indexes = project_to_image(self.gaussians, camera_params, config)
-    visibility = query_visibility(gaussians2d, depth, camera_params.image_size, config)
-
-    visible = visibility > threshold
-    return indexes[visible], visibility[visible]
+    feature = torch.zeros((self.num_points, 1), device=self.device)
+    rendering = render_projected(indexes, gaussians2d, feature, depth, 
+                            camera_params, config)
+    
+    return rendering.visible
 
 
   def evaluate_sh_features(self):

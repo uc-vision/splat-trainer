@@ -7,7 +7,7 @@ trainer:
     target_count: 1000000
 
     # rate of splitting proportional to current size
-    prune_rate: 0.1
+    prune_rate: 0.05
 
     # minimum number of times point is in view before it is able to be pruned
     min_views: 10

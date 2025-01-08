@@ -82,7 +82,7 @@ def main():
     n = trainer.scene.num_points
     trainer.controller = DisabledController()
     trainer.config = replace(trainer.config, controller=DisabledConfig())
-    
+    torch.random.manual_seed(0)
 
     batch_idx = torch.randint(0, len(trainer.camera_table), (args.batch_size,))
 

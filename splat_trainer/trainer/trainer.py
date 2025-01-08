@@ -104,8 +104,6 @@ class Trainer(Dispatcher):
     self.view_clustering = view_clustering
 
 
-
-
   @staticmethod
   def initialize(config:TrainConfig, dataset:Dataset, logger:Logger):
 
@@ -379,7 +377,7 @@ class Trainer(Dispatcher):
 
 
   def reg_loss(self, rendering:Rendering) -> Tuple[torch.Tensor, dict]:
-    vis = rendering.point_visibility 
+    # vis = rendering.point_visibility 
 
     scale_term =  (rendering.point_scale / rendering.camera.focal_length[0]).pow(2)
     aspect_term = (rendering.point_scale.max(-1).values / (rendering.point_scale.min(-1).values + 1e-6))
@@ -389,9 +387,9 @@ class Trainer(Dispatcher):
           for x in [self.config.scale_reg, self.config.opacity_reg, self.config.aspect_reg]]
     
     regs = dict(
-      scale_reg     =  (vis.unsqueeze(-1) * scale_term).mean() * scale,
-      opacity_reg   =  (vis * opacity_term).mean() * opacity,  
-      aspect_reg    =  (vis * aspect_term).mean() * aspect
+      scale_reg     =  (scale_term).mean() * scale,
+      opacity_reg   =  (opacity_term).mean() * opacity,  
+      aspect_reg    =  (aspect_term).mean() * aspect
     )
 
 

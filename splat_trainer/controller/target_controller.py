@@ -48,6 +48,8 @@ class TargetConfig(ControllerConfig):
   max_scale:float = 0.2
   target_schedule:VaryingFloat = Between(0, 0.6, SmoothStep(0.0, 1.0))
 
+  min_split_size:float = 1/2000.
+
 
 
   def make_controller(self, scene:GaussianScene, logger:Logger):
@@ -110,6 +112,7 @@ class TargetController(Controller):
 
     n = self.points.split_score.shape[0]
     exceeds_scale = self.points.max_scale > self.config.max_scale
+    
     num_large = exceeds_scale.sum().item()
     prune_cost = torch.where(self.points.points_in_view > config.min_views,
                              self.points.prune_cost, 
@@ -123,7 +126,9 @@ class TargetController(Controller):
     # (and compensate for pruned points)
     target_split = ((target - n) + n_prune) 
 
-    split_score = self.points.split_score #/ (self.points.visible + 1)
+    split_score = self.points.split_score # / (self.points.points_in_view + 1)
+    # split_score[self.points.max_scale < config.min_split_size] = 0.
+
     split_mask = take_n(split_score, target_split, descending=True)
 
     both = (split_mask & prune_mask)

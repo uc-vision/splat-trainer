@@ -7,7 +7,7 @@ trainer:
 
     parameters:
       position:
-        lr: ${log_decay:0.2, 0.25}
+        lr: ${log_decay:0.05, 0.25}
         type: local_vector
 
       log_scaling:
@@ -20,7 +20,7 @@ trainer:
         lr: 0.05
 
       feature:
-        lr: 5.0
+        lr: 2.0
         type: vector
 
 
