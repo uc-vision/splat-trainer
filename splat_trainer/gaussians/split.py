@@ -14,10 +14,28 @@ import roma
     
 
 def point_basis(log_scaling:torch.Tensor, rotation_quat:torch.Tensor):
-  scale = torch.exp(log_scaling)
+  scale = torch.clamp(torch.exp(log_scaling), min=1e-4)
   r = F.normalize(rotation_quat, dim=1)
 
   return roma.unitquat_to_rotmat(r) * scale.unsqueeze(-2)
+
+
+def point_basis_inverse(log_scaling:torch.Tensor, rotation_quat:torch.Tensor):
+  scale = torch.clamp(torch.exp(log_scaling), min=1e-4)
+  r = F.normalize(rotation_quat, dim=1)
+  rotation_matrix = roma.unitquat_to_rotmat(r)
+  
+  inv_rotation = rotation_matrix.transpose(-1, -2)
+  inv_scale = 1.0 / scale
+  condition = scale > 1e-1
+  condition = condition.unsqueeze(-1).expand(-1, 3, 3)
+  inv_basis = torch.where(
+    condition,
+    inv_rotation * inv_scale.unsqueeze(-1),
+    inv_rotation
+  )
+  # inv_basis = inv_rotation * inv_scale.unsqueeze(-1)
+  return inv_basis
 
 
 

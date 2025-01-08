@@ -70,3 +70,34 @@ class CudaTimer:
 
   def ellapsed(self):
     return self.start.elapsed_time(self.end)
+  
+@torch.compile
+def cluster_points(position:torch.Tensor, num_clusters:int) -> torch.Tensor:
+  cluster_indices = torch.randperm(position.shape[0])[:num_clusters]
+
+  dist = torch.cdist(position[cluster_indices], position)
+  return dist.argmin(dim=0)
+
+
+def sinkhorn(matrix: torch.Tensor, num_iter: int, epsilon: float = 1e-8) -> torch.Tensor:
+    """Applies Sinkhorn-Knopp algorithm to make matrix doubly stochastic.
+    
+    Args:
+        matrix: Input matrix to normalize
+        num_iter: Number of normalization iterations
+        epsilon: Small value added for numerical stability
+    """
+    # matrix = matrix.exp()
+    for _ in range(num_iter):
+        # Symmetrize
+        matrix = (matrix + matrix.T) / 2
+        
+        # Row normalization
+        row_sums = matrix.sum(dim=1, keepdim=True)
+        matrix = matrix / (row_sums + epsilon)
+        
+        # Column normalization  
+        col_sums = matrix.sum(dim=0, keepdim=True)
+        matrix = matrix / (col_sums + epsilon)
+        
+    return matrix

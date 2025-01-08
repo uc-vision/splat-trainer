@@ -1,6 +1,6 @@
 [project]
 name = "splat-trainer"  
-version = "0.1.6"  
+version = "0.2.0"  
 description = "Gaussian Splatting scene reconstruction with taichi-splatting"  
 readme = "README.md" 
 requires-python = ">=3.10"
@@ -11,7 +11,7 @@ maintainers = [
 ]
 
 dependencies = [
-  'taichi-splatting >= 0.25.0',
+  'taichi-splatting >= 0.26.0',
   'tqdm',
   'plyfile',
   'pypcd4',
@@ -53,11 +53,12 @@ dependency_links = ["https://pypi.taichi.graphics/simple/"]
 splat-trainer = "splat_trainer.scripts.train_scan:main"
 to-colmap = "splat_trainer.scripts.to_colmap:main"
 grid-search-trainer = "splat_trainer.scripts.grid_search:main"
+bayesian-optimize-trainer = "splat_trainer.scripts.bayesian_optimize:main"
 evaluate-trainer = "splat_trainer.scripts.evaluate:evaluate"
 resume-trainer = "splat_trainer.scripts.evaluate:resume"
+
 rq-worker-launcher = "splat_trainer.scripts.rq_worker_launcher:main"
 shutdown-workers = "splat_trainer.scripts.shutdown_all_workers:main"
-
 
 [tool.setuptools.package-data]
 

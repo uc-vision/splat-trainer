@@ -10,6 +10,8 @@ from splat_trainer import config
 import torch
 import os
 
+from taichi_splatting.taichi_queue import TaichiQueue
+
 config.add_resolvers()
 
 
@@ -169,7 +171,8 @@ def train_with_config(cfg) -> dict | str:
   result = None
 
   try:
-    ti.init(arch=ti.cuda, debug=cfg.debug, device_memory_GB=0.1)
+    TaichiQueue.stop()
+    TaichiQueue.init(arch=ti.cuda, debug=cfg.debug, device_memory_GB=0.1, threaded=True)
     
     
     train_config = hydra.utils.instantiate(cfg.trainer, _convert_="object")
