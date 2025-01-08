@@ -26,10 +26,10 @@ trainer:
 
   densify_interval:
     _target_: splat_trainer.config.Piecewise
-    start: 100
+    start: 200
     steps:
-      - [0.2, 200]
-      - [0.5, 400]
+      - [0.2, 400]
+      - [0.5, 800]
     scale: ${training_scale}
 
   # Evaluation settings
@@ -42,8 +42,8 @@ trainer:
   # mse_weight: 10.0
   ssim_levels: 4
 
-  scale_reg: ${log_decay:0.01, 0.01}
-  opacity_reg: ${log_decay:0.001, 0.01}
+  scale_reg: ${log_decay:0.001, 0.01}
+  opacity_reg: ${log_decay:0.0001, 0.01}
   # aspect_reg: 0.0001
 
   # view similarity

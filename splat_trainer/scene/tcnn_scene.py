@@ -10,14 +10,13 @@ import torch.nn.functional as F
 from splat_trainer.camera_table.camera_table import CameraTable, camera_scene_extents, camera_similarity
 from splat_trainer.config import Progress, VaryingFloat,  eval_varyings
 from splat_trainer.logger.logger import Logger
-from splat_trainer.debug.optim import compare_tensors
 from splat_trainer.scene.transfer_sh import transfer_sh
 from splat_trainer.scene.color_model import ColorModel, GLOTable
 from splat_trainer.scene.scene import GaussianSceneConfig, GaussianScene
 from splat_trainer.gaussians.split import point_basis, split_gaussians_uniform
 
 
-from taichi_splatting.optim import ParameterClass, SparseLaProp
+from taichi_splatting.optim import ParameterClass, SparseLaProp, VisibilityAwareAdam
 from taichi_splatting import Gaussians3D, RasterConfig, Rendering, TaichiQueue
 from taichi_splatting.misc.morton_sort import argsort
 
@@ -51,12 +50,12 @@ class TCNNConfig(GaussianSceneConfig):
 
 
 
-  # def optim_options(self):
-  #   return dict(optimizer=VisibilityAwareAdam, betas=(self.beta1, self.beta2), vis_beta=self.vis_beta,
-  #               bias_correction=True, vis_smooth=0.01)
-
   def optim_options(self):
-    return dict(optimizer=SparseLaProp, betas=(self.beta1, self.beta2), bias_correction=True)
+    return dict(optimizer=VisibilityAwareAdam, betas=(self.beta1, self.beta2), vis_beta=self.vis_beta,
+                bias_correction=True, vis_smooth=0.01)
+
+  # def optim_options(self):
+  #   return dict(optimizer=SparseLaProp, betas=(self.beta1, self.beta2), bias_correction=True)
 
   def from_color_gaussians(self, gaussians:Gaussians3D, 
                            camera_table:CameraTable, 
@@ -163,11 +162,11 @@ class TCNNScene(GaussianScene):
     visibility = self.points.visible
 
     vis_idx = visibility.nonzero().squeeze(1)
-    # vis_weight = visibility[vis_idx]
+    vis_weight = visibility[vis_idx]
 
     basis = point_basis(self.points.log_scaling[vis_idx], self.points.rotation[vis_idx]).contiguous()
 
-    self.points.step(indexes=vis_idx, basis=basis)
+    self.points.step(visibility=vis_weight, indexes=vis_idx, basis=basis)
 
     self.color_opt.step()
     self.glo_opt.step()

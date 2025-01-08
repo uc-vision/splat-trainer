@@ -13,6 +13,6 @@ trainer:
     min_views: 10
 
     # threshold (of screen width) for pruning large points
-    max_scale: 0.4
+    max_scale: 0.2
     
   

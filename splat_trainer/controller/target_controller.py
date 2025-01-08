@@ -8,6 +8,7 @@ from taichi_splatting import Rendering
 import torch
 
 from splat_trainer.logger.logger import Logger
+from splat_trainer.util.misc import exp_lerp
 from .controller import Controller, ControllerConfig
 from splat_trainer.scene import GaussianScene
 
@@ -80,14 +81,7 @@ class TargetController(Controller):
     return f"TargetController(points={self.points.batch_size[0]})"
 
   def log_checkpoint(self):
-
-    split_score, prune_cost = self.points.split_score.log(), self.points.prune_cost.log()
-
-    self.logger.log_histogram("points/log_split_score", split_score[split_score.isfinite()])
-    self.logger.log_histogram("points/log_prune_cost",  prune_cost[prune_cost.isfinite()])
-    self.logger.log_histogram("points/max_scale", self.points.max_scale)
-
-    self.logger.log_histogram("points/points_in_view", self.points.points_in_view)
+    pass
     
 
   def state_dict(self) -> dict:
@@ -113,14 +107,14 @@ class TargetController(Controller):
 
     n = self.points.split_score.shape[0]
     exceeds_scale = self.points.max_scale > self.config.max_scale
-    
     num_large = exceeds_scale.sum().item()
+
+
     prune_cost = torch.where(self.points.points_in_view > config.min_views,
                              self.points.prune_cost, 
                              torch.inf)
 
-    prune_mask = take_n(prune_cost, 
-              n_prune - num_large, descending=False) | exceeds_scale
+    prune_mask = take_n(prune_cost, n_prune - num_large, descending=False) | exceeds_scale
 
                   
     # number of split points is directly set to achieve the target count 
@@ -129,6 +123,8 @@ class TargetController(Controller):
 
     split_score = self.points.split_score # / (self.points.points_in_view + 1)
     # split_score[self.points.max_scale < config.min_split_size] = 0.
+
+
 
     split_mask = take_n(split_score, target_split, descending=True)
 
@@ -150,6 +146,12 @@ class TargetController(Controller):
     self.prune_thresh = points.prune_cost[prune_mask].max().item() if n_prune > 0 else 0.
     self.split_thresh = points.split_score[split_idx].min().item() if n_split > 0 else 0.
 
+
+    self.logger.log_histogram("densify/prune_cost", points.prune_cost)
+    self.logger.log_histogram("densify/split_score", points.split_score)
+    self.logger.log_histogram("densify/max_scale", points.max_scale)
+    self.logger.log_histogram("densify/points_in_view", points.points_in_view)
+
     keep_mask = ~(split_mask | prune_mask)
 
   # maximum scale for a point to not be pruned
@@ -164,6 +166,8 @@ class TargetController(Controller):
             max_prune_score=self.prune_thresh, 
             min_split_score=self.split_thresh,
             unseen = n_unseen))
+
+
     
 
 
@@ -171,8 +175,12 @@ class TargetController(Controller):
     points = self.points
     in_view_idx = rendering.points_in_view
 
-    points.prune_cost[in_view_idx] += rendering.prune_cost
-    points.split_score[in_view_idx] += rendering.split_score
+    # points.prune_cost[in_view_idx] += rendering.prune_cost
+    # points.split_score[in_view_idx] += rendering.split_score
+
+
+    points.split_score[in_view_idx] = exp_lerp(0.99, rendering.split_score, points.split_score[in_view_idx])    
+    points.prune_cost[in_view_idx] = exp_lerp(0.1, rendering.prune_cost, points.prune_cost[in_view_idx])
 
     image_size = max(rendering.camera.image_size)
     far_points = rendering.point_depth.squeeze(1) > rendering.point_depth.quantile(0.75)
