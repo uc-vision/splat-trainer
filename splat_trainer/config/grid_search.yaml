@@ -6,6 +6,7 @@ defaults:
   - scene: tcnn
   - trainer: default
   - test_datasets: default
+  - color_corrector: nil
   - _self_
 
 
@@ -27,8 +28,9 @@ hydra:
   mode: MULTIRUN
   sweeper:
     params:
-      trainer.scene.learning_rates.position: 0.1, 0.05, 0.01
-      +test_scene: bonsai, scan_1457_west, scan_21
+      +test_scene: scan_1457_east, scan_23, bonsai, scan_1457_west, room, scan_21, bicycle, counter, flowers, garden, kitchen, stump, treehill
+
+run_name: ${test_scene}
 
 
 debug: False

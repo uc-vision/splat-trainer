@@ -149,7 +149,8 @@ class COLMAPDataset(Dataset):
     return MultiCameraTable(
       camera_t_world = torch.tensor(np.array(self.camera_t_world), dtype=torch.float32),
       projection = self.projections,
-      camera_idx = torch.tensor(self.camera_idx, dtype=torch.long))
+      camera_idx = torch.tensor(self.camera_idx, dtype=torch.long),
+      image_names = self.image_names)
   
 
 

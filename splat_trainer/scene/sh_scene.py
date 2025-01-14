@@ -111,7 +111,7 @@ class SHScene(GaussianScene):
 
     vis = rendering.visible_indices
     basis = point_basis(self.points.log_scaling[vis], self.points.rotation[vis]).contiguous()
-    self.points.step(visible_indexes=vis, basis=basis)
+    self.points.step(indexes=vis, basis=basis)
 
 
     self.points.rotation = torch.nn.Parameter(
