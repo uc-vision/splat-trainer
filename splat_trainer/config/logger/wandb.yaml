@@ -5,6 +5,5 @@ logger:
   entity: UCVision
   project: ${..project}
   name: ${..run_name}
-  # group: ${group_name:${hydra:job.override_dirname}}
-  group: ${group_name:${hydra:overrides.task}}
+  group: ${..group_name}
   

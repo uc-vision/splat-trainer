@@ -1,22 +1,20 @@
 # @package _global_
 
 defaults:
-  - _self_
-  - dataset: scan
-  - logger: wandb
   - controller: target
   - scene: sh
   - color_corrector: nil
   - trainer: default
   - override hydra/sweeper: optuna
   - override hydra/sweeper/sampler: cmaes
+  - _self_
 
 
 hydra:
   job: 
     chdir: True
   sweep:
-    dir: optuna
+    dir: ${project}
     subdir: ${hydra.job.num}
  
   mode: MULTIRUN
@@ -35,16 +33,16 @@ hydra:
       trainer.scene.parameters.rotation.lr: interval(0.001, 0.1)
       trainer.scene.parameters.alpha_logit.lr: interval(0.001, 0.1)
       trainer.scene.parameters.feature.lr: interval(0.001, 0.1)
-      trainer.scene.beta1: interval(0.5, 1)
-      trainer.scene.beta2: interval(0.7, 1)
+      # trainer.scene.beta1: interval(0.5, 1)
+      # trainer.scene.beta2: interval(0.7, 1)
 
 
 trainer.optimizer: VisibilityAwareAdam
 
+group_name: ${format:${hydra:job.num}}
+project: optuna_multirun_${trainer.optimizer}_lr
 
-project: optuna
-run_name: ${format:${hydra:job.num}}
-base_path: /uc/research/CropVision/fieldtrips/nelson_12_21/01-12_09-49/scan_09/scene.json
+optimize_algorithm: ${hydra:sweeper.sampler}
 
 wait_exit: False
 debug: False

@@ -11,6 +11,7 @@ from typing import Any, Optional, Union
 import numpy as np
 import pandas as pd
 import psutil
+import redis
 import rq
 import socket
 import traceback
@@ -20,7 +21,6 @@ from hydra.core.utils import JobReturn, JobStatus
 from hydra.experimental.callback import Callback
 from omegaconf import DictConfig, OmegaConf
 
-from splat_trainer.logger import Logger
 from splat_trainer.util.deploy import kill_rq_worker_by_name
 
 
@@ -32,18 +32,31 @@ class AverageResult(Callback):
         self.failed_jobs_file = os.path.join(output_dir, "failed_jobs.json")
         self.params = sweep_params
         self.log = logging.getLogger(f"{__name__}.{self.__class__.__name__}")
+        self.redis_host = socket.gethostname()
+        self.start_time = None
         
+    def _get_redis_client(self) -> redis.Redis:
+        return redis.Redis(host=self.redis_host, port=6379, decode_responses=True)
         
     def on_job_start(self, config: DictConfig, **kwargs: Any) -> None:
-        job = rq.get_current_job()
-        hostname = socket.gethostname()
+        redis_client = self._get_redis_client()
+        project = OmegaConf.select(config, 'project')
+        redis_client.set('project', project)
+        self.start_time = time.time()
         
-        job.descripton = hostname + '__' + job.description
-        job.save()
+        # job = rq.get_current_job()
+        # hostname = socket.gethostname()
+        
+        # job.descripton = hostname + '__' + job.description
+        # job.save()
     
     
     def on_job_end(self, config: DictConfig, job_return: JobReturn, **kwargs: Any) -> None:
-
+        end_time = time.time()
+        if self.start_time is not None:
+            runtime = end_time - self.start_time
+        else:
+            runtime = None
         job_num = config.hydra.job.num
         params = {k: v for k, v in (override.split('=') 
                     for override in OmegaConf.select(config, "hydra.overrides.task"))}
@@ -63,6 +76,8 @@ class AverageResult(Callback):
                 "timestamp": timestamp,
                 "status":"succeed",
             }
+            
+            result_data["result"]["runtime"] = runtime
 
             self.save_to_json(self.results_file, result_data)
             self.log.info(f"Job {job_num} result has been successfully saved to {self.results_file}.\n")
@@ -89,23 +104,16 @@ class AverageResult(Callback):
             
             if "Permission" in str(job_return._return_value):
                 kill_rq_worker_by_name()
-            # result_data = {
-            #     "job_num": job_num,
-            #     "params": params,
-            #     "result": job_return._return_value,
-            #     "hostname": hostname,
-            #     "timestamp": timestamp,
-            #     "status": "failed"
-            # }
-            # self.save_to_json(self.results_file, result_data)
 
 
-    def on_multirun_end(self, config: DictConfig, **kwargs: Any) -> None:   
-        project = (OmegaConf.select(config, "hydra.sweep.dir")).replace("/", "__")
+
+    def on_multirun_end(self, config: DictConfig, **kwargs: Any) -> None: 
+        redis_client = self._get_redis_client() 
+        project = redis_client.get('project')
         base_path = Path(__file__).parents[2]
 
         try:
-            average_results(project, base_path / self.output_dir)
+            average_results(project, self.log, base_path / self.output_dir, redis_client)
 
         except Exception as e:
             self.log.error(f"Error occurred while averaging the results: {e}")
@@ -149,7 +157,12 @@ class AverageResult(Callback):
             self.dump_data(file, all_data)
 
 
-def average_results(project: Optional[str]=None, file_path: Union[Path, str] = None) -> None:
+def average_results(project: Optional[str]=None, 
+                    log: Optional[logging.Logger]=None, 
+                    file_path: Union[Path, str] = None,
+                    redis_client: Optional[redis.Redis]=None) -> None:
+    if not log:
+        log = logging.getLogger(__name__)
 
     if not file_path:
         file_path = get_args().path
@@ -168,12 +181,12 @@ def average_results(project: Optional[str]=None, file_path: Union[Path, str] = N
         result = result_data['result']
         param_values = tuple(value for param, value in params.items() if param != 'test_scene')
         param_names = tuple(param for param in params.keys() if param != 'test_scene')
-        test_scene = params.get('test_scene')  # Get the test_scene key
+        test_scene = params.get('test_scene')
         test_scene_set.add(test_scene)
         for metric, value in result.items():
             metric_results[metric].append((param_values, job_num, test_scene, value))
 
-    print(f"Averaging {len(result_dict)} training results across {len(test_scene_set)} scenes...")
+    log.info(f"Averaging {len(result_dict)} training results across {len(test_scene_set)} scenes...")
 
     for metric, metric_list in metric_results.items():
         updated_metric_list = []
@@ -192,37 +205,48 @@ def average_results(project: Optional[str]=None, file_path: Union[Path, str] = N
 
             updated_job_list = [(param_values, job_num, test_scene, value, avg_value) for job_num, test_scene, value in job_list]
             updated_metric_list += updated_job_list
-        updated_metric_list.sort(key=lambda x: x[-1], reverse=True if 'psnr' in metric else False)
+        updated_metric_list.sort(key=lambda x: x[-1], reverse=True if 'psnr' or 'ssim' in metric else False)
         metric_results[metric] = updated_metric_list
 
+
+    log_average_results = {}
+    for metric, values in metric_results.items():
+        log_average_results[metric] = values[0][-1]
+    redis_client.hset('multirun_result:1', mapping=log_average_results)
+
+  
     averaged_results = []
     for metric, job_list in metric_results.items():
         for param_values, job_num, test_scene, value, avg_value in job_list:
             averaged_results.append((job_num, *param_values, test_scene, value, avg_value, metric))
-
+              
     df = pd.DataFrame(averaged_results, columns=['job_num', *param_names, 'test_scene', 'value', 'avg_value', 'metric'])
 
     for col in [*param_names]:
         df.loc[df.index % len(test_scene_set) != 0, col] = ''
-    
+        
     if project:
-        name = f"averaged_result_{int(time.time())}"
-        run = wandb.init(project=project, name=name, dir=Path.cwd(), group='metric_average', entity='UCVision')
-        result_artifact = wandb.Artifact(name, type="result")
-        
-        for metric_name, metric_df in df.groupby("metric"):
-            metric_df = metric_df.iloc[:, :-1]
-            result_table = wandb.Table(dataframe=metric_df)
-
-            result_artifact.add(result_table, f"{metric_name}_average")
-            run.log({f"{metric_name}_average": result_table})
-        
-        assert os.path.exists(output_file), f"The output file {output_file} does not exist."
-        result_artifact.add_file(output_file)
-    
-        run.log_artifact(result_artifact)
-        run.finish()
-        print(f"Averaged results uploaded to wandb.")
+        try:
+            name = f"averaged_result_{int(time.time())}"
+            run = wandb.init(project=project, 
+                             name=name, 
+                             dir=Path.cwd(), 
+                             group=f'metrics_average', 
+                             entity='UCVision',
+                             settings=wandb.Settings(silent=True))
+            
+            for metric_name, metric_df in df.groupby("metric"):
+                metric_df = metric_df.iloc[:, :-1]
+                result_table = wandb.Table(dataframe=metric_df)
+                run.log({f"{metric_name}_average": result_table})
+            
+            run.finish()
+            log.info(f"Averaged results uploaded to wandb.")
+            
+        except wandb.errors.UsageError as e:
+            log.error(f"Failed to upload results to wandb: {e}")
+        except Exception as e:
+            log.error(f"Unexpected error occurred while logging to wandb: {e}")
         
     for col in ['metric']:
         df.loc[df[col].duplicated(), col] = ''
@@ -232,19 +256,10 @@ def average_results(project: Optional[str]=None, file_path: Union[Path, str] = N
         
     output_file = Path(file_path) / "averaged_results.csv"
     df.to_csv(output_file, index=False)
-    print(f"Averaged results saved to {output_file}")
+    log.info(f"Averaged results saved to {output_file}")
     
     return
 
-
-    # for process in psutil.process_iter(['pid', 'name', 'cmdline']):
-    #     try:
-    #         if 'rq:worker' in process.info['cmdline']:
-    #             print(f"Killing rq:worker process with PID: {process.info['pid']}")
-    #             process.terminate() 
-    #             process.wait(timeout=5)
-    #     except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.TimeoutExpired) as e:
-    #         print(f"Failed to kill process with PID {process.info['pid']}: {e}")
 
 
 def get_args():

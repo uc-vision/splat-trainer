@@ -1,4 +1,4 @@
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, replace, field
 from functools import cached_property, partial
 import heapq
 import json
@@ -83,7 +83,6 @@ class TrainConfig:
   scale_reg: VaryingFloat = 0.1
   opacity_reg: VaryingFloat = 0.01
   aspect_reg: VaryingFloat = 0.01
-  reg_loss_weight: List[int] = field(default_factory=lambda: [1, 1, 1])
 
   # vis_clusters: int = 1024 # number of point clusters to use for view similarity
 
@@ -388,8 +387,8 @@ class Trainer:
       eval = self.evaluate_image(*image_data, correct_image=correct_image)
       radius_hist = radius_hist.append(eval.log_radii, trim=False)
 
-      if i in log_indexes:
-        self.log_eval(f"{name}_images/{eval.image_id}", eval, log_source=self.step == 0)
+      # if i in log_indexes:
+      #   self.log_eval(f"{name}_images/{eval.image_id}", eval, log_source=self.step == 0)
 
       add_worst = heapq.heappush if len(worst) < worst_count else heapq.heappushpop
       add_worst(worst, (-eval.metrics['psnr'], eval))    
@@ -400,8 +399,8 @@ class Trainer:
       pbar.update(1)
       pbar.set_postfix(**{k:f"{v:.3f}" for k, v in eval.metrics.items()})
 
-    for i, (_, eval) in enumerate(worst):
-      self.log_eval(f"worst_{name}/{i}", eval, log_source=True)
+    # for i, (_, eval) in enumerate(worst):
+    #   self.log_eval(f"worst_{name}/{i}", eval, log_source=True)
 
     self.logger.log_evaluations(f"eval_{name}/evals", rows, step=self.step)
     totals = transpose_rows(list(rows.values()))
@@ -631,7 +630,7 @@ class Trainer:
     self.pbar.set_postfix(**metrics, **eval_metrics)        
     self.pbar.close()
 
-    return eval_metrics['train_psnr']
+    return eval_metrics
     
 
   def close(self):

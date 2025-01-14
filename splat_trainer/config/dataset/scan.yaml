@@ -2,7 +2,7 @@
 
 dataset:
   _target_: splat_trainer.dataset.ScanDataset
-  scan_file: ${..base_path}
+  scan_file: ???
 
   image_scale: null
   resize_longest: 1536

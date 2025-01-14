@@ -26,8 +26,6 @@ trainer:
   ssim_weight: 1.0 # ssim is expensive but converges faster than just l1 loss
   l1_weight: 1.0
   ssim_levels: 4
-
-  reg_loss_weight: [1, 1, 1] # opacity, scale, aspect
   
   scale_reg: ${log_decay:10.0, 0.01}
   opacity_reg: ${log_decay:0.1, 0.01}

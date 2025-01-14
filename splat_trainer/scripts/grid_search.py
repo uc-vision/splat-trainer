@@ -21,29 +21,45 @@ def find_dataset_config(name:str, test_datasets:DictConfig):
 
 
 OmegaConf.register_new_resolver("sanitize", lambda x: x.replace("/", "__"))
+
 OmegaConf.register_new_resolver(
     "run_name",
     lambda x: "; ".join([
-        f"{(item.split('=')[0]).split('.')[-1]}={item.split('=')[1]}" 
-        if bool(re.match(r'^-?\d+(\.\d+)?$', item.split('=')[1])) or item.split('=')[1] in ['True', 'False', 'true', 'false'] 
-        else item.split('=')[1]
+        f"{'.'.join((item.split('=')[0]).split('.')[-2:])}={float(item.split('=')[1]):.4f}"
+        if bool(re.match(r'^-?\d+(\.\d+)?$', item.split('=')[1]))
+        else f"{'.'.join((item.split('=')[0]).split('.')[-2:])}={item.split('=')[1]}"
         for item in x
     ]) if x else ""
 )
+
 OmegaConf.register_new_resolver("format", lambda x: f"{x:04d}")
+
 OmegaConf.register_new_resolver(
     "project_name", 
     lambda x: "__".join([
-        f"{(item.split('=')[0]).split('.')[-1]}" 
+        ".".join((item.split('=')[0]).split('.')[-2:])
         for item in x if 'test_scene' not in item
     ]) if x else ""
 )
+
 OmegaConf.register_new_resolver(
     "group_name",
     lambda x: "; ".join([
-        f"{(item.split('=')[0]).split('.')[-1]}={item.split('=')[1]}" 
-        for item in x if 'test_scene' not in item
+        "{}={}".format(
+            ".".join((item.split('=')[0]).split('.')[-2:]),
+            "{:.3f}".format(float(value)) if re.match(r'^-?\d+(\.\d+)?$', value) and '.' in value else value
+        )
+        for item in x
+        if 'test_scene' not in item and (value := item.split('=')[1])  # Use walrus operator here
     ]) if x else ""
+)
+
+OmegaConf.register_new_resolver(
+    "conditional_run_name",
+    lambda optimize_algorithm, group_name, job_num, task_name:
+      f"{group_name}__{job_num}__{task_name}"
+      if optimize_algorithm == "grid_search"
+      else f"{job_num}__{task_name}"
     
 )
 
