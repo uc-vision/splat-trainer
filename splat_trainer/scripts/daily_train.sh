@@ -4,7 +4,7 @@
 DATE=$(date +"%Y-%m-%d__%H-%M-%S")
 BASE_PATH=/local/splat_trainer_daily_multirun
 
-mkdir ${BASE_PATH}/${DATE}
+mkdir -p ${BASE_PATH}/${DATE}
 LOG_FILE="${BASE_PATH}/${DATE}/daily_train_log_${DATE}.log"
 
 echo "Script started at $(date)" >> "$LOG_FILE"
