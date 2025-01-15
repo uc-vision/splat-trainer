@@ -11,7 +11,7 @@ maintainers = [
 ]
 
 dependencies = [
-  'taichi-splatting >= 0.28.0',
+  'taichi-splatting >= 0.30.0',
   'tqdm',
   'plyfile',
   'pypcd4',
@@ -38,7 +38,7 @@ dependencies = [
   'splatview>=0.2.0',
   'python-dispatch',
 
-  'tensordict >= 0.6.2',
+  'tensordict >= 0.6',
   'pykeops'
 ]
 
