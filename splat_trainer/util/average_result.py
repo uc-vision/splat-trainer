@@ -23,19 +23,21 @@ from omegaconf import DictConfig, OmegaConf
 from splat_trainer.util.push_metrics import push_metrics
 
 
+log = logging.getLogger(__name__)
+log.setLevel(logging.INFO)
+
 
 class AverageResult(Callback):
-    def __init__(self, output_dir: str, sweep_params: DictConfig) -> None:
+    def __init__(self, output_dir: str) -> None:
         self.output_dir = output_dir
-        self.results_file = os.path.join(output_dir, "results.json")
-        self.failed_jobs_file = os.path.join(output_dir, "failed_jobs.json")
-        self.params = sweep_params.get('+test_scene').split(',')
         self.log = logging.getLogger(f"{__name__}.{self.__class__.__name__}")
         self.redis_host = socket.gethostname()
         self.start_time = None
         
+        
     def _get_redis_client(self) -> redis.Redis:
         return redis.Redis(host=self.redis_host, port=6379, decode_responses=True)
+        
         
     def on_job_start(self, config: DictConfig, **kwargs: Any) -> None:
         redis_client = self._get_redis_client()
@@ -43,7 +45,9 @@ class AverageResult(Callback):
         group = OmegaConf.select(config, 'logger.group')
         redis_client.set('project', project)
         redis_client.set('group', group)
+        
         self.start_time = time.time()
+    
     
     def on_job_end(self, config: DictConfig, job_return: JobReturn, **kwargs: Any) -> None:
         end_time = time.time()
@@ -51,6 +55,7 @@ class AverageResult(Callback):
             runtime = end_time - self.start_time
         else:
             runtime = None
+            
         job_num = config.hydra.job.num
         params = {"test_scene": OmegaConf.select(config, "test_scene"),
                   "group": OmegaConf.select(config, 'logger.group')}
@@ -72,8 +77,9 @@ class AverageResult(Callback):
             
             result_data["result"]["runtime"] = runtime
 
-            self.save_to_json(self.results_file, result_data)
-            self.log.info(f"Job {job_num} result has been successfully saved to {self.results_file}.\n")
+            results_file = os.path.join(self.output_dir, "results.json")
+            self.save_to_json(results_file, result_data)
+            self.log.info(f"Job {job_num} result has been successfully saved to {results_file}.\n")
 
 
         else:
@@ -90,23 +96,35 @@ class AverageResult(Callback):
                 "timestamp": timestamp
             }
 
-            self.save_to_json(self.failed_jobs_file, job_data)
-            self.log.info(f"Job {job_num} has failed and the details have been saved to {self.failed_jobs_file}.\n")
-
+            failed_jobs_file = os.path.join(self.output_dir, "failed_jobs.json")
+            self.save_to_json(failed_jobs_file, job_data)
+            self.log.info(f"Job {job_num} has failed and the details have been saved to {failed_jobs_file}.\n")
 
 
     def on_multirun_end(self, config: DictConfig, **kwargs: Any) -> None: 
         redis_client = self._get_redis_client() 
         project = redis_client.get('project')
         group = redis_client.get('group')
-        base_path = Path(__file__).parents[2]
 
         try:
-            results = average_results(project, group, self.log, base_path / self.output_dir, redis_client)
+            results, param_names, test_scene_set = average_results(self.output_dir)
 
         except Exception as e:
             self.log.error(f"Error occurred while averaging the results: {e}")
             self.log.error(f"Stack trace: {traceback.format_exc()}")
+        
+        averaged_results = {}
+        for metric, values in results.items():
+            averaged_results[metric] = values[0][-1]
+        redis_client.hset('multirun_result:1', mapping=averaged_results)
+        
+        
+        df = create_df(results, param_names, test_scene_set)
+        
+        log_wandb(df, project, group)
+        
+        save_csv(df, self.output_dir)
+        
         
         try:
             push_metrics(results)
@@ -155,13 +173,7 @@ class AverageResult(Callback):
             self.dump_data(file, all_data)
 
 
-def average_results(project: Optional[str]=None, 
-                    group: Optional[str]=None,
-                    log: Optional[logging.Logger]=None, 
-                    file_path: Union[Path, str] = None,
-                    redis_client: Optional[redis.Redis]=None) -> dict | None:
-    if not log:
-        log = logging.getLogger(__name__).setLevel(logging.INFO)
+def average_results(file_path: Union[Path, str] = None) -> tuple | None:
 
     if not file_path:
         file_path = get_args().path
@@ -169,7 +181,7 @@ def average_results(project: Optional[str]=None,
     result_dict = AverageResult.load_data(Path(file_path) / "results.json")
     
     if not result_dict:
-        log.error(f"Cannot find 'results.json' file under {file_path}.")
+        log.error(f"Cannot load 'results.json' file under {file_path}.")
         return
     
     metric_results = defaultdict(list)
@@ -206,14 +218,13 @@ def average_results(project: Optional[str]=None,
             updated_metric_list += updated_job_list
         updated_metric_list.sort(key=lambda x: x[-1], reverse=True if 'psnr' or 'ssim' in metric else False)
         metric_results[metric] = updated_metric_list
+        
+    return metric_results, param_names, test_scene_set
 
 
-    log_average_results = {}
-    for metric, values in metric_results.items():
-        log_average_results[metric] = values[0][-1]
-    redis_client.hset('multirun_result:1', mapping=log_average_results)
-
-  
+def create_df(metric_results: dict,
+              param_names: tuple,
+              test_scene_set: set) -> pd.DataFrame:
     averaged_results = []
     for metric, job_list in metric_results.items():
         for param_values, job_num, test_scene, value, avg_value in job_list:
@@ -224,6 +235,13 @@ def average_results(project: Optional[str]=None,
     for col in [*param_names]:
         df.loc[df.index % len(test_scene_set) != 0, col] = ''
         
+    return df
+    
+
+def log_wandb(df: pd.DataFrame,
+              project: Optional[str]=None, 
+              group: Optional[str]=None,):
+
     if project and group:
         try:
             run = wandb.init(project=project, 
@@ -245,6 +263,9 @@ def average_results(project: Optional[str]=None,
             log.error(f"Failed to upload results to wandb: {e}")
         except Exception as e:
             log.error(f"Unexpected error occurred while logging to wandb: {e}")
+            
+            
+def save_csv(df: pd.DataFrame, file_path: str):
         
     for col in ['metric']:
         df.loc[df[col].duplicated(), col] = ''
@@ -255,9 +276,6 @@ def average_results(project: Optional[str]=None,
     output_file = Path(file_path) / "averaged_results.csv"
     df.to_csv(output_file, index=False)
     log.info(f"Averaged results saved to {output_file}")
-    
-    return log_average_results
-
 
 
 def get_args():
@@ -268,5 +286,10 @@ def get_args():
 
 
 
+
+
+
 if __name__ == "__main__":
-    average_results()
+    args = get_args()
+    df = create_df(*average_results(args.path))
+    save_csv(df, args.path)
