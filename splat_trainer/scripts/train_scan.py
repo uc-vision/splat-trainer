@@ -176,6 +176,7 @@ def train_with_config(cfg) -> dict | str:
   result = None
 
   try:
+    TaichiQueue.stop()
     TaichiQueue.init(arch=ti.cuda, debug=cfg.debug, device_memory_GB=0.1, threaded=True)
     
     train_config = hydra.utils.instantiate(cfg.trainer, _convert_="object")
@@ -184,8 +185,7 @@ def train_with_config(cfg) -> dict | str:
     trainer = Trainer.initialize(train_config, dataset, logger)
     trainer.warmup()
 
-    viewer:Viewer = hydra.utils.instantiate(cfg.viewer).create_viewer(trainer, enable_training=True)
-
+    viewer = hydra.utils.instantiate(cfg.viewer).create_viewer(trainer, enable_training=True)
     result = trainer.train()
 
     # allow viewer to run if enabled

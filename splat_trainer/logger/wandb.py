@@ -16,14 +16,16 @@ from .logger import Logger
 class WandbLogger(Logger):
 
   @beartype
-  def __init__(self, project:str | None, 
+  def __init__(self, project:str | None,
+               group:str | None, 
                entity:str | None, 
                name:str | None=None):
     
     dir = Path.cwd()
     wandb.require("core")
 
-    self.run = wandb.init(project=project, 
+    self.run = wandb.init(project=project,
+                          group=group, 
                           name=name, 
                           dir=dir, 
                           entity=entity,

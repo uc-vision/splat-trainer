@@ -19,7 +19,7 @@ def find_dataset_config(name:str, test_datasets:DictConfig):
 
 
 @hydra.main(config_path="../config", version_base="1.2", config_name="grid_search")
-def main(cfg : DictConfig) -> None:
+def main(cfg : DictConfig) -> dict | str:
     
   dataset_cfg = find_dataset_config(cfg.test_scene, cfg.test_datasets)
   OmegaConf.update(cfg, "dataset", dataset_cfg, force_add=True)
@@ -27,10 +27,7 @@ def main(cfg : DictConfig) -> None:
   result = train_with_config(cfg)
   print(result)
 
-  # save result to yaml - TODO: use a different wandb logger to upload result too?
-  with open("result.yaml", "w") as f:
-    OmegaConf.save(cfg, f)
-  
+  return result
 
 
 if __name__ == "__main__":

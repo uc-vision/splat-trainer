@@ -311,6 +311,7 @@ class MultiCameraTable(CameraTable):
 
     self.register_buffer("_camera_idx", camera_idx)
     self._camera_t_world = PoseTable(camera_t_world)
+    self._image_names = image_names
 
   @beartype
   def forward(self, image_idx:torch.Tensor) -> Cameras:
@@ -341,6 +342,10 @@ class MultiCameraTable(CameraTable):
   @property
   def device(self):
     return self._camera_projection.device
+  
+  @property
+  def image_name(self, image_idx:int) -> str:
+    return self._image_names[image_idx]
 
 
 
