@@ -17,7 +17,7 @@ trainer:
   save_checkpoints: False
   save_output: False
 
-  steps: 1000 # tiny number for testing
+  steps: 20000 # tiny number for testing
 
 
 hydra:
