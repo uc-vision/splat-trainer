@@ -185,12 +185,11 @@ def train_with_config(cfg) -> dict | str:
     trainer = Trainer.initialize(train_config, dataset, logger)
     trainer.warmup()
 
-    viewer = hydra.utils.instantiate(cfg.viewer).create_viewer(trainer, enable_training=True) if cfg.viewer == 'splatview' else None
+    viewer = hydra.utils.instantiate(cfg.viewer).create_viewer(trainer, enable_training=True)
     result = trainer.train()
 
     # allow viewer to run if enabled
-    if viewer is not None:
-      viewer.spin()
+    viewer.spin()
   except KeyboardInterrupt:
     pass
 

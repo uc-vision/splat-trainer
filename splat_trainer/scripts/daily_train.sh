@@ -19,4 +19,12 @@ pip install -e .
 source ~/.bashrc
 conda activate splat-trainer
 
-grid-search-trainer logger=wandb scene=sh +project=splat_trainer_daily_multirun logger.group=${DATE} logger.entity=UCVision +viewer=splatview hydra.sweep.dir=/local/splat_trainer_daily_multirun/${DATE} trainer.num_logged_images=-1 trainer.log_worst_images=-1
+grid-search-trainer \
+    logger=wandb \
+    logger.group=${DATE} \
+    logger.entity=UCVision \
+    scene=sh \
+    +project=splat_trainer_daily_multirun  \
+    hydra.sweep.dir=/local/splat_trainer_daily_multirun/${DATE} \
+    trainer.num_logged_images=-1 \
+    trainer.log_worst_images=-1

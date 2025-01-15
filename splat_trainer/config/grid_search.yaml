@@ -7,6 +7,9 @@ defaults:
   - trainer: default
   - test_datasets: default
   - color_corrector: nil
+  - viewer: none
+  - hydra/callbacks:
+    - average_result
   - _self_
 
 
@@ -28,7 +31,8 @@ hydra:
   mode: MULTIRUN
   sweeper:
     params:
-      +test_scene: scan_1457_east, scan_23, bonsai, scan_1457_west, room, scan_21, bicycle, counter, flowers, garden, kitchen, stump, treehill
+      +test_scene: scan_1457_east, scan_23, scan_1457_west
+      # +test_scene: scan_1457_east, scan_23, bonsai, scan_1457_west, room, scan_21, bicycle, counter, flowers, garden, kitchen, stump, treehill
 
 run_name: ${test_scene}
 
