@@ -15,6 +15,10 @@ def from_pointcloud(pcd:PointCloud,
                     initial_alpha:float = 0.5,
                     num_neighbors:int = 3) -> Gaussians3D:
   scales = estimate_scale(pcd, num_neighbors=num_neighbors) * initial_scale
+  return from_scaled_pointcloud(pcd, scales, initial_alpha)
+
+def from_scaled_pointcloud(pcd:PointCloud, scales:torch.Tensor, 
+                    initial_alpha:float = 0.5) -> Gaussians3D:
 
   return Gaussians3D(
     position=pcd.points,
@@ -26,6 +30,11 @@ def from_pointcloud(pcd:PointCloud,
     batch_size=(pcd.points.shape[0],)
   )
 
+def to_pointcloud(gaussians:Gaussians3D) -> PointCloud:
+  return PointCloud(
+    points=gaussians.position,
+    colors=gaussians.feature
+  )
   
 def estimate_scale(pointcloud : PointCloud, num_neighbors:int = 3):
   points = pointcloud.points.cpu().numpy()

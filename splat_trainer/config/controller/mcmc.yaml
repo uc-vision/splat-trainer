@@ -1,0 +1,8 @@
+# @package _global_
+
+trainer:
+  controller:
+    _target_: splat_trainer.controller.MCMCConfig
+
+  opacity_reg: 0.005 # ${log_decay:0.005, 0.1}
+  # scale_reg: ${log_decay:0.1, 0.001}

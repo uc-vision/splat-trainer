@@ -1,21 +1,22 @@
 from argparse import ArgumentParser, Namespace
 import os
 from pathlib import Path
-from time import time
-from typing import Optional
+from types import NoneType
+from typing import Callable, Optional
 
 import hydra
 
 import numpy as np
 from omegaconf import DictConfig, OmegaConf
 from taichi_splatting import TaichiQueue
+from splat_trainer.scene.io import write_gaussians
 from splat_trainer.trainer import Trainer
 from taichi_splatting import TaichiQueue
 import torch
 
 import taichi as ti
 
-from splat_trainer.config import add_resolvers, setup_project
+from splat_trainer.config import add_resolvers, make_overrides, setup_project
 from splat_trainer.viewer import SplatviewConfig
 
 
@@ -54,8 +55,8 @@ def load_checkpoint(splat_path:Path, step:Optional[int]=None):
 
 
 def init_from_checkpoint(config, state_dict):
-  dataset = hydra.utils.instantiate(config.dataset)  
-  train_config = hydra.utils.instantiate(config.trainer)
+  dataset = hydra.utils.instantiate(config.dataset, _convert_="object")  
+  train_config = hydra.utils.instantiate(config.trainer, _convert_="object")
 
   logger = hydra.utils.instantiate(config.logger)
 
@@ -73,7 +74,7 @@ def get_path(dotted_path:str, config:DictConfig):
     config = config[key]
   return config
 
-def with_trainer(f, args):
+def with_trainer(f:Callable[[Trainer], None], args:Namespace):
 
   overrides = args.override or []
   
@@ -83,24 +84,32 @@ def with_trainer(f, args):
   torch.set_printoptions(precision=4, sci_mode=False)
   np.set_printoptions(precision=4, suppress=True)
 
-  TaichiQueue.init(arch=ti.cuda, debug=args.debug, threaded=True)
+  TaichiQueue.init(arch=ti.cuda, debug=args.debug, threaded=False)
 
   add_resolvers()
 
   state_dict, workspace_path = load_checkpoint(args.splat_path, args.step)
   config = OmegaConf.load(workspace_path / "config.yaml")
+  
 
   if not args.enable_logging:
     config.logger = OmegaConf.create({"_target_": "splat_trainer.logger.NullLogger"})
 
-  run_path, args.run = setup_project(config.project, args.run or config.run_name, config.base_path)
-  os.chdir(str(run_path))
+
+  args.base_path, run_path, args.run = setup_project(config.project, args.run or config.run_name, 
+        workspace_path.parent.parent if args.base_path is None else args.base_path)
+  
+  overrides += make_overrides(run_name=args.run,  base_path=args.base_path)
 
   for override in overrides:
     key, value = override.split("=")
 
     existing_type = type(get_path(key, config))
-    OmegaConf.update(config, key, existing_type(value))
+
+    if existing_type is not NoneType:
+      value = existing_type(value)
+
+    OmegaConf.update(config, key, value)
 
   scale_images = getattr(args, "scale_images", None)
   resize_longest = getattr(args, "resize_longest", None)
@@ -110,12 +119,15 @@ def with_trainer(f, args):
     if dataset.image_scale is not None:
       dataset.image_scale *= scale_images
 
+    if dataset.resize_longest is not None:
+      dataset.resize_longest = int(dataset.resize_longest * scale_images)
+
   if resize_longest is not None:
     dataset.resize_longest = int(dataset.resize_longest * resize_longest)
 
-  print(OmegaConf.to_yaml(config))
   trainer = init_from_checkpoint(config, state_dict)
-  print(trainer)
+  os.chdir(str(run_path))
+
 
   try:
     f(trainer)
@@ -124,7 +136,6 @@ def with_trainer(f, args):
 
   trainer.close()
 
-  print("Done")
 
 
 def arguments():
@@ -132,6 +143,7 @@ def arguments():
   parser.add_argument("splat_path", type=Path,  help="Path to output folder from splat-trainer")
   parser.add_argument("--step", type=int, default=None, help="Checkpoint from step to evaluate")
   parser.add_argument("--debug", action="store_true", help="Enable debug in taichi")
+  parser.add_argument("--base_path", type=Path, default=None, help="Override base path for project outputs")
 
   parser.add_argument("--scale_images", type=float, default=None, help="Scale images relative to training size")
   parser.add_argument("--run", type=str, default=None, help="Name for this run")
@@ -142,11 +154,15 @@ def arguments():
 
 def evaluate():
   parser = arguments()
+  parser.add_argument("--write", action="store_true", help="Write back to checkpoint")
   args = parser.parse_args()
 
-  def f(trainer):
+  def f(trainer:Trainer):
     result = trainer.evaluate()
     print(result)
+
+    if args.write:
+      trainer.write_checkpoint()
 
   with_trainer(f, args)
 
@@ -174,7 +190,7 @@ def visualize():
 
   args = parser.parse_args()
     
-  def f(trainer):
+  def f(trainer:Trainer):
 
     viewer = start_with_viewer(trainer, args)
     viewer.spin()
@@ -186,7 +202,7 @@ def resume():
   add_viewer_args(parser)
   args = parser.parse_args()
 
-  def f(trainer):
+  def f(trainer:Trainer):
 
     if args.vis:
       viewer = start_with_viewer(trainer, args, enable_training=True)
@@ -199,8 +215,21 @@ def resume():
   with_trainer(f, args)
 
 
-
   
+def write_sh_gaussians():
+  parser = arguments()
+  args = parser.parse_args()
+  
+  def f(trainer:Trainer):
+    paths = trainer.paths()
+    print(f"Writing SH gaussians to {paths.point_cloud}...")
+
+    write_gaussians(paths.point_cloud, trainer.scene.to_sh_gaussians(), with_sh=True)
+
+  with_trainer(f, args)
+
+
+
 
 if __name__ == "__main__":
   resume()

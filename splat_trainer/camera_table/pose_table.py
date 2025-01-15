@@ -38,7 +38,7 @@ class RigPoseTable(nn.Module):
 
   
   def forward(self, frame_idx:torch.Tensor, camera_idx:torch.Tensor):
-    assert frame_idx.dim() == 1 and camera_idx.dim() == 1, \
+    assert frame_idx.dim() <= 1 and camera_idx.dim() <= 1, \
       f"Expected 1D tensors, got: {frame_idx.shape}, {camera_idx.shape}"
 
     camera_t_rig = self.camera_t_rig(camera_idx)
@@ -68,7 +68,7 @@ class PoseTable(nn.Module):
     if indices is None:
       q, t = F.normalize(self.q, dim=-1), self.t  
     else:
-      assert indices.dim() == 1, f"Expected 1D tensor, got: {indices.shape}"
+      assert indices.dim() <= 1, f"Expected 1D tensor, got: {indices.shape}"
       assert (indices < self.q.shape[0]).all(), f"Index out of bounds: {indices} >= {self.q.shape[0]}"
 
       q, t = F.normalize(self.q[indices], dim=-1), self.t[indices]

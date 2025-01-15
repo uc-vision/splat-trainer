@@ -1,3 +1,4 @@
+import heapq
 import numpy as np
 import torch
 
@@ -53,8 +54,16 @@ def exp_lerp(t, a, b):
     return max_ab + torch.log(torch.lerp(torch.exp(a - max_ab), torch.exp(b - max_ab), t))
 
 @torch.compile
+def pow_lerp(t, a, b, k=2):
+    return (a ** k + (b ** k - a ** k) * t) ** (1 / k)
+
+@torch.compile
 def lerp(t, a, b):
   return a + (b - a) * t
+
+@torch.compile
+def max_decaying(x, t, decay):
+  return x * (1 - decay) + torch.maximum(x, t) * decay
 
 
 class CudaTimer:
@@ -71,32 +80,27 @@ class CudaTimer:
   def ellapsed(self):
     return self.start.elapsed_time(self.end)
   
-def cluster_points(position:torch.Tensor, num_clusters:int) -> torch.Tensor:
-  cluster_indices = torch.randperm(position.shape[0])[:num_clusters]
+  def wrap(self, f, *args, **kwargs):
+    with self:
+      return f(*args, **kwargs)
+  
 
-  dist = torch.cdist(position[cluster_indices], position)
-  return dist.argmin(dim=0)
 
+class Heap:
+  def __init__(self, max_size:int):
+    self.max_size = max_size
+    self.heap = []
 
-def sinkhorn(matrix: torch.Tensor, num_iter: int, epsilon: float = 1e-8) -> torch.Tensor:
-    """Applies Sinkhorn-Knopp algorithm to make matrix doubly stochastic.
-    
-    Args:
-        matrix: Input matrix to normalize
-        num_iter: Number of normalization iterations
-        epsilon: Small value added for numerical stability
-    """
-    # matrix = matrix.exp()
-    for _ in range(num_iter):
-        # Symmetrize
-        matrix = (matrix + matrix.T) / 2
-        
-        # Row normalization
-        row_sums = matrix.sum(dim=1, keepdim=True)
-        matrix = matrix / (row_sums + epsilon)
-        
-        # Column normalization  
-        col_sums = matrix.sum(dim=0, keepdim=True)
-        matrix = matrix / (col_sums + epsilon)
-        
-    return matrix
+  def push(self, value, item):
+    heapq.heappush(self.heap, (value, item))
+    if len(self.heap) > self.max_size:
+      heapq.heappop(self.heap)
+
+  def pop(self):
+    return heapq.heappop(self.heap)
+
+  def __len__(self):
+    return len(self.heap)
+
+  def __iter__(self):
+    return iter(self.heap)

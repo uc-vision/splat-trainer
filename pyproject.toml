@@ -24,6 +24,8 @@ dependencies = [
 
   'python-dispatch',
   'markdown_strings',
+  'colored_traceback',
+  'pandas',
   
   'opencv-python',
   'pycolmap',
@@ -34,6 +36,10 @@ dependencies = [
   'debugpy',
   'wonderwords',
   'splatview>=0.2.0',
+  'python-dispatch',
+
+  'tensordict >= 0.6.2',
+  'pykeops'
 ]
 
 
@@ -59,16 +65,25 @@ to-colmap = "splat_trainer.scripts.to_colmap:main"
 
 grid-search-trainer = "splat_trainer.scripts.grid_search:main"
 
-eval-checkpoint = "splat_trainer.scripts.checkpoint:evaluate"
-resume-checkpoint = "splat_trainer.scripts.checkpoint:resume"
-vis-checkpoint = "splat_trainer.scripts.checkpoint:visualize"
+checkpoint-evaluate = "splat_trainer.scripts.checkpoint:evaluate"
+checkpoint-resume = "splat_trainer.scripts.checkpoint:resume"
+checkpoint-visualize = "splat_trainer.scripts.checkpoint:visualize"
+checkpoint-write-sh = "splat_trainer.scripts.checkpoint:write_sh_gaussians"
 
+checkpoint-show-batch = "splat_trainer.scripts.view_batching:main"
+checkpoint-benchmark = "splat_trainer.scripts.benchmark:main"
+checkpoint-view-clusters = "splat_trainer.scripts.view_clusters:main"
+
+checkpoint-eval-pruning = "splat_trainer.scripts.eval_pruning:main"
 
 
 [tool.setuptools.package-data]
 
 [tool.pyright]
 reportInvalidTypeForm = "none"
+reportGeneralTypeIssues = "none"
+# typeCheckingMode = "off"
+
 
 [tool.ruff]
 indent-width = 2

@@ -1,190 +1,120 @@
 
 from dataclasses import  dataclass
+import gc
 import math
-from typing import Dict
 from beartype import beartype
-from beartype.typing import Optional
-import numpy as np
 
-from splat_trainer.util.misc import exp_lerp, lerp
 from taichi_splatting import Rendering
-from tensordict import tensorclass
 import torch
 
+from splat_trainer.config import eval_varying
+from splat_trainer.controller.point_state import PointState, densify_and_prune, log_histograms
 from splat_trainer.logger.logger import Logger
 from .controller import Controller, ControllerConfig
 from splat_trainer.scene import GaussianScene
 
-from splat_trainer.config import Between, SmoothStep, VaryingFloat, eval_varying
-
-@tensorclass
-class PointStatistics:
-  split_score : torch.Tensor  # (N, ) - averaged split score
-  prune_cost : torch.Tensor  # (N, ) - max prune cost
-  max_scale : torch.Tensor # (N, ) - max scale
-
-
-  @staticmethod
-  def zeros(batch_size, device:Optional[torch.device] = None):
-    return PointStatistics(
-      split_score=torch.zeros(batch_size, dtype=torch.float32, device=device),
-      prune_cost=torch.zeros(batch_size, dtype=torch.float32, device=device),
-      max_scale=torch.zeros(batch_size, dtype=torch.float32, device=device),
-
-      batch_size=(batch_size,)
-    )
+from splat_trainer.config import Progress, VaryingInt
 
 
 @beartype
 @dataclass
 class TargetConfig(ControllerConfig):
-
-  # target point cloud size - if None then optimize for the current size
-  target_count:Optional[int] = None
-
   # base rate (relative to count) to prune points 
-  prune_rate:float = 0.05
+  prune_rate:float = 0.04
 
-  # ema half life
-  split_alpha:float = 0.1
-  prune_alpha:float = 0.01
+  # maximum split rate (relative to count when count is less than target)
+  max_split_rate:float = 0.06
+
+  # minimum number of times point is in view before it is able to be pruned
+  min_views:int = 10
 
   # maximum screen-space size for a floater point (otherwise pruned)
-  max_scale:float = 0.2
-  target_schedule:VaryingFloat = Between(0, 0.6, SmoothStep(0.0, 1.0))
+  max_scale_px:float = 200
+
+  # minimum max-screen-space size for a point to be split (don't split tiny points)
+  min_split_px:float = 0.0
+
+  densify_prune_interval:VaryingInt = 100
 
 
 
-  def make_controller(self, scene:GaussianScene):
-    return TargetController(self, scene)
+  def make_controller(self, scene:GaussianScene, logger:Logger):
+    return TargetController(self, scene, logger)
 
-  def from_state_dict(self, state_dict:dict, scene:GaussianScene) -> Controller:
-    controller = TargetController(self, scene)
-    
+  def from_state_dict(self, state_dict:dict, scene:GaussianScene, logger:Logger) -> Controller:
+    controller = TargetController(self, scene, logger)
     controller.points.load_state_dict(state_dict['points'])
-    controller.start_count = state_dict['start_count']
-
     return controller
 
 class TargetController(Controller):
   def __init__(self, config:TargetConfig, 
-               scene:GaussianScene):
+               scene:GaussianScene, logger:Logger):
     
     self.config = config
     self.scene = scene
+    self.logger = logger
 
-    self.target_count = config.target_count or scene.num_points
-    self.start_count = scene.num_points 
-
-    self.points = PointStatistics.zeros(scene.num_points, device=scene.device)
-
+    self.points = PointState.new_zeros(scene.num_points, device=scene.device)
 
 
   def __repr__(self):
     return f"TargetController(points={self.points.batch_size[0]})"
 
-  def log_histograms(self, logger:Logger, step:int):
-
-    split_score, prune_cost = self.points.split_score.log(), self.points.prune_cost.log()
-
-    logger.log_histogram("points/log_split_score", split_score[split_score.isfinite()], step)
-    logger.log_histogram("points/log_prune_cost",  prune_cost[prune_cost.isfinite()], step)
-    logger.log_histogram("points/max_scale", self.points.max_scale, step)
 
   def state_dict(self) -> dict:
-    return dict(points=self.points.state_dict(), 
-                start_count=self.start_count)
+    return dict(points=self.points.state_dict())
 
 
-  def find_split_prune_indexes(self, t:float):
+  def find_split_prune_indexes(self, target_count:int, t:float):
     config = self.config  
     n = self.points.batch_size[0]
 
-    # point count schedule
-    schedule = eval_varying(self.config.target_schedule, t)
+    exceeds_scale = self.points.max_scale_px > config.max_scale_px
+    num_large = exceeds_scale.sum().item()
 
-    total_added = self.config.target_count - self.start_count
-    target = max(n, self.start_count + math.ceil(schedule * total_added))
+    prune_schedule = math.ceil(config.prune_rate * n * (1 - t))
 
-    # number of pruned points is controlled by the split rated
-    # prune_rate = (config.prune_rate * config.densify_interval/100)
-    n_prune = math.ceil(config.prune_rate * n * (1 - t))
+    prune_cost, split_score = self.points.masked_heuristics(config.min_views)
+    prune_mask = take_n(prune_cost, prune_schedule - num_large, descending=False) | exceeds_scale
+                  
+    target_split = int(min(config.max_split_rate * n, (target_count - n) + prune_schedule)) 
 
-    
+    split_score = self.points.split_score 
+    split_score[prune_mask] = 0.
 
-    n = self.points.split_score.shape[0]
-    prune_mask = (take_n(self.points.prune_cost, n_prune, descending=False) 
-                  | (~torch.isfinite(self.points.prune_cost))
-                  | (self.points.max_scale > self.config.max_scale))
 
-    # number of split points is directly set to achieve the target count 
-    # (and compensate for pruned points)
-    target_split = ((target - n) + n_prune) 
+    if self.config.min_split_px > 0:
+      # if min split is enabled, only split points above the threshold size
+      too_small = self.points.max_scale_px < self.config.min_split_px
+      split_score[too_small] = 0.
 
-    split_score = self.points.split_score #/ (self.points.visible + 1)
     split_mask = take_n(split_score, target_split, descending=True)
-
-    both = (split_mask & prune_mask)
-    return split_mask ^ both, prune_mask ^ both
-
-  def densify_and_prune(self, t:float) -> Dict[str, float]:
-
-    points = self.points
-    split_mask, prune_mask = self.find_split_prune_indexes(t)
-    split_idx = split_mask.nonzero().squeeze(1)
-
-    n_prune = prune_mask.sum().item()
-    n_split = split_idx.shape[0]
-
-    n = self.points.batch_size[0]
-    n_unseen = n - torch.count_nonzero(points.prune_cost).item()
-
-    self.prune_thresh = points.prune_cost[prune_mask].max().item() if n_prune > 0 else 0.
-    self.split_thresh = points.split_score[split_idx].min().item() if n_split > 0 else 0.
-
-    keep_mask = ~(split_mask | prune_mask)
-  # maximum scale for a point to not be pruned
-    self.scene.split_and_prune(keep_mask, split_idx)
+    return split_mask, prune_mask
 
 
-    self.points = PointStatistics.zeros(self.scene.num_points, device=self.scene.device)
-    # self.points.prune_cost[:keep_mask.sum().item()] = points.prune_cost[keep_mask]
+  def step(self, target_count:int, progress:Progress, log_details:bool=False):
+    densify_interval = eval_varying(self.config.densify_prune_interval, progress.t)
 
-    stats = dict(n=self.points.batch_size[0], 
-            prune=n_prune,       
-            split=n_split,
-            max_prune_score=self.prune_thresh, 
-            min_split_score=self.split_thresh,
-            unseen = n_unseen)
+    if log_details:
+      log_histograms(self.points, self.logger, "step")
+
+    if progress.step % densify_interval == 0:
     
-    return stats
+      split_mask, prune_mask = self.find_split_prune_indexes(target_count, progress.t)
+      #self.points = 
+      densify_and_prune(self.points, self.scene, split_mask, prune_mask, self.logger)
 
+      # reset points
+      self.points = PointState.new_zeros(self.scene.num_points, device=self.scene.device)
 
-  def step(self, rendering:Rendering, step:int)  -> Dict[str, float]: 
-    idx = rendering.points_in_view
-    points = self.points
+      gc.collect()
+      torch.cuda.empty_cache()
 
-    # Some alternative update rule
-    # points.split_score[idx] += rendering.split_score
-    # points.prune_cost[idx] +=  rendering.prune_cost
+  def add_rendering(self, image_idx:int, rendering:Rendering):
+    self.points.exp_lerp_heuristics(rendering, split_alpha=0.99, prune_alpha=0.1)
+    self.points.add_in_view(rendering)
 
-    points.split_score[idx] = exp_lerp(self.config.split_alpha, rendering.split_score, points.split_score[idx])    
-    points.prune_cost[idx] = exp_lerp(self.config.prune_alpha, rendering.prune_cost, points.prune_cost[idx])
     
-    # points.prune_cost[idx] = torch.maximum(points.prune_cost[idx], prune_cost) 
-
-    image_size = max(rendering.camera.image_size)
-    far_points = rendering.point_depth.squeeze(1) > rendering.point_depth.quantile(0.75)
-
-    # measure scale of far points in image
-    image_scale = rendering.point_scale.max(1).values / image_size
-    image_scale[far_points] = 0.
-
-    points.max_scale[idx] = torch.maximum(points.max_scale[idx], image_scale)
-
-    return dict(in_view = rendering.points_in_view.shape[0], 
-                visible = rendering.visible_indices.shape[0],
-                )      
 
 
 

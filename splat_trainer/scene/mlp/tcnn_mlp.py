@@ -1,6 +1,6 @@
 import tinycudann as tcnn
 
-def directional_mlp(inputs: int, outputs: int, hidden: int, layers: int, sh_degree: int):
+def directional_mlp(inputs: int, outputs: int, hidden: int, hidden_layers: int, sh_degree: int):
   return tcnn.NetworkWithInputEncoding(
     inputs + 3, outputs,
     encoding_config=dict(
@@ -21,13 +21,13 @@ def directional_mlp(inputs: int, outputs: int, hidden: int, layers: int, sh_degr
       activation = "ReLU",
       output_activation = "Sigmoid",
       n_neurons = hidden,
-      n_hidden_layers = layers,
+      n_hidden_layers = hidden_layers,
     )
   )
 
 
 
-def basic_mlp(inputs: int, outputs: int, hidden: int, layers: int):
+def basic_mlp(inputs: int, outputs: int, hidden: int, hidden_layers: int):
   return tcnn.Network(
     inputs, outputs,
     network_config=dict(
@@ -35,6 +35,6 @@ def basic_mlp(inputs: int, outputs: int, hidden: int, layers: int):
       activation = "ReLU",
       output_activation = "Sigmoid",
       n_neurons = hidden,
-      n_hidden_layers = layers,
+      n_hidden_layers = hidden_layers,
     )
   )

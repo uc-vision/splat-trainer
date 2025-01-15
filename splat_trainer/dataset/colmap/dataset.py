@@ -1,16 +1,16 @@
 from dataclasses import dataclass
 from functools import cached_property
 from pathlib import Path
-from typing import Optional
+from typing import Iterable, Optional, Sequence
 from beartype import beartype
 from beartype.typing import Iterator, Tuple, List
 
 import torch
 
 import numpy as np
-from splat_trainer.camera_table.camera_table import Projections, MultiCameraTable
+from splat_trainer.camera_table.camera_table import Label, Projections, MultiCameraTable
 from splat_trainer.dataset.colmap.loading import load_images
-from splat_trainer.dataset.dataset import  CameraView, Dataset
+from splat_trainer.dataset.dataset import  ImageView, Dataset
 
 from splat_trainer.util.misc import split_stride
 from splat_trainer.util.pointcloud import PointCloud
@@ -75,7 +75,7 @@ class COLMAPDataset(Dataset):
 
     self.image_scale = image_scale
     self.resize_longest = resize_longest
-    self.camera_depth_range = depth_range
+    self.camera_depth_range = [float(f) for f in depth_range]
 
     self.image_dir = image_dir
     self.base_path = base_path
@@ -129,27 +129,29 @@ class COLMAPDataset(Dataset):
     cameras = [CameraImage(filename, torch.from_numpy(image).pin_memory(), i) 
                for i, (filename, image) in enumerate(zip(self.image_names, images))]  
     return cameras
-  
-  @cached_property
-  def train_cameras(self) -> List[CameraImage]:
-    return [self.camera_images[i] for i in self.train_idx]
 
-  @cached_property
-  def val_cameras(self) -> List[CameraImage]:
-    return [self.camera_images[i] for i in self.val_idx]
+  @beartype
+  def loader(self, idx:torch.Tensor, shuffle:bool=False) -> Sequence[ImageView]:
+    images = [self.camera_images[i] for i in idx.cpu().numpy()]
+    return Images(images, shuffle=shuffle)
 
-  def train(self, shuffle=False) -> Iterator[CameraView]:
-    return Images(self.train_cameras, shuffle=shuffle)
+  def train(self, shuffle=False) -> Sequence[ImageView]:
+    return self.loader(self.train_idx, shuffle=shuffle)
   
-  def val(self) -> Iterator[CameraView]:
-    return Images(self.val_cameras)
+  def val(self) -> Sequence[ImageView]:
+    return self.loader(self.val_idx)
 
 
   def camera_table(self) -> MultiCameraTable:
+    labels = torch.zeros(len(self.camera_images), dtype=np.int32)
+    labels[self.train_idx] |= Label.Training.value
+    labels[self.val_idx] |= Label.Validation.value
+
     return MultiCameraTable(
       camera_t_world = torch.tensor(np.array(self.camera_t_world), dtype=torch.float32),
       projection = self.projections,
-      camera_idx = torch.tensor(self.camera_idx, dtype=torch.long))
+      camera_idx = torch.tensor(self.camera_idx, dtype=torch.long),
+      labels=labels)
   
 
 
@@ -164,7 +166,7 @@ class COLMAPDataset(Dataset):
 
 
 
-class Images(torch.utils.data.Dataset):
+class Images(Sequence[ImageView]):
   @beartype
   def __init__(self, camera_images:List[CameraImage], shuffle:bool=False):
     self.camera_images = camera_images
@@ -173,11 +175,11 @@ class Images(torch.utils.data.Dataset):
   def __len__(self):
       return len(self.camera_images)
 
-  def __getitem__(self, index) -> CameraView:
+  def __getitem__(self, index) -> ImageView:
     camera_image:CameraImage = self.camera_images[index]
-    return camera_image.filename, camera_image.image, camera_image.image_id
+    return ImageView(camera_image.filename, camera_image.image_id, camera_image.image)
      
-  def __iter__(self) -> Iterator[CameraView]:
+  def __iter__(self) -> Iterator[ImageView]:
     order = torch.randperm(len(self)) if self.shuffle else torch.arange(len(self))
     for idx in order:
       yield self[idx]  

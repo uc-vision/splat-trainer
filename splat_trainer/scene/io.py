@@ -116,7 +116,7 @@ def from_plydata(plydata:plyfile.PlyData, with_sh:bool=False) -> Gaussians3D:
     batch_size = (positions.shape[0],)
   )
 
-def write_gaussians(filename:Path | str, gaussians:Gaussians3D, with_sh:bool = False):
+def write_gaussians(filename:Path | str, gaussians:Gaussians3D, with_sh:bool = True):
   filename = Path(filename)
 
   plydata = to_plydata(gaussians.apply(torch.detach), with_sh=with_sh)
@@ -124,7 +124,7 @@ def write_gaussians(filename:Path | str, gaussians:Gaussians3D, with_sh:bool = F
 
 
 
-def read_gaussians(filename:Path | str, with_sh:bool = False) -> Gaussians3D:
+def read_gaussians(filename:Path | str, with_sh:bool = True) -> Gaussians3D:
   filename = Path(filename) 
 
   plydata = plyfile.PlyData.read(str(filename))

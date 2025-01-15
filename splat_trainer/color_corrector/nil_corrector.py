@@ -29,4 +29,7 @@ class NilCorrector(Corrector):
 
   def state_dict(self) -> Dict[str, Any]:
     return {}
+
+  def zero_grad(self):
+    pass
   

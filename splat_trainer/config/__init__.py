@@ -1,10 +1,11 @@
 from abc import abstractmethod, ABCMeta
 
-from dataclasses import asdict, fields, replace
+from dataclasses import asdict, dataclass, fields, replace
 import math
-from os import path
+from os import PathLike, path
 from omegaconf import OmegaConf 
 
+import termcolor
 from wonderwords import RandomWord
 from pathlib import Path
 from typing import Generic, Mapping, Protocol, Sequence, Tuple, TypeVar, runtime_checkable
@@ -17,6 +18,21 @@ class IsDataclass(Protocol):
     __dataclass_fields__: dict
 
 T = TypeVar('T')
+
+
+@dataclass(kw_only=True, frozen=True)
+class Progress:
+  step:int
+  total_steps:int
+
+  @property
+  def t(self) -> float:
+    return clamp(self.step / self.total_steps, 0.0, 1.0)
+  
+  def __float__(self) -> float:
+    return float(self.t)
+
+
 
 class Varying(Generic[T], metaclass=ABCMeta):
   @abstractmethod
@@ -38,6 +54,14 @@ class Linear(Varying[T]):
   def __call__(self, t:float) -> T:
     return self.start * (1 - t) + self.end * t
   
+class LogDecay(Varying[T]):
+  def __init__(self, start:T, factor:T):
+    self.start = start
+    self.factor = factor
+
+  def __call__(self, t:float) -> T:
+    return self.start * self.factor ** t
+
 
 class LogLinear(Varying[T]):
   def __init__(self, start:T, end:T):
@@ -48,18 +72,19 @@ class LogLinear(Varying[T]):
     return math.exp(math.log(self.start) * (1 - t) + math.log(self.end) * t)
 
 class Piecewise(Varying[T]):
-  def __init__(self, start:T, steps:list[tuple[float, T]]):
+  def __init__(self, start:T, steps:list[tuple[float, T]], scale:float = 1.0):
     self.start = start
     self.steps = steps
+    self.scale = scale
 
   def __call__(self, t:float) -> T:
     value = self.start
     for t_min, next_value in self.steps:
         if t < t_min:
-            return value
+            return value * self.scale
         value = next_value
 
-    return value
+    return value * self.scale
   
 
 def smoothstep(t, a, b, interval=(0, 1)):
@@ -88,6 +113,7 @@ VaryingInt = Varying[int] | int
 
 
 def eval_varyings(value, t:float):
+  
   if isinstance(value, IsDataclass):
     return resolve_varying(value, t, deep=True)
   if isinstance(value, Mapping):
@@ -109,7 +135,10 @@ def resolve_varying(cfg:IsDataclass, t:float, deep:bool = False):
     return replace(cfg, **varying)
   
 @beartype
-def eval_varying(value:Varying[T] | T, t:float) -> T:
+def eval_varying(value:Varying[T] | T, t:float | Progress) -> T:
+
+  t = float(t)
+
   if isinstance(value, Varying):
     return value(t)
   else:
@@ -138,12 +167,16 @@ def schedule_lr(v:Varying[float] | float, t:float,  optimizer:Optimizer):
 
 @beartype
 def schedule_groups(groups:dict[str, VaryingFloat], t:float, optimizer:Optimizer):
-    for param_group in optimizer.param_groups:
-      if param_group['name'] in groups:
-        param_group['lr'] = eval_varying(groups[param_group['name']], t)
+  group_dict = {param_group['name']: param_group for param_group in optimizer.param_groups}
 
+  for name, lr in groups.items(): 
+      if not name in group_dict:
+          raise KeyError(f"Group {name} not found in optimizer")
+      
+      group_dict[name]['lr'] = eval_varying(lr, t)
 
-
+  # reutrn all the learning rates
+  return {param_group['name']: param_group['lr'] for param_group in optimizer.param_groups}
 
 
 def target(name:str, **kwargs):
@@ -152,9 +185,25 @@ def target(name:str, **kwargs):
     **kwargs
   })
 
+
+def make_overrides(**kwargs):
+  overrides = []
+  for k, v in kwargs.items():
+    overrides.append(f"{k}={v if v is not None else 'null'}")
+  return overrides
+
+
+
 def add_resolvers():
     OmegaConf.register_new_resolver("dirname", path.dirname)
     OmegaConf.register_new_resolver("basename", path.basename)
+
+    OmegaConf.register_new_resolver("int_mul", lambda x, y: int(x * y))
+    OmegaConf.register_new_resolver("int_div", lambda x, y: x // y)
+
+    
+
+
     OmegaConf.register_new_resolver("without_ext", lambda x: path.splitext(x)[0])
     OmegaConf.register_new_resolver("ext", lambda x: path.splitext(x)[1])
 
@@ -172,6 +221,9 @@ def add_resolvers():
 
     OmegaConf.register_new_resolver("log_decay", 
         lambda x, y: target('LogLinear', start=x, end=x * y))
+    
+    OmegaConf.register_new_resolver("linear_decay", 
+        lambda x, y: target('Linear', start=x, end=x * y))
 
     OmegaConf.register_new_resolver("piecewise", 
         lambda init,values: target('Piecewise', init=init, values=values))
@@ -218,17 +270,11 @@ def number_folders(path:Path, name:str):
   return path / f"{name}_{i}"
 
 @beartype
-def setup_project(project_name:str, run_name:str | None, base_path:str | None) -> Tuple[Path, str]:
-  if base_path is None:
-    base_path = Path.cwd() / project_name
-  else:
-    base_path = Path(base_path) / project_name
+def setup_project(project_name:str, run_name:str | None, base_path: Path) -> Tuple[Path, Path, str]:
 
-  base_path.mkdir(parents=True, exist_ok=True)
+    run_name = run_name or random_folder(base_path)
+    run_path = base_path / project_name / run_name
+    run_path.mkdir(parents=True, exist_ok=True)
 
-  run_name = run_name or random_folder(base_path)
-  run_path = base_path / run_name
-  run_path.mkdir(parents=True, exist_ok=True)
-
-
-  return run_path, run_name
+    print(f"Running {termcolor.colored(run_name, 'light_yellow')} in {termcolor.colored(run_path, 'light_green')}")
+    return base_path, run_path, run_name

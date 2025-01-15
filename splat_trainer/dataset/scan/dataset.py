@@ -1,16 +1,18 @@
 from functools import cached_property
 
 from pathlib import Path
-from typing import List, Optional
+from typing import Iterable, List, Optional, Sequence
+from beartype import beartype
 from beartype.typing import Iterator, Tuple
 
 from camera_geometry import FrameSet
 from camera_geometry.camera_models import optimal_undistorted
 
 import numpy as np
+import torch
 from tqdm import tqdm
-from splat_trainer.camera_table.camera_table import CameraRigTable
-from splat_trainer.dataset.dataset import  CameraView, Dataset
+from splat_trainer.camera_table.camera_table import CameraRigTable, Label
+from splat_trainer.dataset.dataset import  ImageView, Dataset
 from splat_trainer.util.misc import split_stride
 
 
@@ -33,7 +35,7 @@ class ScanDataset(Dataset):
     scan = FrameSet.load_file(Path(scan_file))
     self.loaded_scan = scan
 
-    self.camera_depth_range = tuple(depth_range)
+    self.camera_depth_range = [float(f) for f in depth_range]
 
     cameras = {k: optimal_undistorted(camera, alpha=0)
                  for k, camera in scan.cameras.items()}
@@ -53,7 +55,10 @@ class ScanDataset(Dataset):
     self.scan = scan.copy(cameras=cameras)
 
     # Evenly distribute validation images
-    self.train_idx, self.val_idx = split_stride(np.arange(scan.num_frames * len(cameras)), val_stride)
+    train_idx, val_idx = split_stride(np.arange(scan.num_frames * len(cameras)), val_stride)
+    self.train_idx = torch.tensor(train_idx, dtype=torch.long)
+    self.val_idx = torch.tensor(val_idx, dtype=torch.long)
+    
     
   def __repr__(self) -> str:
     args = [] 
@@ -70,28 +75,34 @@ class ScanDataset(Dataset):
 
   @cached_property
   def _images(self) -> PreloadedImages:
+    """ Load all images into memory, DO NOT use this property unless you want to load the images """
     print("Loading images...")
     return preload_images(self.loaded_scan, self.cameras)
 
-  @cached_property
-  def _train_cameras(self) -> List[CameraImage]:
-    return [self._images[i] for i in self.train_idx]
+  @property
+  def num_images(self) -> int:
+    return self.scan.num_frames * len(self.cameras)
 
-  @cached_property
-  def _val_cameras(self) -> List[CameraImage]:
-    return [self._images[i] for i in self.val_idx]
+  @beartype
+  def loader(self, idx:torch.Tensor, shuffle:bool=False) -> Sequence[ImageView]:
+    images = [self._images[i] for i in idx.cpu().numpy()]
+    return PreloadedImages(images, shuffle=shuffle)
+    
 
-  def train(self, shuffle=False) -> Iterator[CameraView]:
-    images = PreloadedImages(self._train_cameras, shuffle=shuffle)
-    return images
+  def train(self, shuffle=False) -> Sequence[ImageView]:
+    return self.loader(self.train_idx, shuffle=shuffle)
 
     
-  def val(self) -> Iterator[CameraView]:
-    images = PreloadedImages(self._val_cameras)
-    return images
+  def val(self) -> Sequence[ImageView]:
+    return self.loader(self.val_idx)
   
   def camera_table(self) -> CameraRigTable:
-    return camera_rig_table(self.scan, self.camera_depth_range)
+    labels = torch.zeros((self.num_images, ), dtype=torch.int32)
+
+    labels[self.train_idx] |= Label.Training.value
+    labels[self.val_idx] |= Label.Validation.value
+
+    return camera_rig_table(self.scan, self.camera_depth_range, labels)
 
   
   def pointcloud_file(self) -> Optional[str]:
@@ -99,7 +110,7 @@ class ScanDataset(Dataset):
 
   def pointcloud(self) -> Optional[PointCloud]:
     pcd_filename = self.pointcloud_file()  
-    return PointCloud.load(pcd_filename) if pcd_filename is not None else None
+    return PointCloud.load_cloud(pcd_filename) if pcd_filename is not None else None
 
 
 

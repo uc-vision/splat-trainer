@@ -1,7 +1,7 @@
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import Optional, Sequence, Tuple
 from beartype.typing import Dict, Iterator, List
 
 import cv2
@@ -16,7 +16,7 @@ import numpy as np
 from tqdm import tqdm
 
 from splat_trainer.camera_table.camera_table import CameraRigTable, Projections
-from splat_trainer.dataset import CameraView
+from splat_trainer.dataset import ImageView
 
 @dataclass
 class CameraImage:
@@ -67,7 +67,7 @@ def projections(scan:FrameSet, depth_range:Tuple[float, float]) -> Projections:
 
     return torch.stack([to_projection(camera) for camera in scan.cameras.values()])
 
-def camera_rig_table(scan:FrameSet, depth_range:Tuple[float, float]) -> CameraRigTable:
+def camera_rig_table(scan:FrameSet, depth_range:Tuple[float, float], labels:torch.Tensor) -> CameraRigTable:
     camera_t_rig = np.array(
       [camera.camera_t_parent for camera in scan.cameras.values()])
     
@@ -78,7 +78,8 @@ def camera_rig_table(scan:FrameSet, depth_range:Tuple[float, float]) -> CameraRi
       rig_t_world=torch.linalg.inv(world_t_rig),
       camera_t_rig=torch.from_numpy(camera_t_rig).to(torch.float32),
       projection=projections(scan, depth_range),
-      image_names=image_names)
+      image_names=image_names,
+      labels=labels)
 
 
 def concat_lists(xs):
@@ -113,7 +114,7 @@ def preload_images(scan:FrameSet, undistorted:Dict[str, Camera]) -> List[CameraI
   frames = load_frames_with(scan, undistortions, load)
   return concat_lists(frames)
 
-class PreloadedImages(torch.utils.data.Dataset):
+class PreloadedImages(Sequence[ImageView]):
   @beartype
   def __init__(self, camera_images:List[CameraImage], shuffle:bool=False):
     self.camera_images = camera_images
@@ -122,11 +123,11 @@ class PreloadedImages(torch.utils.data.Dataset):
   def __len__(self):
       return len(self.camera_images)
 
-  def __getitem__(self, index) -> CameraView:
+  def __getitem__(self, index) -> ImageView:
     camera_image:CameraImage = self.camera_images[index]
-    return camera_image.filename, camera_image.image, camera_image.image_id
+    return ImageView(camera_image.filename, camera_image.image_id, camera_image.image)
      
-  def __iter__(self) -> Iterator[CameraView]:
+  def __iter__(self) -> Iterator[ImageView]:
     order = torch.randperm(len(self)) if self.shuffle else torch.arange(len(self))
     for idx in order:
       yield self[idx]  

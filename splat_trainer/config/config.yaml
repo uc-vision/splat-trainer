@@ -3,12 +3,14 @@
 defaults:
   - _self_
   - dataset: scan
-  - logger: tensorboard
+  - logger: none
+  - trainer: default
+
   - controller: target
   - scene: tcnn
-  - color_corrector: nil
-  - trainer: default
   - viewer: none
+  - view_selection: random
+
 hydra:
   job: 
     chdir: True
@@ -19,4 +21,7 @@ run_name: ???
 base_path: ???
 
 debug: False
+training_scale: 1
 
+far: 100.0
+near: 0.1

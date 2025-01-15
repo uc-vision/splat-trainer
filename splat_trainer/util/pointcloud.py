@@ -1,4 +1,4 @@
-from tensordict import tensorclass
+from tensordict.tensorclass import tensorclass
 from pathlib import Path
 
 import torch
@@ -9,15 +9,13 @@ import pypcd4
 import plyfile
 
 
-
-@tensorclass 
-class PointCloud:
+@tensorclass
+class PointCloud: 
   points : torch.Tensor # (N, 3)
   colors : torch.Tensor # (N, 3)
 
-
   @property
-  def count(self) -> int:
+  def num_points(self) -> int:
     return self.points.shape[0]
 
 
@@ -26,20 +24,11 @@ class PointCloud:
     if rgb.dtype == np.uint8:
       rgb = rgb.astype(np.float32) / 255.0
 
-
     return PointCloud(
         points = torch.from_numpy(xyz.astype(np.float32)), 
         colors = torch.from_numpy(rgb.astype(np.float32)),
         batch_size = (xyz.shape[0],))
 
-  def show(self):
-    import open3d as o3d
-          
-    pcl = o3d.geometry.PointCloud()
-    pcl.points = o3d.utility.Vector3dVector(self.points.cpu().numpy())
-    pcl.colors = o3d.utility.Vector3dVector(self.colors.cpu().numpy())
-
-    o3d.visualization.draw_geometries([pcl])
 
 
   def append(self, other: 'PointCloud') -> 'PointCloud':
@@ -49,7 +38,7 @@ class PointCloud:
   
   
   @staticmethod
-  def load(filename:str | Path) -> 'PointCloud':
+  def load_cloud(filename:str | Path) -> 'PointCloud':
     filename = Path(filename)
 
     if filename.suffix == ".pcd": 
@@ -62,7 +51,7 @@ class PointCloud:
       elif 'r' in cloud.fields:
         rgb = cloud.numpy(('red', 'green', 'blue'))
       else:
-        rgb = np.ones((cloud.size, 3), dtype=np.uint8)
+        rgb = np.ones((len(cloud), 3), dtype=np.uint8)
         
       return PointCloud.from_numpy(cloud.numpy(("x", "y", "z")), rgb)
 

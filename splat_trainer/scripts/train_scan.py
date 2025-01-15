@@ -5,6 +5,7 @@ import numpy as np
 from omegaconf import OmegaConf
 from taichi_splatting import TaichiQueue
 from termcolor import colored
+import termcolor
 from splat_trainer.logger.logger import Logger
 from splat_trainer import config
 
@@ -15,7 +16,7 @@ import os
 
 from splat_trainer.viewer.viewer import Viewer
 
-config.add_resolvers()
+
 
 
 
@@ -33,19 +34,20 @@ def cfg_from_args():
   dataset_group.add_argument("--colmap", type=str, default=None, help="Colmap scene to load")
   dataset_group.add_argument("--image_scale", type=float, default=None, help="Image scale")
   dataset_group.add_argument("--resize_longest", type=int, default=None, help="Resize longest side")
+  dataset_group.add_argument("--far", type=float, default=None, help="Set far plane")
+  dataset_group.add_argument("--near", type=float, default=None, help="Set near plane")
 
   # Training group
   training_group = parser.add_argument_group("Training")
-  training_group.add_argument("--target", type=int, default=None, help="Target point count")
-  training_group.add_argument("--no_alpha", action="store_true", help="Fix point alpha=1.0 in training")
-  training_group.add_argument("--steps", type=int, default=None, help="Number of training steps")
+  training_group.add_argument("--target_points", type=int, default=None, help="Target point count")
+  training_group.add_argument("--total_steps", type=int, default=None, help="Number of total training steps")
+  training_group.add_argument("--training_scale", type=float, default=1.0, help="Scale the number of steps by a constant factor")
   
   training_group.add_argument("--add_points", type=int, default=None, help="Add random background points")
   training_group.add_argument("--limit_points", type=int, default=None, help="Limit the number of points from the dataset to N")
   training_group.add_argument("--random_points", type=int, default=None, help="Initialise with N random points only")
 
   training_group.add_argument("--tcnn", action="store_true", help="Use tcnn scene")
-  training_group.add_argument("--sh", action="store_true", help="Use spherical harmonics scene")
   training_group.add_argument("--bilateral", action="store_true", help="Use bilateral color correction")
 
   training_group.add_argument("--vis", action="store_true", help="Enable web viewer")
@@ -62,7 +64,11 @@ def cfg_from_args():
   output_group.add_argument("--run", type=str, default=None, help="Name for this run")
   output_group.add_argument("--base_path", type=str, default=None, help="Base output path")
   output_group.add_argument("--checkpoint", action="store_true", help="Save checkpoints")
+
+
   output_group.add_argument("--wandb", action="store_true", help="Use wandb logging")
+  output_group.add_argument("--log_details", action="store_true", help="Log detailed histograms for points/gradients etc.")
+
 
   args = parser.parse_args()
 
@@ -90,39 +96,44 @@ def cfg_from_args():
     overrides.append(f"dataset.resize_longest={args.resize_longest}")
     overrides.append("dataset.image_scale=null")
 
+  if args.far is not None:
+    overrides.append(f"far={args.far}")
+
+  if args.near is not None:
+    overrides.append(f"near={args.near}")
+
   # Training group
-  if args.target is not None:
+  if args.target_points is not None:
     overrides.append("controller=target")
-    overrides.append(f"trainer.controller.target_count={args.target}")
-  
-  if args.no_alpha:
-    overrides.append("trainer.initial_alpha=1.0")
-    overrides.append("trainer.scene.learning_rates.alpha_logit=0.0")
+    overrides.append(f"trainer.target_points={args.target_points}")
 
-  if args.steps is not None:
-    overrides.append(f"trainer.steps={args.steps}")
 
+  if args.total_steps is not None:
+    overrides.append(f"trainer.total_steps={args.total_steps}")
+
+  if args.training_scale is not None:
+    overrides.append(f"training_scale={args.training_scale}")
+
+  # Pointcloud initialisation from dataset
   assert args.add_points is None or args.random_points is None, "Cannot specify both background and random points"
   assert args.limit_points is None or args.random_points is None, "Cannot specify both limit and random points"
 
   if args.add_points is not None:
-    overrides.append(f"trainer.initial_points={args.add_points}")
-    overrides.append("trainer.add_initial_points=true")
+    overrides.append(f"trainer.cloud_init.initial_points={args.add_points}")
+    overrides.append("trainer.cloud_init.add_initial_points=true")
 
   if args.limit_points is not None:
-    overrides.append(f"trainer.limit_points={args.limit_points}")
-
+    overrides.append(f"trainer.cloud_init.limit_points={args.limit_points}")
 
   if args.random_points is not None:
-    overrides.append(f"trainer.initial_points={args.random_points}")
-    overrides.append("trainer.load_dataset_cloud=false")
+    overrides.append(f"trainer.cloud_init.initial_points={args.random_points}")
+    overrides.append("trainer.cloud_init.load_dataset_cloud=false")
 
 
+  # Scene
   if args.tcnn:
     overrides.append("scene=tcnn")
 
-  if args.sh:
-    overrides.append("scene=sh")
 
   if args.bilateral:
     overrides.append("color_corrector=bilateral")
@@ -134,17 +145,23 @@ def cfg_from_args():
     overrides.append("trainer.antialias=true")
 
   # Output group
-  if args.wandb is not None:
+  if args.wandb is True:
     overrides.append("logger=wandb")
+
+  if args.log_details:
+    overrides.append("trainer.log_details=true")
 
   if args.checkpoint:
     overrides.append("trainer.save_checkpoints=true")
   
-  run_path, args.run = config.setup_project(args.project, args.run, base_path=args.base_path)
+  base_path = Path(args.base_path) if args.base_path is not None else Path.cwd()
+  args.base_path, run_path, args.run = config.setup_project(args.project, args.run, base_path=base_path)
   os.chdir(str(run_path))
 
-  overrides += [f"run_name={args.run}", f"project={args.project}", f"base_path={args.base_path}"]
+  overrides += config.make_overrides(run_name=args.run, project=args.project, base_path=args.base_path)
+  config.add_resolvers()
 
+  
   hydra.initialize(config_path="../config", version_base="1.2")
   cfg = hydra.compose(config_name="config", overrides=overrides)
 
@@ -182,8 +199,6 @@ def train_with_config(cfg) -> dict | str:
     dataset = hydra.utils.instantiate(cfg.dataset)
   
     trainer = Trainer.initialize(train_config, dataset, logger)
-    trainer.warmup()
-
     viewer:Viewer = hydra.utils.instantiate(cfg.viewer).create_viewer(trainer, enable_training=True)
 
     result = trainer.train()
