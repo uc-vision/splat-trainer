@@ -1,6 +1,10 @@
 #!/bin/bash
 
-DATE=$(date +"%Y-%m-%d__%H:%M:%S")
+
+DATE=$(date +"%Y-%m-%d__%H-%M-%S")
+LOG_FILE="/local/splat_trainer_daily_multirun/daily_train_log_${DATE}.log"
+
+echo "Script started at $(date)" >> "$LOG_FILE"
 
 mkdir /local/splat_trainer_daily_multirun
 cd /local/splat_trainer_daily_multirun
@@ -27,4 +31,7 @@ grid-search-trainer \
     +project=splat_trainer_daily_multirun  \
     hydra.sweep.dir=/local/splat_trainer_daily_multirun/${DATE} \
     trainer.num_logged_images=-1 \
-    trainer.log_worst_images=-1
+    trainer.log_worst_images=-1 \
+    >> "$LOG_FILE" 2>&1
+
+echo "Script completed at $(date)" >> "$LOG_FILE"
