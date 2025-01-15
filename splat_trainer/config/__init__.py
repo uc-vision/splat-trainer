@@ -221,6 +221,9 @@ def add_resolvers():
 
     OmegaConf.register_new_resolver("log_decay", 
         lambda x, y: target('LogLinear', start=x, end=x * y))
+    
+    OmegaConf.register_new_resolver("linear_decay", 
+        lambda x, y: target('Linear', start=x, end=x * y))
 
     OmegaConf.register_new_resolver("piecewise", 
         lambda init,values: target('Piecewise', init=init, values=values))

@@ -6,18 +6,15 @@ import json
 from pathlib import Path
 import time
 from types import SimpleNamespace
-from typing import Callable, Iterator, List, Optional, Sequence, Tuple
+from beartype.typing import Callable, Iterator, List, Optional, Sequence, Tuple
 
 
 # Third party packages
 from beartype import beartype
-from beartype.typing import Optional
 from fused_ssim import fused_ssim
 import numpy as np
 from pydispatch import Dispatcher
 import colored_traceback
-colored_traceback.add_hook()
-
 
 from tensordict import TensorDict
 from termcolor import colored
@@ -29,7 +26,7 @@ from taichi_splatting import Gaussians3D, Rendering
 from taichi_splatting.perspective import CameraParams
 
 # Local imports
-from splat_trainer.camera_table.camera_table import Camera, Label, camera_json
+from splat_trainer.camera_table.camera_table import Camera, camera_json
 from splat_trainer.dataset import Dataset
 from splat_trainer.dataset.dataset import ImageView
 
@@ -38,7 +35,7 @@ from splat_trainer.controller.controller import Controller
 
 from splat_trainer.gaussians.loading import to_pointcloud
 from splat_trainer.logger import Logger
-from splat_trainer.logger.logger import CompositeLogger, StateLogger
+from splat_trainer.logger.logger import CompositeLogger, LoggerWithState, StateLogger
 
 from splat_trainer.scene.io import read_gaussians, write_gaussians
 from splat_trainer.scene.scene import GaussianScene
@@ -48,7 +45,7 @@ from splat_trainer.visibility import cluster
 from splat_trainer.util.colorize import colorize, get_cv_colormap
 from splat_trainer.util.containers import mean_rows, transpose_rows
 
-from splat_trainer.util.misc import Heap, next_multiple
+from splat_trainer.util.misc import Heap
 
 
 from .config import TrainConfig
@@ -56,6 +53,8 @@ from .evaluation import Evaluation
 from .init import get_initial_gaussians
 from .loading import ThreadedLoader
 from .view_selection import ViewSelection
+
+colored_traceback.add_hook()
 
 class TrainerState(Enum):
   Stopped = 0
@@ -65,15 +64,16 @@ class TrainerState(Enum):
 class Trainer(Dispatcher):
   _events_ = ["on_update"]
 
+  @beartype
   def __init__(self, config:TrainConfig,
                 scene:GaussianScene, 
                 controller:Controller,
                 dataset:Dataset,              
-                logger:CompositeLogger,
+                logger:LoggerWithState,
                 
                 view_selection:ViewSelection,
-
                 step = 0,
+
                 view_clustering:Optional[cluster.ViewClustering] = None,
       ):
 
@@ -88,12 +88,11 @@ class Trainer(Dispatcher):
     self.logger = logger
 
     self.step = step
+
     self.last_checkpoint = step
     self.state = TrainerState.Stopped
 
-
-    self.state_logger = StateLogger()
-    self.logger = logger.add_logger(self.state_logger)
+    self.logger = logger
     self.loader = None
 
     self.view_selection = view_selection
@@ -113,7 +112,9 @@ class Trainer(Dispatcher):
     print(f"Initializing points from {dataset}")
 
     initial_gaussians = get_initial_gaussians(config.cloud_init, dataset, device)
-    logger = CompositeLogger(logger)
+
+    if not isinstance(logger, LoggerWithState):
+      logger = LoggerWithState(logger)
 
     scene = config.scene.from_color_gaussians(initial_gaussians, camera_table, device, logger)
     controller = config.controller.make_controller(scene, logger)
@@ -129,13 +130,13 @@ class Trainer(Dispatcher):
     return Trainer(config, scene, controller, dataset, logger, view_selector)
       
 
-    
   @staticmethod
   def from_state_dict(config:TrainConfig, dataset:Dataset, logger:Logger, state_dict:dict):
     device = torch.device(config.device)
     camera_table = dataset.camera_table().to(device)
 
-    logger = CompositeLogger(logger)
+    if not isinstance(logger, LoggerWithState):
+      logger = LoggerWithState(logger)
 
     scene = config.scene.from_state_dict(state_dict['scene'], camera_table, logger)
     controller = config.controller.from_state_dict(state_dict['controller'], scene, logger) 
@@ -154,7 +155,7 @@ class Trainer(Dispatcher):
 
   def state_dict(self):
 
-    return dict(step=self.step, 
+    return dict(step=self.step,
                 scene=self.scene.state_dict(), 
                 controller=self.controller.state_dict(),
                 view_selection=self.view_selection.state_dict(),
@@ -165,6 +166,13 @@ class Trainer(Dispatcher):
   def clone(self) -> 'Trainer':
     state = self.state_dict()
     return self.from_state_dict(self.config, self.dataset, self.logger, state)
+
+  def replace(self, logger:Optional[Logger]=None, **kwargs) -> 'Trainer':
+    """ Basically, clone with changed config."""
+    trainer = self.state_dict()
+    
+    config = replace(self.config, **kwargs)
+    return self.from_state_dict(config, self.dataset, logger or self.logger, trainer)
 
   @property
   def output_path(self):
@@ -178,7 +186,7 @@ class Trainer(Dispatcher):
     paths = dict(
       checkpoint = self.output_path / "checkpoint" / f"checkpoint_{step}.pt",
       point_cloud = self.output_path / "point_cloud" / f"iteration_{step}" / "point_cloud.ply",
-      cameras = self.output_path / "checkpoint" / f"cameras.json",
+      cameras = self.output_path / "checkpoint" / "cameras.json",
       workspace = self.output_path 
     )
 
@@ -215,6 +223,7 @@ class Trainer(Dispatcher):
 
     return gaussians.to(self.device)
 
+
   @property
   def progress(self) -> Progress:
     return Progress(step=self.step, total_steps=self.config.total_steps)
@@ -244,7 +253,7 @@ class Trainer(Dispatcher):
   def render(self, camera_params:CameraParams, image_idx:Optional[int]=None, **options):
 
     return self.scene.render(camera_params, image_idx,  **options, 
-      antialias=self.config.antialias, compute_visibility=True,
+      antialias=self.config.antialias, compute_visibility=True, compute_point_heuristic=True,
       blur_cov=0.0 if self.config.antialias is True else self.config.blur_cov)
 
 
@@ -254,8 +263,13 @@ class Trainer(Dispatcher):
     image_view = self.load_data(image_view)
 
     camera_params = self.camera_params(image_view.image_idx)
-    rendering = self.render(camera_params, image_view.image_idx, render_median_depth=True).detach()
-    return Evaluation(image_view.filename, rendering, image_view.image)
+    # with torch.enable_grad():
+    #   rendering = self.render(camera_params, image_view.image_idx, render_median_depth=True)
+    #   loss, loss_metrics = self.losses(rendering, image_view.image)
+    #   loss.backward()
+
+    rendering = self.render(camera_params, image_view.image_idx, render_median_depth=True)
+    return Evaluation(image_view.filename, rendering.detach(), image_view.image)
 
   def evaluations(self, image_views:Sequence[ImageView]) -> Iterator[Evaluation]:
     for image_view in image_views:
@@ -273,7 +287,7 @@ class Trainer(Dispatcher):
     # Track metrics for all images
     metrics = {}
 
-    point_clusters = cluster.PointClusters.cluster(self.scene.points['position'], self.config.vis_clusters)
+    # point_clusters = cluster.PointClusters.cluster(self.scene.points['position'], self.config.vis_clusters)
     log_interval = len(image_views) // (self.config.num_logged_images + 1)
 
     pbar = tqdm(total=len(image_views), desc=f"Evaluating {name}", leave=False)
@@ -286,7 +300,7 @@ class Trainer(Dispatcher):
         worst.push(-eval.metrics['psnr'], eval)
 
         metrics[eval.filename] = eval.metrics
-        view_features.append(point_clusters.view_features(*eval.rendering.visible))
+        # view_features.append(point_clusters.view_features(*eval.rendering.visible))
         
         pbar.update(1)
         pbar.set_postfix_str(", ".join([f"{k}:{v:.3f}" for k, v in eval.metrics.items()]))
@@ -295,7 +309,7 @@ class Trainer(Dispatcher):
         self.log_evaluation_images(f"worst_{name}/{i}", eval, log_source=True)
 
     self.log_evaluation_table(name, metrics)
-    self.view_clustering = cluster.ViewClustering(point_clusters, torch.stack(view_features))
+    # self.view_clustering = cluster.ViewClustering(point_clusters, torch.stack(view_features))
     
 
   
@@ -433,7 +447,7 @@ class Trainer(Dispatcher):
 
       camera_params = self.camera_params(image_view.image_idx)
       with torch.enable_grad():
-        rendering = self.render(camera_params, image_view.image_idx, compute_point_heuristic=True)
+        rendering = self.render(camera_params, image_view.image_idx)
 
         loss, loss_metrics = self.losses(rendering, image_view.image)
         loss.backward()
@@ -443,16 +457,35 @@ class Trainer(Dispatcher):
 
     return metrics
   
-  def training_step(self, batch:List[ImageView]) -> dict:
+
+  def log_rendering_histograms(self, rendering:Rendering):
+    
+    def log_scale_histogram(name:str, t:torch.Tensor, min_val:float = 1e-12):
+      self.logger.log_histogram(name, torch.log10(torch.clamp_min(t, min_val)))
+
+    log_scale_histogram("rendering/log10_prune_cost", rendering.prune_cost)
+    log_scale_histogram("rendering/log10_split_score", rendering.split_score)
+    log_scale_histogram("rendering/log10_max_scale_px", rendering.point_scale, min_val=1e-6)
+    
+    self.logger.log_histogram("rendering/points_in_view", rendering.points_in_view)
+    self.logger.log_histogram("rendering/visible", rendering.point_visibility)
+
+
+
+  def training_step(self, batch:List[ImageView], log_details:bool=False) -> dict:
+
+    @torch.no_grad()
     def f(image_idx:int, rendering:Rendering):
       self.scene.add_rendering(image_idx, rendering)
       self.controller.add_rendering(image_idx, rendering)
 
+      if log_details:
+        self.log_rendering_histograms(rendering)
+
     metrics = self.evaluate_backward_with(batch, f)
     self.step += len(batch)
 
-    self.scene.step(self.progress)
-    self.controller.step(self.progress)
+    self.scene.step(self.progress, log_details=log_details)
     self.logger.step(self.progress)
 
     return dict(**mean_rows(metrics), t = self.progress.t)
@@ -462,7 +495,6 @@ class Trainer(Dispatcher):
 
     image = image_view.image.to(self.device, non_blocking=True) 
     image = image.to(dtype=torch.float) / 255.0
-
 
     return replace(image_view, image=image)
 
@@ -494,8 +526,7 @@ class Trainer(Dispatcher):
   def checkpoint(self, save:bool=True):
     self.evaluate()
     
-    self.scene.log_checkpoint()
-    self.controller.log_checkpoint()
+    self.scene.log_checkpoint(self.progress)
 
     if save and self.config.save_output:
       self.write_checkpoint()
@@ -510,19 +541,19 @@ class Trainer(Dispatcher):
     self.pbar.update(self.progress.step - self.pbar.n)
     desc = []
 
-    if "densify" in self.state_logger:
-      pruned, split, n = [self.state_logger[k].value for k in ["densify/prune", "densify/split", "densify/n"]]
+    if "densify" in self.logger:
+      pruned, split, n = [self.logger[k].value for k in ["densify/prune", "densify/split", "densify/n"]]
       desc.append(f"points(+{split:d} -{pruned:d} = {n:d})")
 
-    if "train" in self.state_logger:
-      values = self.state_logger["train"]
+    if "train" in self.logger:
+      values = self.logger["train"]
       for k in ["l1", "mse", "ssim", "reg"]:
         if k in values:
           desc.append(f"{k}:{values[k].value:.3f}")
       
 
-    if "eval_train" in self.state_logger:
-      psnr, ssim = [self.state_logger[k].value for k in ["eval_train/psnr", "eval_train/ssim"]]
+    if "eval_train" in self.logger:
+      psnr, ssim = [self.logger[k].value for k in ["eval_train/psnr", "eval_train/ssim"]]
       desc.append(f"eval(psnr:{psnr:.3f} ssim:{ssim:.3f})")
 
     self.pbar.set_postfix_str(" ".join(desc))
@@ -530,32 +561,39 @@ class Trainer(Dispatcher):
 
   def train(self, state:TrainerState = TrainerState.Training):
     self.state = state
-    next_densify = next_multiple(self.step, eval_varying(self.config.densify_interval, self.progress))
 
     self.checkpoint(self.config.save_checkpoints)
+    steps = []
 
     # Create batch loader that loads log_interval batches at a time
     self.loader = ThreadedLoader(self.iter_batches())
     self.pbar = tqdm(initial=self.step, total=self.config.total_steps, desc=self.state.name)
 
     while self.step < self.config.total_steps:
-        self.emit("on_update")
-        if self.state == TrainerState.Paused:
-            time.sleep(0.1)
-            continue
-
+  
         if self.last_checkpoint + self.config.eval_steps <= self.step:
             self.checkpoint(self.config.save_checkpoints)
 
-        if self.step - next_densify >= 0:
-            next_densify += eval_varying(self.config.densify_interval, self.progress)
-            if next_densify < self.config.total_steps:
-                self.controller.densify_and_prune(self.progress)
+        is_logging_step = self.step % self.config.log_interval == 0
+        step = self.training_step(self.loader.next(), log_details=self.config.log_details and is_logging_step)
+        steps.append(step)
 
-        steps = [self.training_step(self.loader.next()) for _ in range(self.config.log_interval)]
+        last_period = self.step >= self.config.total_steps - self.config.eval_steps
+        if not last_period:
+          self.controller.step(self.config.target_points, self.progress)
 
-        self.logger.log_values("train", mean_rows(steps))
-        self.update_progress()
+
+        if is_logging_step:
+          self.logger.log_values("train", mean_rows(steps))
+          # Don't densify or prune in the last eval period
+          steps = []
+
+          self.emit("on_update")
+          if self.state == TrainerState.Paused:
+              time.sleep(0.1)
+              continue
+          
+          self.update_progress()
 
     self.checkpoint(True)
 

@@ -36,6 +36,7 @@ dependencies = [
   'debugpy',
   'wonderwords',
   'splatview>=0.2.0',
+  'python-dispatch',
 
   'tensordict >= 0.6.2',
   'pykeops'

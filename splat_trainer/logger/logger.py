@@ -43,7 +43,7 @@ class Logger(metaclass=ABCMeta):
     raise NotImplementedError
   
   @abstractmethod
-  def log_histogram(self, name:str, values:torch.Tensor | Histogram):
+  def log_histogram(self, name:str, values:torch.Tensor | Histogram, num_bins:Optional[int] = None):
     raise NotImplementedError
 
 
@@ -94,9 +94,9 @@ class CompositeLogger(Logger):
     for logger in self.loggers:
       logger.log_value(name, value)
 
-  def log_histogram(self, name:str, values:torch.Tensor | Histogram):
+  def log_histogram(self, name:str, values:torch.Tensor | Histogram, num_bins:Optional[int] = None):
     for logger in self.loggers: 
-      logger.log_histogram(name, values)
+      logger.log_histogram(name, values, num_bins=num_bins)
 
   def log_json(self, name:str, data:dict):
     for logger in self.loggers:
@@ -132,7 +132,7 @@ class NullLogger(Logger):
   def log_value(self, name:str, value:float):
     pass
 
-  def log_histogram(self, name:str, values:torch.Tensor | Histogram):
+  def log_histogram(self, name:str, values:torch.Tensor | Histogram, num_bins:Optional[int] = None):
     pass
 
   def log_json(self, name:str, data:dict):
@@ -149,6 +149,22 @@ class StepValue:
   value:Any
 
 
+
+class LoggerWithState(CompositeLogger):
+  def __init__(self, logger:Logger):
+    self.state = StateLogger()
+    self.logger = logger
+    super().__init__(self.state, self.logger)
+
+  def get_value(self, path:str, default:Any = None) -> Any:
+    return self.state.get_value(path, default)
+
+  def __getitem__(self, path:str) -> dict | StepValue:
+    return self.state[path]
+  
+  def __contains__(self, path:str) -> bool:
+    return path in self.state
+  
 
 class StateLogger(NullLogger):
   def __init__(self):

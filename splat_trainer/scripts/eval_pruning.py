@@ -1,9 +1,11 @@
 from dataclasses import replace
 import json
+from taichi_splatting import Gaussians3D
 import torch
 from tqdm import tqdm
 
-from splat_trainer.controller.controller import DisabledConfig, DisabledController
+from splat_trainer.controller import DisabledConfig
+from splat_trainer.controller.threshold_controller import take_n
 from splat_trainer.scene.point_statistics import PointStatistics
 from splat_trainer.scene.scene import GaussianScene
 from splat_trainer.scripts.checkpoint import arguments, with_trainer
@@ -13,20 +15,17 @@ import pandas as pd
 from splat_trainer.util.containers import mean_rows
 
 
-def prune_with(scene:GaussianScene, heuristics:PointStatistics, n_prune:int, min_views:int=5):
+def prune_with(scene:GaussianScene, heuristics:PointStatistics, n_prune:int, min_views:int=5
+               ) -> torch.Tensor:
   
-  # prune_cost = heuristics.prune_cost  / heuristics.points_in_view
-  prune_cost = heuristics.prune_cost
-  prune_cost[heuristics.points_in_view < min_views] = torch.inf
+  prune_cost = heuristics.prune_cost  / (heuristics.points_in_view + min_views).sqrt()
+  # prune_cost = heuristics.prune_cost
+  # prune_cost[heuristics.points_in_view < min_views] = torch.inf
 
+  prune_mask = take_n(prune_cost, n_prune, descending=False)
 
-  prune_idx = torch.argsort(prune_cost)[:n_prune]
-
-  keep_mask = torch.ones(scene.num_points, dtype=torch.bool, device=scene.device)
-  keep_mask[prune_idx] = False
-
-  scene.split_and_prune(keep_mask, split_idx=torch.arange(0, dtype=torch.int64, device=scene.device))
-  return heuristics[keep_mask]
+  scene.split_and_prune(~prune_mask, split_idx=torch.arange(0, dtype=torch.int64, device=scene.device))
+  return prune_mask
   
 
 def evaluate_with_training(trainer:Trainer, train:bool) -> dict:
@@ -50,6 +49,15 @@ def evaluate_with_training(trainer:Trainer, train:bool) -> dict:
   return mean_rows(metrics)
 
 
+def show_pruning(trainer:Trainer, cloud:Gaussians3D, prune_mask:torch.Tensor):
+    from splat_viewer.viewer import show_workspace
+    from splat_viewer.gaussians import Workspace, Gaussians
+
+    paths = trainer.paths()
+    workspace = Workspace.load(paths.workspace)
+    gaussian_labelled = Gaussians.from_gaussians3d(cloud).with_labels(prune_mask.unsqueeze(1).int())
+  
+    show_workspace(workspace, gaussians=gaussian_labelled)
 
 def main():
   parser = arguments()
@@ -59,10 +67,12 @@ def main():
   parser.add_argument("--train", action="store_true", help="Train after pruning")
   parser.add_argument("--opacity", action="store_true", help="Use opacity for pruning")
 
+  parser.add_argument("--show", action="store_true", help="Show results in a viewer")
+
   parser.add_argument("--clustered", action="store_true", help="Use clustered views")
 
   parser.add_argument("--min_views", type=int, default=5, help="Minimum number of views to consider pruning a point")
-  parser.add_argument("--batch_size", type=int, default=60, help="Number of views to evaluate at a time")
+  parser.add_argument("--view_proportion", type=float, default=1.0, help="Proportion of views to evaluate at a time")
 
   parser.add_argument("--output", type=str, default=None, help="Output file")
   args = parser.parse_args()
@@ -70,13 +80,14 @@ def main():
 
   def f(trainer:Trainer):
 
-    
-    n = trainer.scene.num_points
-    trainer.controller = DisabledController()
-    trainer.config = replace(trainer.config, controller=DisabledConfig())
     torch.random.manual_seed(0)
+    n = trainer.scene.num_points
 
-    batch_idx = torch.randint(0, len(trainer.camera_table), (args.batch_size,))
+    cloud = trainer.load_cloud()
+    trainer = trainer.replace(controller=DisabledConfig())
+
+    n_views = len(trainer.camera_table)
+    batch_idx = torch.randint(0, n_views, (int(n_views * args.view_proportion),))
 
     # Compute pruning heuristics in the backward pass
     heuristics:PointStatistics = PointStatistics.new_zeros(n, device=trainer.device)
@@ -96,16 +107,27 @@ def main():
     prune_size = int(args.max_prune * n / args.prune_steps)
     levels = [100 * args.max_prune * i / args.prune_steps for i in range(args.prune_steps + 1)]
     evals = []
+
+    prune_mask = None
+
     for step in range(args.prune_steps + 1):
+        metrics = evaluate_with_training(trainer, args.train)
+        metrics["prune_max"] = heuristics.prune_cost.min().item()
 
-      metrics = evaluate_with_training(trainer, args.train)
+        metrics_str = [f"{k}={v:.4g}" for k, v in metrics.items()]
 
-      metrics_str = [f"{k}={v:.4f}" for k, v in metrics.items()]
-      print(f"Pruned {levels[step]:.1f}% points, {', '.join(metrics_str)}")
+        print(f"Pruned {levels[step]:.1f}% points, {', '.join(metrics_str)}")
+        evals.append({**metrics, "n": trainer.scene.num_points, "level": levels[step]})
 
-      evals.append({**metrics, "n": trainer.scene.num_points, "level": levels[step]})
+        if args.show and prune_mask is not None:
+          show_pruning(trainer, cloud, prune_mask)
+          cloud = cloud[~prune_mask]
 
-      heuristics = prune_with(trainer.scene, heuristics, prune_size, min_views=args.min_views)
+        if step < args.prune_steps:
+          prune_mask = prune_with(trainer.scene, heuristics, prune_size, min_views=args.min_views)
+          heuristics = heuristics[~prune_mask]
+
+
 
     df = pd.DataFrame(evals)
     print(df.to_string(float_format=lambda x: f"{x:.3f}"))

@@ -3,10 +3,10 @@ from taichi_splatting import Gaussians3D
 from termcolor import colored
 import torch
 from splat_trainer.dataset.dataset import Dataset
-from splat_trainer.gaussians.loading import from_pointcloud, to_pointcloud
+from splat_trainer.gaussians.loading import estimate_scale, from_pointcloud, from_scaled_pointcloud
 from splat_trainer.trainer.config import CloudInitConfig
 from splat_trainer.util.pointcloud import PointCloud
-from splat_trainer.visibility.query_points import crop_cloud, random_cloud
+from splat_trainer.visibility.query_points import balanced_cloud, crop_cloud, projections, random_cloud
 
 
 def get_initial_gaussians(config:CloudInitConfig, dataset:Dataset, device:torch.device) -> Gaussians3D:
@@ -31,7 +31,8 @@ def get_initial_gaussians(config:CloudInitConfig, dataset:Dataset, device:torch.
         points = points[random_indices]
       
     if config.add_initial_points or dataset_cloud is None:
-      random_points = random_cloud(cameras, config.initial_points)
+      random_points = balanced_cloud(cameras, config.initial_points, config.min_point_overlap)
+
       if points is not None:
         print(f"Adding {random_points.batch_size[0]} random points")
         points = torch.cat([points, random_points], dim=0)
@@ -39,9 +40,14 @@ def get_initial_gaussians(config:CloudInitConfig, dataset:Dataset, device:torch.
         print(f"Using {random_points.batch_size[0]} random points")
         points = random_points
 
-    initial_gaussians:Gaussians3D = from_pointcloud(points, 
-                                          initial_scale=config.initial_point_scale,
-                                          initial_alpha=config.initial_alpha,
-                                          num_neighbors=config.num_neighbors)
+    scales = torch.full(points.batch_size, torch.inf, device=device)
+    for proj in projections(cameras, points.points):
+      density = proj.camera.image_size[0] * proj.camera.image_size[1] / proj.visible_mask.sum()
+      scales[proj.visible_mask] = torch.minimum(scales[proj.visible_mask], density.sqrt() / proj.scale)
+
+
+    # scales = estimate_scale(points, num_neighbors=config.num_neighbors)
+    initial_gaussians:Gaussians3D = from_scaled_pointcloud(points, scales  * config.initial_point_scale, 
+                                          initial_alpha=config.initial_alpha)
 
     return initial_gaussians

@@ -2,6 +2,7 @@ from functools import partial
 import json
 from pprint import pformat
 import subprocess
+from typing import Optional
 from beartype.typing import Dict, List
 from beartype import beartype
 import torch
@@ -102,9 +103,12 @@ class TensorboardLogger(Logger):
     pass # Not supported by tensorboard
 
   @beartype
-  def log_histogram(self, name:str, values:torch.Tensor | Histogram):
+  def log_histogram(self, name:str, values:torch.Tensor | Histogram, num_bins:Optional[int] = None):
     if isinstance(values, torch.Tensor):
-      self.enqueue(self.writer.add_histogram, name, values, global_step=self.current_step)
+      if num_bins is not None:
+        self.enqueue(self.writer.add_histogram, name, values, global_step=self.current_step, bins=num_bins)
+      else:
+        self.enqueue(self.writer.add_histogram, name, values, global_step=self.current_step)
     elif isinstance(values, Histogram):
       self.enqueue(write_histogram, self.writer, name, values, self.current_step)  
 

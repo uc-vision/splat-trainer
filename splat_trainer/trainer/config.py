@@ -13,7 +13,7 @@ from taichi_splatting import RasterConfig
 # Local imports
 
 
-from splat_trainer.config import VaryingFloat, VaryingInt
+from splat_trainer.config import Between, SmoothStep, VaryingFloat, VaryingInt
 from splat_trainer.controller import ControllerConfig
 from splat_trainer.scene.scene import GaussianSceneConfig
 from splat_trainer.trainer.view_selection import ViewSelectionConfig
@@ -28,6 +28,8 @@ class CloudInitConfig:
   limit_points: Optional[int] = None
 
   initial_points : int 
+  min_point_overlap: int = 16
+
   add_initial_points: bool = False
   load_dataset_cloud: bool = True
 
@@ -47,11 +49,15 @@ class TrainConfig:
   eval_steps: int    
   log_interval: int  = 10
 
+  target_points: int
+
   densify_interval: VaryingInt = 100
 
   # Evaluation settings
   num_logged_images: int = 8
   log_worst_images: int  = 2
+
+  log_details: bool = False
 
   # Loss function settings
   ssim_weight: float = 0.0

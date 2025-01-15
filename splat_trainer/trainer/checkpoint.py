@@ -6,7 +6,6 @@ import hydra
 import torch
 
 
-
 def find_checkpoint(path:Path, checkpoint:Optional[int]=None):
   checkpoint_path = path / "checkpoint"
   checkpoints = list(checkpoint_path.glob("*.pt"))

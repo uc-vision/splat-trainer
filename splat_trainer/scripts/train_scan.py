@@ -35,10 +35,11 @@ def cfg_from_args():
   dataset_group.add_argument("--image_scale", type=float, default=None, help="Image scale")
   dataset_group.add_argument("--resize_longest", type=int, default=None, help="Resize longest side")
   dataset_group.add_argument("--far", type=float, default=None, help="Set far plane")
+  dataset_group.add_argument("--near", type=float, default=None, help="Set near plane")
 
   # Training group
   training_group = parser.add_argument_group("Training")
-  training_group.add_argument("--target", type=int, default=None, help="Target point count")
+  training_group.add_argument("--target_points", type=int, default=None, help="Target point count")
   training_group.add_argument("--total_steps", type=int, default=None, help="Number of total training steps")
   training_group.add_argument("--training_scale", type=float, default=1.0, help="Scale the number of steps by a constant factor")
   
@@ -63,7 +64,10 @@ def cfg_from_args():
   output_group.add_argument("--run", type=str, default=None, help="Name for this run")
   output_group.add_argument("--base_path", type=str, default=None, help="Base output path")
   output_group.add_argument("--checkpoint", action="store_true", help="Save checkpoints")
+
+
   output_group.add_argument("--wandb", action="store_true", help="Use wandb logging")
+  output_group.add_argument("--log_details", action="store_true", help="Log detailed histograms for points/gradients etc.")
 
 
   args = parser.parse_args()
@@ -95,10 +99,13 @@ def cfg_from_args():
   if args.far is not None:
     overrides.append(f"far={args.far}")
 
+  if args.near is not None:
+    overrides.append(f"near={args.near}")
+
   # Training group
-  if args.target is not None:
+  if args.target_points is not None:
     overrides.append("controller=target")
-    overrides.append(f"trainer.controller.target_count={args.target}")
+    overrides.append(f"trainer.target_points={args.target_points}")
 
 
   if args.total_steps is not None:
@@ -140,6 +147,9 @@ def cfg_from_args():
   # Output group
   if args.wandb is True:
     overrides.append("logger=wandb")
+
+  if args.log_details:
+    overrides.append("trainer.log_details=true")
 
   if args.checkpoint:
     overrides.append("trainer.save_checkpoints=true")
@@ -189,7 +199,6 @@ def train_with_config(cfg) -> dict | str:
     dataset = hydra.utils.instantiate(cfg.dataset)
   
     trainer = Trainer.initialize(train_config, dataset, logger)
-
     viewer:Viewer = hydra.utils.instantiate(cfg.viewer).create_viewer(trainer, enable_training=True)
 
     result = trainer.train()

@@ -30,7 +30,7 @@ class GaussianScene(metaclass=ABCMeta):
     raise NotImplementedError
 
   @abstractmethod
-  def step(self, progress:Progress):
+  def step(self, progress:Progress, log_details:bool=False):
     raise NotImplementedError
   
   @abstractmethod
@@ -42,7 +42,7 @@ class GaussianScene(metaclass=ABCMeta):
     raise NotImplementedError
 
   @abstractmethod
-  def log_checkpoint(self, logger:Logger, progress:Progress):
+  def log_checkpoint(self, progress:Progress):
     raise NotImplementedError
   
   @property

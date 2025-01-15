@@ -1,14 +1,16 @@
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from numbers import Number
-from typing import Optional, Tuple
+from typing import Iterator, Optional, Tuple
 from beartype import beartype
+from taichi_splatting import Gaussians3D
 import torch
 
 from splat_trainer.camera_table.camera_table import  Camera, Cameras, CameraTable
 from splat_trainer.util.pointcloud import PointCloud
 from splat_trainer.util.transforms import expand_proj, transform44
+import torch.nn.functional as F
 
-
+from tensordict.tensorclass import tensorclass
 
 def make_homog(points):
   shape = list(points.shape)
@@ -38,13 +40,71 @@ def projection(cameras:Cameras):
 
 @beartype
 def crop_cloud(cameras:Cameras, pcd:PointCloud) -> PointCloud:
-    counts = point_visibility(cameras, pcd.points)
+    counts, _, _ = point_visibility(cameras, pcd.points)
     return pcd[counts > 0]
 
 
 def inverse_ndc_depth(ndc_depth: torch.Tensor, near: float, far: float) -> torch.Tensor:
   # ndc from 0 to 1 (instead of -1 to 1)
   return (near * far - ndc_depth * near) / (far - ndc_depth * (far - near))
+
+
+@dataclass
+class Projected:
+  camera:Camera
+
+  xy:torch.Tensor
+  depth:torch.Tensor
+
+  @property
+  def scale(self) -> torch.Tensor:
+    return self.camera.focal_length[0] / self.depth[self.visible_mask]
+  
+  @property
+  def visible_mask(self) -> torch.Tensor:
+    w, h = self.camera.image_size
+    near, far = self.camera.depth_range
+
+    return (
+      (self.xy[..., 0] >= 0) & (self.xy[..., 0] < w) 
+      & (self.xy[..., 1] >= 0) & (self.xy[..., 1] < h) 
+      & (self.depth > near) & (self.depth < far)
+    )
+
+  
+def projections(cameras:Cameras, points:torch.Tensor) -> Iterator[Projected]:
+  image_t_world = expand_proj(cameras.projection.matrix, 1) @ cameras.camera_t_world
+  homog_points = make_homog(points)
+
+  for i in range(cameras.batch_size[0]):
+    camera:Camera = cameras[i].item()
+
+    proj_points = transform44(image_t_world[i], homog_points)
+    depth = proj_points[..., 2]
+    xy = proj_points[..., :2] / depth.unsqueeze(-1)
+
+    yield Projected(camera, xy, depth)
+
+
+@beartype
+def point_visibility(cameras:Cameras, 
+                     points:torch.Tensor, 
+                     far_threshold:Optional[float]=None, 
+                     quantile:float=1.0) -> torch.Tensor:
+  
+  vis_counts = torch.zeros(points.shape[0], dtype=torch.int32, device=cameras.device)
+
+  for proj in projections(cameras, points):
+    if far_threshold is None:
+      far_threshold = torch.quantile(proj.depth[proj.visible_mask], quantile)
+
+    near_mask = proj.visible_mask & (proj.depth < far_threshold)
+    vis_counts[near_mask] += 1
+  return vis_counts
+
+
+
+
 
 
 @beartype 
@@ -57,19 +117,25 @@ def random_ndc(n, depth_range:Tuple[Number, Number], device=None) -> torch.Tenso
 
 
 @beartype
-def random_points(cameras:Cameras, count:int) -> torch.Tensor:
-    
-    depth_range = cameras[0].depth_range
+def random_points(cameras:Cameras, count:int, weighting:Optional[torch.Tensor]=None) -> torch.Tensor:
+    """
+    Generate random points in cameras.
+    """
+    camera:Camera = cameras[0].item()
+    near, far = camera.depth_range
 
     world_t_image  = torch.inverse(projection(cameras))
     device  = world_t_image.device
 
-    camera_idx = torch.randint(0, world_t_image.shape[0], (count,), device=device)
+    if weighting is None:
+      camera_idx = torch.randint(0, world_t_image.shape[0], (count,), device=device)
+    else:
+      camera_idx = torch.multinomial(F.normalize(weighting, p=1, dim=0), count, replacement=True)
 
     norm_points = torch.rand(count, 2, device=device)
     image_points = norm_points * cameras.image_sizes[camera_idx]
 
-    depths = random_ndc(count, depth_range, device=device)
+    depths = random_ndc(count, (near, far), device=device)
     ones = torch.ones((count, 1), device=device)
 
     homog = torch.cat([image_points * depths, depths, ones], dim=1)
@@ -77,11 +143,30 @@ def random_points(cameras:Cameras, count:int) -> torch.Tensor:
     return points_unproj[..., :3] / points_unproj[..., 3:4]
 
 
-@beartype
-def random_cloud(cameras:Cameras, count:int, seed:int=0) -> PointCloud:
 
-  if seed is not None:
-    torch.manual_seed(seed)
+def balanced_points(cameras:Cameras, count:int, min_overlap:int=4) -> torch.Tensor:
+    """
+    Generate random points in cameras, each point is visible in at least min_views cameras.
+    Attempt to balance the number of points visible in each camera.
+    """
+
+
+    valid_points = torch.empty((0, 3), device=cameras.device)
+    cam_counts = torch.zeros(cameras.batch_size[0], dtype=torch.int32, device=cameras.device)
+
+    while valid_points.shape[0] < count:
+      points = random_points(cameras, count // 8, weighting= 1 / (cam_counts + 1))
+      points = points[point_visibility(cameras, points) >= min_overlap]
+
+      for i, proj in enumerate(projections(cameras, points)):
+        cam_counts[i] += proj.visible_mask.sum()
+
+      valid_points = torch.cat([valid_points, points])
+
+    return valid_points[:count], cam_counts
+
+@beartype
+def random_cloud(cameras:Cameras, count:int) -> PointCloud:
 
   points = random_points(cameras, count)
   colors = torch.rand(count, 3, device=points.device)
@@ -90,39 +175,11 @@ def random_cloud(cameras:Cameras, count:int, seed:int=0) -> PointCloud:
 
 
 @beartype
-def point_visibility(cameras:Cameras, 
-                     points:torch.Tensor, 
-                     far_threshold:Optional[float]=None, 
-                     quantile:float=1.0) -> torch.Tensor:
-  
-  vis_counts = torch.zeros(points.shape[0], dtype=torch.int32, device=cameras.device)
-  image_t_world = expand_proj(cameras.projection.matrix, 1) @ cameras.camera_t_world
+def balanced_cloud(cameras:Cameras, count:int, min_overlap:int=4) -> PointCloud:
+  points, _ = balanced_points(cameras, count, min_overlap)
 
-  homog_points = make_homog(points)
-
-  for i in range(cameras.batch_size[0]):
-    camera:Camera = cameras[i].item()
-    
-    w, h = camera.image_size
-    near, far = camera.depth_range
-
-    proj_points = transform44(image_t_world[i], homog_points)
-    depth = proj_points[..., 2]
-    xy = proj_points[..., :2] / depth.unsqueeze(-1)
-
-    view_mask = (
-      (xy[..., 0] >= 0) & (xy[..., 0] < w) 
-      & (xy[..., 1] >= 0) & (xy[..., 1] < h) 
-      & (depth > near) & (depth < far)
-    )
-
-    if far_threshold is None:
-      far_threshold = torch.quantile(depth[view_mask], quantile)
-
-    near_mask = view_mask & (depth < far_threshold)
-    vis_counts[near_mask] += 1
-
-  return vis_counts
+  colors = torch.rand(count, 3, device=points.device)
+  return PointCloud(points, colors, batch_size=(count,))
 
 
 
@@ -134,3 +191,5 @@ def foreground_points(cameras:Cameras, points:torch.Tensor,
   num_views = cameras.batch_size[0]
 
   return near_counts > (min_overlap * num_views)
+
+

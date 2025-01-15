@@ -171,7 +171,6 @@ def main():
 
   if args.random_points is not None:
      camera_table = camera_rig_table(scan)
-     image_sizes = torch.tensor([image.image_size for image in cam_images])
 
 
      cloud = random_cloud(camera_table, (args.near, args.far), args.random_points)

@@ -19,7 +19,7 @@ class ControllerConfig(metaclass=ABCMeta):
 
 class Controller(metaclass=ABCMeta):
   @abstractmethod
-  def densify_and_prune(self, progress:Progress):
+  def step(self, target_count:int, progress:Progress):
     """ Perform densification and pruning """
     raise NotImplementedError
 
@@ -28,16 +28,7 @@ class Controller(metaclass=ABCMeta):
     """ Add a rendering to the controller """
     raise NotImplementedError
 
-  @abstractmethod
-  def step(self, progress:Progress):
-    """ Step the controller for a batch of images processed"""
-    raise NotImplementedError
   
-  @abstractmethod
-  def log_checkpoint(self):
-    """ Log more detailed statistics when checkpointing """
-    raise NotImplementedError
-
 
   @abstractmethod
   def state_dict(self) -> dict:
@@ -46,29 +37,6 @@ class Controller(metaclass=ABCMeta):
 
 
 
-class DisabledConfig(ControllerConfig):
-  def make_controller(self, scene:GaussianScene, logger:Logger) -> 'Controller':
-    return DisabledController()
-  
-  def from_state_dict(self, state_dict:dict, scene:GaussianScene, logger:Logger) -> 'Controller':
-    return DisabledController()
-  
 
-
-class DisabledController(Controller):
-  def densify_and_prune(self, progress:Progress):
-    return {}
-  
-  def add_rendering(self, image_idx:int, rendering:Rendering):
-    pass
-
-  def step(self, progress:Progress):
-    pass
-  
-  def log_checkpoint(self):
-    pass
-
-  def state_dict(self) -> dict:
-    return {}
 
   

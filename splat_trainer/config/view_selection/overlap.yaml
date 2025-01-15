@@ -2,6 +2,12 @@
 
 trainer:
   view_selection:
-    _target_: splat_trainer.trainer.OverlapSamplerConfig
-    batch_size: 2
-    overlap_temperature: 0.0
+    _target_: splat_trainer.trainer.TargetOverlapConfig
+    batch_size: 1
+
+    # Temperature threshold - higher is more random
+    overlap_temperature: 0.5
+    history_size: 4
+
+    # Select overlap values closest to target
+    target_overlap: 0.25

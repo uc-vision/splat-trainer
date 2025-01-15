@@ -58,6 +58,8 @@ def show_batch(window:str, trainer:Trainer, batch_indexes:torch.Tensor, rows:int
   display_image(window, grid)
 
 
+def sh_gaussians_to_cloud(gaussians:Gaussians3D) -> PointCloud:
+  return PointCloud(gaussians.position, sh_to_rgb(gaussians.feature[:, :, 0]))
 
 
 def main():
@@ -69,28 +71,19 @@ def main():
   args = parser.parse_args()
 
 
-
   def f(trainer:Trainer):
     point_cloud = sh_gaussians_to_cloud(trainer.load_cloud())
-
     cameras = trainer.camera_table.cameras
 
     fg_mask = foreground_points(cameras, point_cloud.points)
     point_cloud = point_cloud[fg_mask]
 
     camera_viewer = CameraViewer(cameras, point_cloud)
-    view_similarity = trainer.view_clustering.view_similarity
 
     while camera_viewer.is_active():
-      batch_indexes = trainer.select_batch(args.min_batch, temperature=args.temperature)
+      batch_indexes = trainer.view_selection.select_images(trainer.view_clustering, trainer.progress)
 
-      # batch_indexes = select_group(view_similarity, threshold=args.threshold, min_size=args.min_batch)
-      master_overlaps = view_similarity[batch_indexes[0]]
-
-      # if args.temperature > 0:
-      #   master_overlaps = F.softmax(master_overlaps.log() * 1/args.temperature, dim=0)
-
-      camera_viewer.show_batch_selection(master_overlaps.squeeze(0), batch_indexes)
+      camera_viewer.show_selection(batch_indexes)
       camera_viewer.wait_key()
 
   with_trainer(f, args)

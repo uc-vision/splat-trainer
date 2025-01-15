@@ -4,15 +4,23 @@ trainer:
   controller:
     _target_: splat_trainer.controller.TargetConfig
     
-    target_count: 1000000
 
     # rate of splitting proportional to current size
-    prune_rate: 0.05
+    prune_rate: 0.03
+
+    # maximum split rate (relative to count when count is less than target)
+    max_split_rate: 0.04
 
     # minimum number of times point is in view before it is able to be pruned
-    min_views: 10
+    min_views: 5
 
     # threshold (of screen width) for pruning large points
-    max_scale: 0.2
+    max_scale_px: 200.
     
-  
+    densify_prune_interval:
+      _target_: splat_trainer.config.Piecewise
+      start: 50
+      steps:
+        - [0.2, 100]
+        - [0.5, 200]
+      scale: ${training_scale}

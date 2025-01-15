@@ -70,19 +70,27 @@ class ViewClustering:
     self.cluster_visibility = cluster_visibility
     self.metric = metric
 
-  @cached_property  
-  def view_similarity(self) -> torch.Tensor:
+  @cached_property
+  def normalized_visibility(self) -> torch.Tensor:
     # normalize features by cluster
     cluster_visibility = F.normalize(self.cluster_visibility, dim=0, p=2)
 
     # normalize features by view
     cluster_visibility = F.normalize(cluster_visibility, dim=1, p=2)
 
-    # compute view overlaps
+    return cluster_visibility
+
+  @cached_property  
+  def view_similarity(self) -> torch.Tensor:
+    return self.overlaps_with(self.normalized_visibility)
+    
+  def overlaps_with(self, visibility_vec:torch.Tensor) -> torch.Tensor:
+        # compute view overlaps
     if self.metric == 'cosine':
-      return (cluster_visibility @ cluster_visibility.T)
+      return (visibility_vec @ self.normalized_visibility.T)
     elif self.metric == 'euclidean':
-      return torch.cdist(cluster_visibility, cluster_visibility, p=2)
+      return torch.cdist(visibility_vec, self.normalized_visibility, p=2)
+
 
   @beartype
   def select_batch(self, weighting:torch.Tensor,      # (N,) weighting to bias selection towards less used views
@@ -98,7 +106,11 @@ class ViewClustering:
                    temperature:float=1.0
                    ) -> torch.Tensor:       # (batch_size,) camera indices
     return sample_batch(self.view_similarity, weighting, batch_size, temperature)
-  
+
+
+
+
+
   @beartype
 
   def visible_points(self, batch_indices:torch.Tensor) -> torch.Tensor:
@@ -229,8 +241,24 @@ def sample_batch(view_overlaps:torch.Tensor,
     return index
 
 
-  
+@beartype
+def sample_stratified(view_overlaps:torch.Tensor, 
+                  weighting:torch.Tensor,
+                  history:torch.Tensor,
+                  batch_size:int,
+                  temperature:float=1.0,
+                  ) -> torch.Tensor: # (N,) camera indices 
+  # select initial camera with probability proportional to weighting
+  index = torch.multinomial(weighting, 1, replacement=False)
 
+  if batch_size > 1:
+    probs = view_overlaps[index.squeeze(0)] 
+    probs[index.squeeze(0)] = 0 
+
+    other_index = sample_with_temperature(probs, temperature=temperature, n=batch_size - 1, weighting=weighting)
+    return torch.cat([index, other_index], dim=0)
+  else:
+    return index
 
 @beartype
 def sample_batch_grouped(batch_size:int,  

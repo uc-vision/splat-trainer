@@ -54,6 +54,10 @@ def exp_lerp(t, a, b):
     return max_ab + torch.log(torch.lerp(torch.exp(a - max_ab), torch.exp(b - max_ab), t))
 
 @torch.compile
+def pow_lerp(t, a, b, k=2):
+    return (a ** k + (b ** k - a ** k) * t) ** (1 / k)
+
+@torch.compile
 def lerp(t, a, b):
   return a + (b - a) * t
 

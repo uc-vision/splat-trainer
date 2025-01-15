@@ -16,8 +16,6 @@ dataset:
     - ${far}
 
 
-
-
 # hydra:  
 #   run:
 #     dir: ${scan_name:${dataset.scan_file}}  

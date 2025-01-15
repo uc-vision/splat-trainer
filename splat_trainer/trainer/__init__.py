@@ -4,7 +4,7 @@ from .evaluation import Evaluation
 
 from splat_trainer.dataset.dataset import ImageView
 from splat_trainer.config import Progress, eval_varying
-from .view_selection import OverlapSamplerConfig, RandomSamplerConfig, ViewSelectionConfig, ViewSelection
+from .view_selection import TargetOverlapConfig, RandomSamplerConfig, ViewSelectionConfig, ViewSelection, BatchOverlapSamplerConfig
 
 
 __all__ = ["Trainer", 
@@ -15,10 +15,11 @@ __all__ = ["Trainer",
 
            "ImageView", 
            "ViewSelection",
-           "OverlapSamplerConfig",
+
+           "TargetOverlapConfig",
            "RandomSamplerConfig",
            "ViewSelectionConfig",
-
+           "BatchOverlapSamplerConfig",
 
            "Progress",     
            "eval_varying"]
