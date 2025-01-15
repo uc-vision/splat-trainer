@@ -2,22 +2,24 @@
 
 
 DATE=$(date +"%Y-%m-%d__%H-%M-%S")
-LOG_FILE="/local/splat_trainer_daily_multirun/daily_train_log_${DATE}.log"
+BASE_PATH=/local/splat_trainer_daily_multirun
+
+mkdir ${BASE_PATH}/${DATE}
+LOG_FILE="${BASE_PATH}/${DATE}/daily_train_log_${DATE}.log"
 
 echo "Script started at $(date)" >> "$LOG_FILE"
 
-mkdir /local/splat_trainer_daily_multirun
-cd /local/splat_trainer_daily_multirun
-rm -rf /local/splat_trainer_daily_multirun/splat-trainer
-git clone git@github.com:uc-vision/splat-trainer.git
+cd ${BASE_PATH}
+rm -rf ${BASE_PATH}/splat-trainer
+git clone -b daily-multirun git@github.com:uc-vision/splat-trainer.git
 
-cd /local/splat_trainer_daily_multirun/splat-trainer
+cd ${BASE_PATH}/splat-trainer
 git clone git@github.com:uc-vision/taichi-splatting.git
 
-cd /local/splat_trainer_daily_multirun/splat-trainer/taichi-splatting
+cd ${BASE_PATH}/splat-trainer/taichi-splatting
 pip install -e .
 
-cd /local/splat_trainer_daily_multirun/splat-trainer
+cd ${BASE_PATH}/splat-trainer
 pip install -e .
 
 source ~/.bashrc
@@ -29,7 +31,7 @@ grid-search-trainer \
     logger.entity=UCVision \
     scene=sh \
     +project=splat_trainer_daily_multirun  \
-    hydra.sweep.dir=/local/splat_trainer_daily_multirun/${DATE} \
+    hydra.sweep.dir=${BASE_PATH}/${DATE} \
     trainer.num_logged_images=-1 \
     trainer.log_worst_images=-1 \
     >> "$LOG_FILE" 2>&1
