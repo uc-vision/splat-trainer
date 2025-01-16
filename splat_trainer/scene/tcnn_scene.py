@@ -16,7 +16,7 @@ from splat_trainer.scene.scene import GaussianSceneConfig, GaussianScene
 from splat_trainer.gaussians.split import point_basis, split_gaussians_uniform
 
 
-from taichi_splatting.optim import ParameterClass, SparseLaProp, VisibilityAwareAdam
+from taichi_splatting.optim import ParameterClass, VisibilityAwareLaProp, VisibilityAwareAdam
 from taichi_splatting import Gaussians3D, RasterConfig, Rendering, TaichiQueue
 from taichi_splatting.misc.morton_sort import argsort
 
@@ -25,6 +25,7 @@ from taichi_splatting.perspective import CameraParams
 
 
 from splat_trainer.scene.util import pop_raster_config
+from splat_trainer.util.straight_through import ones_like_ste, sigmoid_ste, zeros_like_ste
 
 @beartype
 @dataclass(kw_only=True, frozen=True)
@@ -65,7 +66,7 @@ class TCNNConfig(GaussianSceneConfig):
     
 
     feature = torch.zeros(gaussians.batch_size[0], self.point_features)
-    torch.nn.init.normal_(feature, std=0.5)
+    torch.nn.init.normal_(feature, std=5.0)
 
 
     point_tensors:TensorDict = (gaussians.to_tensordict().replace(
@@ -158,16 +159,22 @@ class TCNNScene(GaussianScene):
     self.color_opt.zero_grad()
     self.glo_opt.zero_grad()
 
-  @torch.no_grad()
-  def log_histograms(self, vis_idx:torch.Tensor, visibility:torch.Tensor, name:str = "parameters"):    
-    for key, value in self.points.tensors.items():
-      self.logger.log_histogram(f"{name}/{key}", value.detach())
+  def hist_log_nonzero(self, name:str, value:torch.Tensor,  min_value:float=1e-16):
+    value = value.detach()[value > min_value]
+    self.logger.log_histogram(f"{name}", torch.log10(value))
 
-      visible = value[vis_idx]
-      if visible.grad is not None:
-        self.logger.log_histogram(f"{name}/{key}_grad", visible.grad)
-        norm_grad = visible.grad / (self.config.vis_smooth + visibility)
-        self.logger.log_histogram(f"{name}/{key}_norm_grad", norm_grad)
+  @torch.no_grad()
+  def log_gradients(self, visibility:torch.Tensor, min_vis:float=0.1):   
+    vis_idx = torch.nonzero(visibility > min_vis).squeeze(1)
+    visibility = visibility[vis_idx].view(vis_idx.shape[0], 1)
+
+    for key, value in self.points.tensors.items():
+      if value.grad is not None:
+        grad = value.grad[vis_idx].view(vis_idx.shape[0], -1)  
+
+        self.hist_log_nonzero(f"log10_grad/{key}", grad)
+        norm_grad = grad / (self.config.vis_smooth + visibility)
+        self.hist_log_nonzero(f"log10_norm_grad/{key}", norm_grad)
 
   @torch.no_grad()
   def log_optimizer_state(self, name:str="optimizer"):
@@ -176,28 +183,42 @@ class TCNNScene(GaussianScene):
     if state.batch_dims > 0:
       for key, value in self.points.tensor_state.items():
          for k, v in value.items():
-            self.logger.log_histogram(f"{name}/{key}/log10_{k}", torch.log10(v.detach().clamp_min(1e-16)))
+            self.hist_log_nonzero(f"{name}/{key}/{k}", v)
     
+
+  def log_params(self):
+    opacity = torch.sigmoid(self.points.alpha_logit.detach())
+    
+    self.logger.log_histogram("params/opacity", opacity)
+    self.logger.log_histogram("params/log_scale", self.points.log_scaling.detach())
+    self.logger.log_histogram("params/feature", self.points.feature.detach())
+
+    self.logger.log_histogram("params/glo_feature", self.color_table.weight.detach())
+
+
+  def log_checkpoint(self, progress:Progress):
+    self.log_params()
+
 
   @torch.no_grad()
   @beartype
   def step(self, _:Progress, log_details:bool=False):
-    visibility = self.points.visible
-
-    vis_idx = visibility.nonzero().squeeze(1)
-    vis_weight = visibility[vis_idx]
+    vis_idx = self.points.visible.nonzero().squeeze(1)
+    vis_weight = self.points.visible[vis_idx]
 
     basis = point_basis(self.points.log_scaling[vis_idx], self.points.rotation[vis_idx]).contiguous()
 
     if log_details:
-      self.log_histograms(vis_idx, vis_weight)
+      self.log_gradients(self.points.visible)
       self.log_optimizer_state()
+      self.log_params()
 
 
     self.points.step(visibility=vis_weight, indexes=vis_idx, basis=basis)
 
     self.color_opt.step()
     self.glo_opt.step()
+    
 
     self.points.rotation.data = F.normalize(self.points.rotation.data, dim=1)
     self.points.log_scaling.data.clamp_(min=-10)
@@ -207,6 +228,7 @@ class TCNNScene(GaussianScene):
   @torch.no_grad()
   def add_rendering(self, image_idx:int, rendering:Rendering):
     self.points.visible[rendering.points_in_view] += rendering.point_visibility
+
 
   @property
   def all_parameters(self) -> TensorDict:
@@ -228,8 +250,6 @@ class TCNNScene(GaussianScene):
     # self.points = self.points[idx]
  
 
-
-
   def state_dict(self):
     return dict(points=self.points.state_dict(), 
                 color_model=self._color_model.state_dict(),
@@ -243,12 +263,6 @@ class TCNNScene(GaussianScene):
     return self.config.from_state_dict(self.state_dict(), self.camera_table)
     
 
-  def log_checkpoint(self, progress:Progress):
-    gaussians = self.gaussians
-    
-    self.logger.log_histogram("opacity", gaussians.alpha.detach())
-    self.logger.log_histogram("log_scale", gaussians.log_scaling.detach())
-    self.logger.log_histogram("feature", gaussians.feature.detach())
 
 
   @beartype
@@ -280,7 +294,9 @@ class TCNNScene(GaussianScene):
 
 
     with torch.autocast(device_type=self.device.type, dtype=torch.float16):
-      return self.color_model(self.points.feature[point_indexes], self.points.position[point_indexes], 
+      feature = self.points.feature[point_indexes]
+    
+      return self.color_model(feature, self.points.position[point_indexes], 
                                                         camera_params.camera_position, glo_feature)
 
   def query_visibility(self, camera_params:CameraParams):
@@ -312,8 +328,11 @@ class TCNNScene(GaussianScene):
 
   @property
   def gaussians(self) -> Gaussians3D:
-      points = self.points.tensors.select('position', 'rotation', 'log_scaling', 'alpha_logit', 'feature')
-      return Gaussians3D.from_tensordict(points)
+      return Gaussians3D(position=self.points.position, 
+                         rotation=self.points.rotation, 
+                         log_scaling=self.points.log_scaling, 
+                         alpha_logit=self.points.alpha_logit, 
+                         feature=self.points.feature)
 
 
 
@@ -322,8 +341,8 @@ class TCNNScene(GaussianScene):
              image_idx:Optional[int] = None, **options) -> Rendering:
 
     config = pop_raster_config(options)
+    
     gaussians2d, depth, indexes = project_to_image(self.gaussians, camera_params, config)
-
 
     colour = TaichiQueue.run_sync(self.eval_colors, indexes, camera_params, image_idx)
     rendering = render_projected(indexes, gaussians2d, colour, depth, 

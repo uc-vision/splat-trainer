@@ -50,6 +50,9 @@ def cfg_from_args():
   training_group.add_argument("--tcnn", action="store_true", help="Use tcnn scene")
   training_group.add_argument("--bilateral", action="store_true", help="Use bilateral color correction")
 
+  training_group.add_argument("--no_controller", action="store_true", help="Disable controller prune/split")
+  training_group.add_argument("--mcmc", action="store_true", help="Use MCMC controller")
+
   training_group.add_argument("--vis", action="store_true", help="Enable web viewer")
 
 
@@ -140,6 +143,13 @@ def cfg_from_args():
 
   if args.vis:
     overrides.append("viewer=splatview")
+
+
+  if args.no_controller:
+    overrides.append("controller=disabled")
+
+  if args.mcmc:
+    overrides.append("controller=mcmc")
 
   if args.antialias:
     overrides.append("trainer.antialias=true")

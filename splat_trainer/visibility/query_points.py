@@ -40,7 +40,7 @@ def projection(cameras:Cameras):
 
 @beartype
 def crop_cloud(cameras:Cameras, pcd:PointCloud) -> PointCloud:
-    counts, _, _ = point_visibility(cameras, pcd.points)
+    counts = point_visibility(cameras, pcd.points)
     return pcd[counts > 0]
 
 

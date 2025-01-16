@@ -1,14 +1,10 @@
 from functools import partial
-import math
-from typing import Tuple
 import torch
 import torch.nn.functional as F
 import torch.nn as nn
-from taichi_splatting.perspective import (CameraParams)
-from taichi_splatting.spherical_harmonics import evaluate_sh_at
 
-from splat_trainer.config import Varying, VaryingFloat, eval_varying, schedule_groups, schedule_lr
-from splat_trainer.scene.mlp.torch_mlp import AffineMLP, BasicMLP, DirectionalMLP
+from splat_trainer.config import VaryingFloat, eval_varying, schedule_groups
+from splat_trainer.scene.mlp.torch_mlp import AffineMLP
 
 
 
@@ -17,6 +13,11 @@ class GLOTable(torch.nn.Module):
     super().__init__()
     self.embeddings = nn.Embedding(n, glo_features, sparse=True)
     torch.nn.init.normal_(self.embeddings.weight, mean=0.0, std=1.0)
+
+
+  @property
+  def weight(self):
+    return self.embeddings.weight
 
   def interpolated(self, weights:torch.Tensor):
     assert weights.shape[0] == self.embeddings.num_embeddings

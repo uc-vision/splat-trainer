@@ -276,7 +276,7 @@ class Trainer(Dispatcher):
       yield self.evaluate_image(image_view)
 
 
-  def evaluate_training(self, name: str, image_views: Sequence[ImageView]):
+  def evaluate_training(self, name: str, image_views: Sequence[ImageView], random_seed:int=0):
     """Evaluate training set, log a selection of images, and worst performing images by psnr.
        Compute view clustering.
     """
@@ -287,29 +287,31 @@ class Trainer(Dispatcher):
     # Track metrics for all images
     metrics = {}
 
-    # point_clusters = cluster.PointClusters.cluster(self.scene.points['position'], self.config.vis_clusters)
-    log_interval = len(image_views) // (self.config.num_logged_images + 1)
+    point_clusters = cluster.PointClusters.cluster(self.scene.points['position'], self.config.vis_clusters)
+
+    rng = np.random.RandomState(random_seed)
+    log_indices = set(rng.choice(len(image_views), self.config.num_logged_images, replace=False))
 
     pbar = tqdm(total=len(image_views), desc=f"Evaluating {name}", leave=False)
     for i, image_view in enumerate(image_views):
         eval = self.evaluate_image(image_view)
 
-        if (i + 1) % log_interval == 0:
+        if i in log_indices:
             self.log_evaluation_images(f"{name}_images/{eval.image_id}", eval, log_source=self.step == 0)
             
         worst.push(-eval.metrics['psnr'], eval)
 
         metrics[eval.filename] = eval.metrics
-        # view_features.append(point_clusters.view_features(*eval.rendering.visible))
+        view_features.append(point_clusters.view_features(*eval.rendering.visible))
         
         pbar.update(1)
         pbar.set_postfix_str(", ".join([f"{k}:{v:.3f}" for k, v in eval.metrics.items()]))
 
     for i, (_, eval) in enumerate(worst):
-        self.log_evaluation_images(f"worst_{name}/{i}", eval, log_source=True)
+        self.log_evaluation_images(f"{name}_images/worst_{i}", eval, log_source=True)
 
     self.log_evaluation_table(name, metrics)
-    # self.view_clustering = cluster.ViewClustering(point_clusters, torch.stack(view_features))
+    self.view_clustering = cluster.ViewClustering(point_clusters, torch.stack(view_features))
     
 
   
@@ -460,15 +462,16 @@ class Trainer(Dispatcher):
 
   def log_rendering_histograms(self, rendering:Rendering):
     
-    def log_scale_histogram(name:str, t:torch.Tensor, min_val:float = 1e-12):
-      self.logger.log_histogram(name, torch.log10(torch.clamp_min(t, min_val)))
+    def log_scale_histogram(name:str, values:torch.Tensor, min_val:float = 1e-12):
+      valid = values[values > min_val]
+      self.logger.log_histogram(name, torch.log10(valid))
 
-    log_scale_histogram("rendering/log10_prune_cost", rendering.prune_cost)
-    log_scale_histogram("rendering/log10_split_score", rendering.split_score)
+    log_scale_histogram("rendering/log10_prune_cost", rendering.prune_cost, min_val=1e-20)
+    log_scale_histogram("rendering/log10_split_score", rendering.split_score, min_val=1e-10)
     log_scale_histogram("rendering/log10_max_scale_px", rendering.point_scale, min_val=1e-6)
-    
+    log_scale_histogram("rendering/log10_visibility", rendering.point_visibility, min_val=1e-10)
+
     self.logger.log_histogram("rendering/points_in_view", rendering.points_in_view)
-    self.logger.log_histogram("rendering/visible", rendering.point_visibility)
 
 
 
@@ -570,30 +573,32 @@ class Trainer(Dispatcher):
     self.pbar = tqdm(initial=self.step, total=self.config.total_steps, desc=self.state.name)
 
     while self.step < self.config.total_steps:
-  
-        if self.last_checkpoint + self.config.eval_steps <= self.step:
-            self.checkpoint(self.config.save_checkpoints)
 
-        is_logging_step = self.step % self.config.log_interval == 0
-        step = self.training_step(self.loader.next(), log_details=self.config.log_details and is_logging_step)
-        steps.append(step)
+      if self.last_checkpoint + self.config.eval_steps <= self.step:
+          self.checkpoint(self.config.save_checkpoints)
 
-        last_period = self.step >= self.config.total_steps - self.config.eval_steps
-        if not last_period:
-          self.controller.step(self.config.target_points, self.progress)
+      is_logging_step = self.step % self.config.log_interval == 0
+      if is_logging_step and len(steps) > 0:
+        self.logger.log_values("train", mean_rows(steps))
+
+        steps = []
+
+        self.emit("on_update")
+        if self.state == TrainerState.Paused:
+            time.sleep(0.1)
+            continue
+
+        self.update_progress()
 
 
-        if is_logging_step:
-          self.logger.log_values("train", mean_rows(steps))
-          # Don't densify or prune in the last eval period
-          steps = []
+      step = self.training_step(self.loader.next(), log_details=self.config.log_details and is_logging_step)
+      steps.append(step)
 
-          self.emit("on_update")
-          if self.state == TrainerState.Paused:
-              time.sleep(0.1)
-              continue
-          
-          self.update_progress()
+      last_period = self.step >= self.config.total_steps - self.config.eval_steps
+      if not last_period:
+        # Don't densify or prune in the last eval period
+        self.controller.step(self.config.target_points, self.progress)
+        
 
     self.checkpoint(True)
 

@@ -26,7 +26,7 @@ class MCMCConfig(ControllerConfig):
   opacity_threshold:float = 0.1
   prune_interval:int = 100
 
-  min_views:int = 10
+  min_views:int = 5
 
   max_scale_px:float = 200
 
@@ -85,8 +85,7 @@ class MCMCController(Controller):
       self.points = densify_and_prune(self.points, self.scene, split_mask, prune_mask, logger=self.logger)
 
     else:
-      ratio = self.config.opacity_threshold / (opacity + 1e-20)  - 1
-      
+      ratio = self.config.opacity_threshold / (opacity + 1e-16)  - 1
       self.logger.log_histogram("opacity_ratio", ratio)
       
       lr_multiplier = torch.where(enough_views, 0.5 + 1.5 * torch.sigmoid(8.0 * ratio), 0.5)

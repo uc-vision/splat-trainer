@@ -33,7 +33,7 @@ class WandbLogger(Logger):
   def __init__(self, project:str | None, 
                entity:str | None, 
                name:str | None=None,
-               workers:int=16):
+               workers:int=4):
     
     dir = Path.cwd()
     settings = wandb.Settings(start_method='thread', quiet=True)
@@ -55,9 +55,6 @@ class WandbLogger(Logger):
   def worker(self):
     while True:
       item:LogItem = self.queue.get()
-      if self.queue.qsize() > 20:
-        print(f"queue size: {self.queue.qsize()}")
-
       data = item.item()
       if data is None:
         break
@@ -136,16 +133,18 @@ class WandbLogger(Logger):
 
     def f(values:torch.Tensor | Histogram):
       try:
-        if isinstance(values, Histogram):
-          counts_norm = values.counts / values.counts.sum()
+        if isinstance(values, torch.Tensor):
+          hist = Histogram(values.float(), range=(values.min(), values.max()), num_bins=num_bins or 64)
+        else:
+          hist = values
 
-          hist = wandb.Histogram(np_histogram=
-            (counts_norm.cpu().numpy(), values.bins.cpu().numpy()))
-          
-          return {name:hist}
+        counts_norm = hist.counts / hist.counts.sum()
 
-        elif isinstance(values, torch.Tensor):
-          return {name:wandb.Histogram(values.cpu().numpy(), num_bins=num_bins or 64)}
+        hist = wandb.Histogram(np_histogram=
+          (counts_norm.cpu().numpy(), hist.bins.cpu().numpy()))
+        
+        return {name:hist}
+      
       except Exception as e:
         print(f"Error logging histogram {name}: {e}")
 

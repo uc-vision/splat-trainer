@@ -95,13 +95,15 @@ class TargetController(Controller):
   def step(self, target_count:int, progress:Progress, log_details:bool=False):
     densify_interval = eval_varying(self.config.densify_prune_interval, progress.t)
 
+    split_mask, prune_mask = self.find_split_prune_indexes(target_count, progress.t)
+
+
     if log_details:
       log_histograms(self.points, self.logger, "step")
 
     if progress.step % densify_interval == 0:
     
       split_mask, prune_mask = self.find_split_prune_indexes(target_count, progress.t)
-      #self.points = 
       densify_and_prune(self.points, self.scene, split_mask, prune_mask, self.logger)
 
       # reset points
