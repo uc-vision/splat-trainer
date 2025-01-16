@@ -127,7 +127,7 @@ class AverageResult(Callback):
         
         
         try:
-            push_metrics(results)
+            push_metrics(averaged_results)
             self.log.info(f"Training metrics pushed to Graphite.")
         
         except Exception as e:
