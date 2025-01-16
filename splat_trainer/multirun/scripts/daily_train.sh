@@ -11,7 +11,7 @@ echo "Script started at $(date)" >> "$LOG_FILE"
 
 cd ${BASE_PATH}
 rm -rf ${BASE_PATH}/splat-trainer
-git clone -b daily-multirun git@github.com:uc-vision/splat-trainer.git
+git clone -b multirun git@github.com:uc-vision/splat-trainer.git
 
 cd ${BASE_PATH}/splat-trainer
 git clone git@github.com:uc-vision/taichi-splatting.git
@@ -27,10 +27,10 @@ conda activate splat-trainer
 
 grid-search-trainer \
     logger=wandb \
-    logger.group=${DATE} \
     logger.entity=UCVision \
     scene=sh \
-    +project=splat_trainer_daily_multirun  \
+    project=splat_trainer_daily_multirun  \
+    group_name=${DATE} \
     hydra.sweep.dir=${BASE_PATH}/${DATE} \
     trainer.num_logged_images=-1 \
     trainer.log_worst_images=-1 \

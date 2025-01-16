@@ -39,8 +39,9 @@ hydra:
 
 trainer.optimizer: VisibilityAwareAdam
 
+project: optuna_multirun__${now:%Y-%m-%d}__${now:%H-%M-%S}
 group_name: ${format:${hydra:job.num}}
-project: optuna_multirun_${trainer.optimizer}_lr
+
 
 optimize_algorithm: ${hydra:sweeper.sampler}
 
