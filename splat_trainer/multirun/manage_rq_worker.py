@@ -15,7 +15,7 @@ from hydra.experimental.callback import Callback
 from omegaconf import DictConfig, OmegaConf
 from rq import Worker
 
-from splat_trainer.util.deploy import deploy_workers, shutdown_all_workers, flush_all
+from splat_trainer.multirun.deploy import deploy_workers, shutdown_all_workers, flush_all
 
 
 class ManageRQWorkers(Callback):

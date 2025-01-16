@@ -4,6 +4,6 @@
 hydra:
   callbacks:
     average_result:
-      _target_: splat_trainer.util.average_result.AverageResult
+      _target_: splat_trainer.multirun.average_result.AverageResult
       output_dir: ${hydra.sweep.dir}
       sweep_params: ${hydra.sweeper.params}

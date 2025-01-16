@@ -56,13 +56,13 @@ def deploy_group(group_name: str, hosts:List[str], connect_kwargs, args):
           conda activate splat-trainer
           cd ~/splat-trainer
           mkdir -p ./log
-          rq worker high --url {redis_url} \\
+          rq worker default --url {redis_url} \\
                          --name {worker_name} \\
-                         --serializer splat_trainer.util.deploy.cloudpickle \\
+                         --serializer splat_trainer.multirun.deploy.cloudpickle \\
                          > ./log/{host}.log 2>&1
           """.format(group_name=group_name, redis_url=args.redis_url, worker_name=worker_name, host=host)
 
-        # TODO: add logic to catch asynchronous error
+        # TODO: add logic to catch asynchronous error 
         # try:
         c.run(command, hide="stdout", asynchronous=True)
         return Machine(host, msg=f"RQ worker started on {host}")
@@ -106,7 +106,7 @@ def deploy_all(config, connect_kwargs, args):
 
 
 def deployer(args):
-  config_path = Path(__file__).parent.parent / 'config'
+  config_path = Path(__file__).parent / 'config'
   config = read_config(config_path / f"{args.config}.yaml")
 
   connect_kwargs = get_connect_keys(args.getpass)

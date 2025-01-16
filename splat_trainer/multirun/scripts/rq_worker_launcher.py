@@ -7,7 +7,7 @@ import importlib.resources
 import rq_dashboard
 from flask import Flask, render_template
 
-from splat_trainer.util.deploy import deploy_workers, shutdown_all_workers
+from splat_trainer.multirun.deploy import deploy_workers, shutdown_all_workers
 
 
 REDIS_URL = None

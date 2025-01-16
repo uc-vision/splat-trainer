@@ -10,7 +10,7 @@ defaults:
   - /hydra/callbacks:
     - manage_rq_workers
     - average_result
-  - override hydra/launcher: rq_launcher
+  - override hydra/launcher: rq
   - _self_
 
 
@@ -18,7 +18,7 @@ trainer:
   save_checkpoints: False
   save_output: False
 
-  steps: 20000
+  steps: 1000
 
 test_scene: ???
 

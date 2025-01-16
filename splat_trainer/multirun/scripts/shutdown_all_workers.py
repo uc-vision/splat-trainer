@@ -1,5 +1,5 @@
 import socket
-from splat_trainer.util.deploy import shutdown_all_workers, shutdown_all, get_connect_keys, read_config
+from splat_trainer.multirun.deploy import shutdown_all_workers, shutdown_all, get_connect_keys, read_config
 from pathlib import Path
 
 

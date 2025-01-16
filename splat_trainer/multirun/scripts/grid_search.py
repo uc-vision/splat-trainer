@@ -65,7 +65,7 @@ OmegaConf.register_new_resolver(
 
 
 
-@hydra.main(config_path="../config", version_base="1.2", config_name="grid_search")
+@hydra.main(config_path="../../config", version_base="1.2", config_name="grid_search")
 def main(cfg : DictConfig) -> None:
   dataset_cfg = find_dataset_config(cfg.test_scene, cfg.test_datasets)
   OmegaConf.update(cfg, "dataset", dataset_cfg, force_add=True)

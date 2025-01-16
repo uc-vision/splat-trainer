@@ -13,7 +13,7 @@ config.add_resolvers()
 
 OmegaConf.register_new_resolver("format", lambda x: f"{x:04d}")
 
-@hydra.main(config_path="../config", version_base="1.2", config_name="bayesian_optimize")
+@hydra.main(config_path="../../config", version_base="1.2", config_name="bayesian_optimize")
 def main(cfg : DictConfig) -> None:
   
   sweeper_params = HydraConfig.get().sweeper.params

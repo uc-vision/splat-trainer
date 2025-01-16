@@ -21,7 +21,7 @@ from hydra.core.utils import JobReturn, JobStatus
 from hydra.experimental.callback import Callback
 from omegaconf import DictConfig, OmegaConf
 
-from splat_trainer.util.deploy import kill_rq_worker_by_name
+from splat_trainer.multirun.deploy import kill_rq_worker_by_name
 
 
 
