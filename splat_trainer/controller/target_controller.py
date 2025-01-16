@@ -165,6 +165,8 @@ class TargetController(Controller):
     points = self.points
 
     # Some alternative update rule
+    # points.split_score[idx] += rendering.split_score
+    # points.prune_cost[idx] +=  rendering.prune_cost
 
     points.split_score[idx] = exp_lerp(self.config.split_alpha, rendering.split_score, points.split_score[idx])    
     points.prune_cost[idx] = exp_lerp(self.config.prune_alpha, rendering.prune_cost, points.prune_cost[idx])

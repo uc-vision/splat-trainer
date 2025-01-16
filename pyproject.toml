@@ -11,16 +11,20 @@ maintainers = [
 ]
 
 dependencies = [
-  'taichi-splatting >= 0.26.0',
+  'taichi-splatting >= 0.28.0',
   'tqdm',
   'plyfile',
   'pypcd4',
+
   'hydra-core',
   'omegaconf',
   'roma>=1.4',
   'tabulate',
-  'torchmetrics',
   'fused-ssim',
+
+  'python-dispatch',
+  'markdown_strings',
+  
   'opencv-python',
   'pycolmap',
   'scipy',
@@ -28,8 +32,8 @@ dependencies = [
   'wandb',
   'termcolor',
   'debugpy',
-  'wonderwords'
-#  'tinycudann @ git+https://github.com/NVlabs/tiny-cuda-nn/#subdirectory=bindings/torch'
+  'wonderwords',
+  'splatview>=0.2.0',
 ]
 
 
@@ -52,8 +56,10 @@ dependency_links = ["https://pypi.taichi.graphics/simple/"]
 [project.scripts]  # Optional
 splat-trainer = "splat_trainer.scripts.train_scan:main"
 to-colmap = "splat_trainer.scripts.to_colmap:main"
-evaluate-trainer = "splat_trainer.scripts.evaluate:evaluate"
-resume-trainer = "splat_trainer.scripts.evaluate:resume"
+
+eval-checkpoint = "splat_trainer.scripts.checkpoint:evaluate"
+resume-checkpoint = "splat_trainer.scripts.checkpoint:resume"
+vis-checkpoint = "splat_trainer.scripts.checkpoint:visualize"
 
 grid-search-trainer = "splat_trainer.multirun.scripts.grid_search:main"
 bayesian-optimize-trainer = "splat_trainer.multirun.scripts.bayesian_optimize:main"

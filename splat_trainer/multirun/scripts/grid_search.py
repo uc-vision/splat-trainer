@@ -72,9 +72,6 @@ def main(cfg : DictConfig) -> None:
 
   result = train_with_config(cfg)
 
-  # save result to yaml - TODO: use a different wandb logger to upload result too?
-
-
   return result
   
 

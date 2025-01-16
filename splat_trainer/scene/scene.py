@@ -1,11 +1,11 @@
 from abc import ABCMeta, abstractmethod
-from typing import Dict, Tuple
+from typing import Dict, Optional, Tuple
 import torch
 
 from taichi_splatting import Gaussians3D, RasterConfig, Rendering
 from taichi_splatting.perspective import CameraParams
 
-from splat_trainer.camera_table.camera_table import ViewTable
+from splat_trainer.camera_table.camera_table import CameraTable
 from splat_trainer.logger.logger import Logger
 
 
@@ -17,7 +17,7 @@ class GaussianScene(metaclass=ABCMeta):
     raise NotImplementedError
   
   @abstractmethod
-  def render(self, camera_params:CameraParams, config:RasterConfig, cam_idx:torch.Tensor, **options) -> Rendering:
+  def render(self, camera_params:CameraParams, cam_idx:Optional[int], **options) -> Rendering:
     raise NotImplementedError
 
   @abstractmethod
@@ -49,10 +49,10 @@ class GaussianScene(metaclass=ABCMeta):
 class GaussianSceneConfig(metaclass=ABCMeta):
 
   @abstractmethod
-  def from_color_gaussians(self, gaussians:Gaussians3D, camera_table:ViewTable, device:torch.device) -> GaussianScene:
+  def from_color_gaussians(self, gaussians:Gaussians3D, camera_table:CameraTable, device:torch.device) -> GaussianScene:
     raise NotImplementedError
   
   @abstractmethod
-  def from_state_dict(self, state:dict, camera_table:ViewTable) -> GaussianScene:
+  def from_state_dict(self, state:dict, camera_table:CameraTable) -> GaussianScene:
     raise NotImplementedError
 

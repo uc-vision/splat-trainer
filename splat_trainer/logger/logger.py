@@ -45,6 +45,46 @@ class Logger(metaclass=ABCMeta):
   
   
 
+class CompositeLogger(Logger):
+  def __init__(self, *loggers:Logger):
+    self.loggers = list(loggers)
+
+  def add_logger(self, logger:Logger):
+    self.loggers.append(logger)
+
+  def log_evaluations(self, name:str, data:Dict[str, Dict], step:int):
+    for logger in self.loggers:
+      logger.log_evaluations(name, data, step)
+
+  def log_config(self, config:dict):
+    for logger in self.loggers:
+      logger.log_config(config)
+
+  def log_image(self, name:str, image:torch.Tensor, step:int, compressed:bool = True, caption:str | None = None):
+    for logger in self.loggers:
+      logger.log_image(name, image, step=step, compressed=compressed, caption=caption)
+
+  def log_cloud(self, name_str, points:PointCloud, step:int):
+    for logger in self.loggers:
+      logger.log_cloud(name_str, points, step)
+
+  def log_values(self, name:str, data:dict, step:int):
+    for logger in self.loggers:
+      logger.log_values(name, data, step)
+
+  def log_value(self, name:str, value:float, step:int):
+    for logger in self.loggers:
+      logger.log_value(name, value, step)
+
+  def log_histogram(self, name:str, values:torch.Tensor | Histogram, step:int):
+    for logger in self.loggers:
+      logger.log_histogram(name, values, step)
+
+  def close(self):
+    for logger in self.loggers:
+      logger.close()
+      
+
 class NullLogger(Logger):
   def __init__(self):
     pass

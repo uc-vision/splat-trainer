@@ -1,0 +1,5 @@
+# @package _global_
+
+
+viewer:  
+  _target_: splat_trainer.viewer.NilViewerConfig

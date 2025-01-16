@@ -7,7 +7,8 @@ defaults:
   - trainer: default
   - test_datasets: default
   - color_corrector: nil
-  - /hydra/callbacks:
+  - viewer: none
+  - hydra/callbacks:
     - manage_rq_workers
     - average_result
   - override hydra/launcher: rq
@@ -19,6 +20,7 @@ trainer:
   save_output: False
 
   steps: 1000
+
 
 test_scene: ???
 
@@ -38,23 +40,7 @@ hydra:
   sweeper:
     params:
       # test_scene: scan_1457_east, scan_23, bonsai, scan_1457_west, room, scan_21, bicycle, counter, flowers, garden, kitchen, stump, treehill
-      # trainer.load_dataset_cloud: True, False
-      # trainer.add_initial_points: True, False
-
-      # trainer.add_initial_points: False, True  # if true, add extra random points to the point cloud
-
-      # trainer.reg_loss_weight: choice([1, 1, 1], [0, 0, 0], [1, 0, 0], [0, 1, 0], [0, 0, 1], [1, 1, 0], [1, 0, 1], [0, 1, 1])
-      # scene: sh, tcnn
-      # trainer.reg_loss_weight: choice([1,0,0], [0,0,1], [1,1,0], [0,1,1])
-      # trainer.reg_loss_weight: choice([1,0,0], [0,0,1])
-      # color_corrector: nil, bilateral
       test_scene: scan_23, scan_1457_west, scan_1457_east
-      # trainer.scene.parameters.log_scaling.lr: choice(0.05077193002287146, 0.04905011407053165)
-      # trainer.num_neighbors: 3, 4
-      # trainer.initial_alpha: 0.2, 0.3
-      # trainer.initial_point_scale: 0.2, 0.3, 0.4
-      # test_scene: scan_21, scan_1457_west, treehill, kitchen, counter, flowers, bonsai, scan_23, room
-
 
 optimize_algorithm: grid_search
 
@@ -63,5 +49,5 @@ group_name: ${group_name:${hydra:overrides.task}}
 run_name: ${conditional_run_name:${optimize_algorithm},${group_name},${format:${hydra:job.num}},${run_name:${hydra:overrides.task}}}
 
 
-wait_exit: False
+
 debug: False

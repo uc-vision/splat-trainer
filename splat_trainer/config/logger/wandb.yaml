@@ -6,4 +6,4 @@ logger:
   project: ${..project}
   name: ${..run_name}
   group: ${..group_name}
-  
+

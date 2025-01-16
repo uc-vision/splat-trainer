@@ -1,10 +1,10 @@
 
 from dataclasses import dataclass, replace
-from typing import Dict, Tuple
+from typing import Any, Dict, Tuple
 
 import torch
 
-from splat_trainer.config import LogLinear, Varying, VaryingFloat, eval_varying, schedule_lr
+from splat_trainer.config import VaryingFloat, eval_varying, schedule_lr
 from taichi_splatting import Rendering
 from .corrector import CorrectorConfig, Corrector
 
@@ -26,6 +26,12 @@ class BilateralCorrectorConfig(CorrectorConfig):
   
   def make_corrector(self, num_images:int, device:torch.device) -> Corrector:
     return BilateralCorrector(self, num_images, device)
+  
+  def from_state_dict(self, state_dict:dict, device:torch.device) -> Corrector:
+    corrector = BilateralCorrector(self, state_dict['num_images'], device)
+    corrector.bil_grids.load_state_dict(state_dict['bil_grids'])
+    corrector.bil_grid_optimizer.load_state_dict(state_dict['optimizer'])
+    return corrector
 
 # @torch.compile
 def correct_grid(bil_grids:BilateralGrid, image:torch.Tensor, image_idx:int) -> torch.Tensor:
@@ -75,7 +81,10 @@ class BilateralCorrector(Corrector):
     return {'tv_loss': tvloss.item()}
 
 
-     
+  def state_dict(self) -> Dict[str, Any]:
+    return dict(bil_grids=self.bil_grids.state_dict(),
+                optimizer=self.bil_grid_optimizer.state_dict())
+
 
 
 
