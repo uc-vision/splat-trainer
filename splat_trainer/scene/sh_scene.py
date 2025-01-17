@@ -19,7 +19,8 @@ from splat_trainer.scene.util import parameters_from_gaussians, pop_raster_confi
 from splat_trainer.util.misc import   rgb_to_sh
 
 import taichi_splatting.optim as optim
-from taichi_splatting.optim import ParameterClass, VisibilityOptimizer
+from taichi_splatting.optim import ParameterClass
+from taichi_splatting.optim.visibility_aware import VisibilityOptimizer
 from taichi_splatting import Gaussians3D, RasterConfig, render_gaussians, Rendering
 from taichi_splatting.perspective import CameraParams
 

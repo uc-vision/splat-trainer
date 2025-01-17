@@ -17,7 +17,8 @@ from splat_trainer.scene.scene import GaussianSceneConfig, GaussianScene
 from splat_trainer.gaussians.split import point_basis, split_gaussians_uniform
 
 import taichi_splatting.optim as optim
-from taichi_splatting.optim import ParameterClass, VisibilityOptimizer
+from taichi_splatting.optim import ParameterClass
+from taichi_splatting.optim.visibility_aware import VisibilityOptimizer
 from taichi_splatting import Gaussians3D, Rendering, TaichiQueue
 
 from taichi_splatting.renderer import render_projected, project_to_image
