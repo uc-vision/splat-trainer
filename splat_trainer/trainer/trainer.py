@@ -399,19 +399,17 @@ class Trainer(Dispatcher):
 
     # Use the 3d scale of the points but scaled according the size in-camera 
     # (dividing by focal length to be independent of image size)
-    scale = self.scene.gaussians.scale[points.idx] / points.depths
 
-    scale_term =  scale.pow(2)
-    aspect_term = (scale.max(-1).values / (scale.min(-1).values + 1e-6))
-    opacity_term = points.opacity
+    norm_scale =  (self.scene.gaussians.scale[points.idx] / points.depths).pow(2)
+    aspect_term = (norm_scale.max(-1).values / (norm_scale.min(-1).values + 1e-6))
 
-    scale, opacity, aspect = [eval_varying(x, self.progress) 
+    scale_weight, opacity_weight, aspect_weight = [eval_varying(x, self.progress) 
           for x in [self.config.scale_reg, self.config.opacity_reg, self.config.aspect_reg]]
     
     regs = dict(
-      scale_reg     =  (points.visibility .unsqueeze(1) * scale_term).mean() * scale,
-      opacity_reg   =  (points.visibility  * opacity_term).mean() * opacity,  
-      aspect_reg    =  (points.visibility  * aspect_term).mean() * aspect
+      scale_reg     =  (points.visibility .unsqueeze(1) * norm_scale).mean() * scale_weight,
+      opacity_reg   =  (points.visibility  * points.opacity).mean() * opacity_weight,  
+      aspect_reg    =  (points.visibility  * aspect_term).mean() * aspect_weight
     )
 
 

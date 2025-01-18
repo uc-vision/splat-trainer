@@ -107,7 +107,6 @@ def cfg_from_args():
 
   # Training group
   if args.target_points is not None:
-    overrides.append("controller=target")
     overrides.append(f"trainer.target_points={args.target_points}")
 
 
