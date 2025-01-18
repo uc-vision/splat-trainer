@@ -1,0 +1,3 @@
+[submodule "taichi-splatting"]
+	path = taichi-splatting
+	url = git@github.com:uc-vision/taichi-splatting.git
