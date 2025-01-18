@@ -9,12 +9,13 @@ import torch
 
 from splat_trainer.config import eval_varying
 from splat_trainer.controller.point_state import PointState, densify_and_prune, log_histograms
+from splat_trainer.gaussians.split import sample_gaussians
 from splat_trainer.logger.logger import Logger
+from splat_trainer.util.misc import soft_lt
 from .controller import Controller, ControllerConfig
 from splat_trainer.scene import GaussianScene
 
 from splat_trainer.config import Progress, VaryingInt
-
 
 @beartype
 @dataclass
@@ -45,6 +46,8 @@ class TargetConfig(ControllerConfig):
     controller = TargetController(self, scene, logger)
     controller.points.load_state_dict(state_dict['points'])
     return controller
+
+
 
 class TargetController(Controller):
   def __init__(self, config:TargetConfig, 
@@ -95,9 +98,6 @@ class TargetController(Controller):
   def step(self, target_count:int, progress:Progress, log_details:bool=False):
     densify_interval = eval_varying(self.config.densify_prune_interval, progress.t)
 
-    split_mask, prune_mask = self.find_split_prune_indexes(target_count, progress.t)
-
-
     if log_details:
       log_histograms(self.points, self.logger, "step")
 
@@ -111,10 +111,30 @@ class TargetController(Controller):
 
       gc.collect()
       torch.cuda.empty_cache()
+  
+    # else:
+    #   enough_views = self.points.points_in_view > self.config.min_views
+    #   # opacity = torch.sigmoid(self.scene.points['alpha_logit'].data)  
+    #   prune_threshold = torch.quantile(self.points.prune_cost, self.config.prune_rate / 2)
+    #   target = soft_lt(self.points.prune_cost, prune_threshold, margin=16.0)
+
+    #   points = self.scene.points.tensors[enough_views]
+    #   position = points['position'].data
+
+    #   noise_level = target[enough_views] * 10.
+
+    #   # print(noise_level.shape, position.shape)
+    #   noise = torch.randn_like(position) * noise_level.unsqueeze(1)
+    #   position += sample_gaussians(points, noise)
+
 
   def add_rendering(self, image_idx:int, rendering:Rendering):
-    self.points.exp_lerp_heuristics(rendering, split_alpha=0.99, prune_alpha=0.1)
+    # self.points.pow_lerp_heuristics(rendering, split_alpha=0.1, prune_alpha=0.1, k=2)
+    # self.points.exp_lerp_heuristics(rendering, split_alpha=0.99, prune_alpha=0.1)
+    # self.points.lerp_heuristics(rendering, split_alpha=0.1, prune_alpha=0.01)
     self.points.add_in_view(rendering)
+    # self.points.lerp_heuristics(rendering, split_alpha=0.1, prune_alpha=0.1)
+    self.points.add_heuristics(rendering)
 
     
 

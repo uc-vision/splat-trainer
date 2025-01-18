@@ -227,7 +227,8 @@ class TCNNScene(GaussianScene):
   
   @torch.no_grad()
   def add_rendering(self, image_idx:int, rendering:Rendering):
-    self.points.visible[rendering.points_in_view] += rendering.point_visibility
+    points = rendering.points.visible
+    self.points.visible[points.idx] += points.visibility
 
 
   @property
@@ -243,7 +244,7 @@ class TCNNScene(GaussianScene):
   @torch.no_grad()
   def split_and_prune(self, keep_mask, split_idx):
     splits = split_gaussians_uniform(
-      self.points[split_idx].detach(), n=2, random_axis=True)
+      self.points[split_idx].detach(), k=2, random_axis=True)
     self.points = self.points[keep_mask].append_tensors(splits)
 
     # idx = argsort(self.points.position, 0.001)

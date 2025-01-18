@@ -45,7 +45,7 @@ from splat_trainer.visibility import cluster
 from splat_trainer.util.colorize import colorize, get_cv_colormap
 from splat_trainer.util.containers import mean_rows, transpose_rows
 
-from splat_trainer.util.misc import Heap
+from splat_trainer.util.misc import Heap, format_dict
 
 
 from .config import TrainConfig
@@ -263,10 +263,7 @@ class Trainer(Dispatcher):
     image_view = self.load_data(image_view)
 
     camera_params = self.camera_params(image_view.image_idx)
-    # with torch.enable_grad():
-    #   rendering = self.render(camera_params, image_view.image_idx, render_median_depth=True)
-    #   loss, loss_metrics = self.losses(rendering, image_view.image)
-    #   loss.backward()
+
 
     rendering = self.render(camera_params, image_view.image_idx, render_median_depth=True)
     return Evaluation(image_view.filename, rendering.detach(), image_view.image)
@@ -302,7 +299,8 @@ class Trainer(Dispatcher):
         worst.push(-eval.metrics['psnr'], eval)
 
         metrics[eval.filename] = eval.metrics
-        view_features.append(point_clusters.view_features(*eval.rendering.visible))
+        points = eval.rendering.points.visible
+        view_features.append(point_clusters.view_features(points.idx, points.visibility))
         
         pbar.update(1)
         pbar.set_postfix_str(", ".join([f"{k}:{v:.3f}" for k, v in eval.metrics.items()]))
@@ -333,7 +331,7 @@ class Trainer(Dispatcher):
         self.log_evaluation_images(f"{name}_images/{eval_cc.image_id}", eval_cc, log_source=self.step == 0)
 
         pbar.update(1)
-        pbar.set_postfix_str(", ".join([f"{k}:{v:.3f}" for k, v in eval_cc.metrics.items()]))
+        pbar.set_postfix_str(format_dict(eval_cc.metrics, precision=3))
 
 
     self.log_evaluation_table(name, metrics)
@@ -350,7 +348,7 @@ class Trainer(Dispatcher):
     self.logger.log_image(f"{name}/render", eval.rendering.image, 
                     caption=f"{eval.filename} PSNR={eval.psnr:.2f} L1={eval.l1:.2f} ssim={eval.ssim:.2f}")
     self.logger.log_image(f"{name}/depth", 
-        colorize(self.color_map, eval.rendering.ndc_median_depth), caption=eval.filename)
+        colorize(self.color_map, eval.rendering.median_ndc_image), caption=eval.filename)
     
     if log_source:
       self.logger.log_image(f"{name}/image", eval.source_image, caption=eval.filename)
@@ -365,6 +363,8 @@ class Trainer(Dispatcher):
     for k, v in metrics.items():
         self.logger.log_value(f"eval_{name}/{k}", means[k])
         self.logger.log_histogram(f"eval_{name}/{k}_hist", torch.tensor(v))
+
+    self.print(f"{name} step={self.step:<6d} n={self.scene.num_points:<7} {format_dict(means,  precision=3)}")
 
 
   def evaluate(self):
@@ -395,19 +395,23 @@ class Trainer(Dispatcher):
 
 
   def reg_loss(self, rendering:Rendering) -> Tuple[torch.Tensor, dict]:
-    vis = rendering.point_visibility 
+    points = rendering.points.visible
 
-    scale_term =  (rendering.point_scale / rendering.camera.focal_length[0]).pow(2)
-    aspect_term = (rendering.point_scale.max(-1).values / (rendering.point_scale.min(-1).values + 1e-6))
-    opacity_term = rendering.point_opacity
+    # Use the 3d scale of the points but scaled according the size in-camera 
+    # (dividing by focal length to be independent of image size)
+    scale = self.scene.gaussians.scale[points.idx] / points.depths
+
+    scale_term =  scale.pow(2)
+    aspect_term = (scale.max(-1).values / (scale.min(-1).values + 1e-6))
+    opacity_term = points.opacity
 
     scale, opacity, aspect = [eval_varying(x, self.progress) 
           for x in [self.config.scale_reg, self.config.opacity_reg, self.config.aspect_reg]]
     
     regs = dict(
-      scale_reg     =  (vis.unsqueeze(1) * scale_term).mean() * scale,
-      opacity_reg   =  (vis * opacity_term).mean() * opacity,  
-      aspect_reg    =  (vis * aspect_term).mean() * aspect
+      scale_reg     =  (points.visibility .unsqueeze(1) * scale_term).mean() * scale,
+      opacity_reg   =  (points.visibility  * opacity_term).mean() * opacity,  
+      aspect_reg    =  (points.visibility  * aspect_term).mean() * aspect
     )
 
 
@@ -461,17 +465,16 @@ class Trainer(Dispatcher):
   
 
   def log_rendering_histograms(self, rendering:Rendering):
+    points = rendering.points.visible
     
     def log_scale_histogram(name:str, values:torch.Tensor, min_val:float = 1e-12):
       valid = values[values > min_val]
       self.logger.log_histogram(name, torch.log10(valid))
 
-    log_scale_histogram("rendering/log10_prune_cost", rendering.prune_cost, min_val=1e-20)
-    log_scale_histogram("rendering/log10_split_score", rendering.split_score, min_val=1e-10)
-    log_scale_histogram("rendering/log10_max_scale_px", rendering.point_scale, min_val=1e-6)
-    log_scale_histogram("rendering/log10_visibility", rendering.point_visibility, min_val=1e-10)
-
-    self.logger.log_histogram("rendering/points_in_view", rendering.points_in_view)
+    log_scale_histogram("rendering/log10_prune_cost", points.prune_cost, min_val=1e-20)
+    log_scale_histogram("rendering/log10_split_score", points.split_score, min_val=1e-10)
+    log_scale_histogram("rendering/log10_max_scale_px", points.screen_scale, min_val=1e-6)
+    log_scale_histogram("rendering/log10_visibility", points.visibility, min_val=1e-10)
 
 
 
@@ -553,11 +556,6 @@ class Trainer(Dispatcher):
       for k in ["l1", "mse", "ssim", "reg"]:
         if k in values:
           desc.append(f"{k}:{values[k].value:.3f}")
-      
-
-    if "eval_train" in self.logger:
-      psnr, ssim = [self.logger[k].value for k in ["eval_train/psnr", "eval_train/ssim"]]
-      desc.append(f"eval(psnr:{psnr:.3f} ssim:{ssim:.3f})")
 
     self.pbar.set_postfix_str(" ".join(desc))
 

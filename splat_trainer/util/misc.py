@@ -2,13 +2,6 @@ import heapq
 import numpy as np
 import torch
 
-def strided_indexes(subset:int, total:int):
-  if subset > 0:
-    stride = max(total // subset, 1)
-    return torch.arange(0, total, stride).to(torch.long)
-  else:
-    return torch.tensor([])
-
 
 def split_stride(images, stride=0):
   assert stride == 0 or stride > 1, f"val_stride {stride}, must be zero, or greater than 1"
@@ -22,12 +15,34 @@ def split_stride(images, stride=0):
 def next_multiple(x, multiple):
   return x + multiple - x % multiple
 
+def format_dict(d:dict, precision:int=4, align:str="<"):
+  return " ".join([f"{k}: {v:{align}{precision+3}.{precision}g}" for k,v in d.items()])
 
 def sigmoid(x):
   return 1 / (1 + np.exp(-x))
 
 def inverse_sigmoid(x):
   return np.log(x) - np.log(1 - x)
+
+
+def soft_gt(t:torch.Tensor, threshold:float, margin:float=8.0):
+  """ Soft threshold (greater than threshold) using sigmoid.
+  Args:
+    t: tensor to threshold
+    threshold: threshold value (sigmoid is centered at this value)
+    margin: scales width of the sigmoid response (larger margin -> sharper threshold)
+  """  
+  return torch.sigmoid((t - threshold)* margin/threshold)
+
+def soft_lt(t:torch.Tensor, threshold:float, margin:float=8.0):
+  """ Soft threshold (less than threshold) using sigmoid.
+  Args:
+    t: tensor to threshold
+    threshold: threshold value (sigmoid is centered at this value)
+    margin: scales width of the sigmoid response (larger margin -> sharper threshold)
+  """  
+  return 1 - soft_gt(t, threshold, margin)
+
 
 
 sh0 = 0.282094791773878
@@ -83,6 +98,7 @@ class CudaTimer:
   def wrap(self, f, *args, **kwargs):
     with self:
       return f(*args, **kwargs)
+  
   
 
 

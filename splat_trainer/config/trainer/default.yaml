@@ -27,8 +27,7 @@ trainer:
   log_interval: 10
 
   # target point cloud size 
-  target_points: 1000000
-
+  target_points: ${int_mul:1000000,${training_scale}}
 
 
   # Evaluation settings

@@ -5,14 +5,14 @@ from taichi_splatting import Rendering
 import torch
 
 from splat_trainer.controller.point_state import PointState, densify_and_prune
+from splat_trainer.gaussians.split import sample_gaussians
 from splat_trainer.logger.logger import Logger
+from splat_trainer.util.misc import soft_lt
 from .controller import Controller, ControllerConfig
 from splat_trainer.scene import GaussianScene
 
 from taichi_splatting.optim import ParameterClass
-
-from splat_trainer.config import Progress
-
+from splat_trainer.config import Progress, eval_varying, VaryingFloat
 
 def saturate(x:torch.Tensor):
   return 1 - 1/torch.exp(2 * x)
@@ -24,13 +24,16 @@ def saturate(x:torch.Tensor):
 class MCMCConfig(ControllerConfig):
   # base rate (relative to count) to prune points 
   opacity_threshold:float = 0.1
-  prune_interval:int = 100
+  prune_interval:int = 50
 
   min_views:int = 5
 
   max_scale_px:float = 200
 
   min_split_px:float = 0.0
+  noise_level:VaryingFloat = 100.0
+
+  max_prune_rate:float = 0.05
 
 
 
@@ -41,6 +44,8 @@ class MCMCConfig(ControllerConfig):
     controller = MCMCController(self, scene, logger)
     controller.points.load_state_dict(state_dict['points'])
     return controller
+
+
 
 class MCMCController(Controller):
   def __init__(self, config:MCMCConfig, 
@@ -61,7 +66,7 @@ class MCMCController(Controller):
     return f"MCMCController(points={self.points.batch_size[0]})"
 
     
-
+  @torch.no_grad()
   def step(self, target_count:int, progress:Progress, log_details:bool=False):
     points:ParameterClass = self.scene.points
     enough_views = self.points.points_in_view > self.config.min_views
@@ -77,6 +82,8 @@ class MCMCController(Controller):
       n = prune_mask.sum().item()
 
 
+
+
       too_small = self.points.max_scale_px < self.config.min_split_px
       split_score = torch.where(prune_mask | too_small, 0, self.points.split_score)
 
@@ -85,11 +92,21 @@ class MCMCController(Controller):
       self.points = densify_and_prune(self.points, self.scene, split_mask, prune_mask, logger=self.logger)
 
     else:
-      ratio = self.config.opacity_threshold / (opacity + 1e-16)  - 1
-      self.logger.log_histogram("opacity_ratio", ratio)
-      
-      lr_multiplier = torch.where(enough_views, 0.5 + 1.5 * torch.sigmoid(8.0 * ratio), 0.5)
-      self.logger.log_histogram("lr_multiplier", lr_multiplier)
+
+      target = soft_lt(opacity, self.config.opacity_threshold / 2, margin=16.0)
+
+      points = self.scene.points.tensors[enough_views]
+      position = points['position'].data
+
+      noise_level = target[enough_views] * eval_varying(self.config.noise_level, progress.t)
+      noise = torch.randn_like(position) * noise_level.unsqueeze(1)
+      position += sample_gaussians(points, noise)
+
+      # mult = 0.5 + 1.5 * target 
+      # mult = torch.where(enough_views, mult, 1.0)
+
+      # self.scene.points.update_group('position', point_lr=mult)
+
 
       
   def add_rendering(self, image_idx:int, rendering:Rendering):

@@ -9,7 +9,7 @@ trainer:
     prune_rate: 0.03
 
     # maximum split rate (relative to count when count is less than target)
-    max_split_rate: 0.04
+    max_split_rate: 0.00
 
     # minimum number of times point is in view before it is able to be pruned
     min_views: 5
@@ -22,5 +22,5 @@ trainer:
       start: 50
       steps:
         - [0.2, 100]
-        - [0.5, 200]
+        # - [0.5, 200]
       scale: ${training_scale}

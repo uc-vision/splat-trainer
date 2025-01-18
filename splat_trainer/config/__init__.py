@@ -1,8 +1,8 @@
 from abc import abstractmethod, ABCMeta
 
-from dataclasses import asdict, dataclass, fields, replace
+from dataclasses import dataclass, fields, replace
 import math
-from os import PathLike, path
+from os import path
 from omegaconf import OmegaConf 
 
 import termcolor
@@ -12,6 +12,7 @@ from typing import Generic, Mapping, Protocol, Sequence, Tuple, TypeVar, runtime
 from beartype import beartype
 
 from torch.optim import Optimizer
+
 
 @runtime_checkable
 class IsDataclass(Protocol):

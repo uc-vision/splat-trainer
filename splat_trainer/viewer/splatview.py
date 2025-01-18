@@ -200,7 +200,7 @@ class SplatviewViewer(Viewer):
 
 
     rendering = self.trainer.render(camera_params, image_idx=img_idx, render_median_depth=True)
-    return rendering.image.detach().cpu().numpy(), rendering.median_depth.detach().cpu().numpy()
+    return rendering.image.detach().cpu().numpy(), rendering.median_depth_image.detach().cpu().numpy()
   
 
 

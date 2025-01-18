@@ -54,11 +54,11 @@ class Projected:
   camera:Camera
 
   xy:torch.Tensor
-  depth:torch.Tensor
+  depths:torch.Tensor
 
   @property
   def scale(self) -> torch.Tensor:
-    return self.camera.focal_length[0] / self.depth[self.visible_mask]
+    return self.camera.focal_length[0] / self.depths[self.visible_mask]
   
   @property
   def visible_mask(self) -> torch.Tensor:
@@ -68,7 +68,7 @@ class Projected:
     return (
       (self.xy[..., 0] >= 0) & (self.xy[..., 0] < w) 
       & (self.xy[..., 1] >= 0) & (self.xy[..., 1] < h) 
-      & (self.depth > near) & (self.depth < far)
+      & (self.depths > near) & (self.depths < far)
     )
 
   
@@ -96,9 +96,9 @@ def point_visibility(cameras:Cameras,
 
   for proj in projections(cameras, points):
     if far_threshold is None:
-      far_threshold = torch.quantile(proj.depth[proj.visible_mask], quantile)
+      far_threshold = torch.quantile(proj.depths[proj.visible_mask], quantile)
 
-    near_mask = proj.visible_mask & (proj.depth < far_threshold)
+    near_mask = proj.visible_mask & (proj.depths < far_threshold)
     vis_counts[near_mask] += 1
   return vis_counts
 

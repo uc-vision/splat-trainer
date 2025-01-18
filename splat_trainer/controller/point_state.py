@@ -3,7 +3,7 @@ from taichi_splatting import Rendering
 import torch
 from splat_trainer.logger.logger import Logger
 from splat_trainer.scene.scene import GaussianScene
-from splat_trainer.util.misc import exp_lerp, lerp
+from splat_trainer.util.misc import exp_lerp, lerp, pow_lerp
 
 from tensordict import tensorclass
 
@@ -33,38 +33,45 @@ class PointState:
 
     def lerp_heuristics(self, rendering:Rendering,
                       split_alpha:float = 0.1, prune_alpha:float = 0.1):
-        in_view_idx = rendering.points_in_view
+        points = rendering.points.visible
 
-        self.split_score[in_view_idx] = lerp(split_alpha, rendering.split_score, self.split_score[in_view_idx])
-        self.prune_cost[in_view_idx] = lerp(prune_alpha, rendering.prune_cost, self.prune_cost[in_view_idx])
+        self.split_score[points.idx] = lerp(split_alpha, points.split_score, self.split_score[points.idx])
+        self.prune_cost[points.idx] = lerp(prune_alpha, points.prune_cost, self.prune_cost[points.idx])
 
 
     def exp_lerp_heuristics(self, rendering:Rendering,
                       split_alpha:float = 0.99, prune_alpha:float = 0.1):
-        in_view_idx = rendering.points_in_view
+        points = rendering.points.visible
 
-        self.split_score[in_view_idx] = exp_lerp(split_alpha, rendering.split_score, self.split_score[in_view_idx])
-        self.prune_cost[in_view_idx] = exp_lerp(prune_alpha, rendering.prune_cost, self.prune_cost[in_view_idx])
+        self.split_score[points.idx] = exp_lerp(split_alpha, points.split_score, self.split_score[points.idx])
+        self.prune_cost[points.idx] = exp_lerp(prune_alpha, points.prune_cost, self.prune_cost[points.idx])
+  
+    def pow_lerp_heuristics(self, rendering:Rendering,
+                      split_alpha:float = 0.1, prune_alpha:float = 0.1, k:float = 0.5):
+        points = rendering.points.visible
+
+        self.split_score[points.idx] = pow_lerp(split_alpha, points.split_score, self.split_score[points.idx], k)
+        self.prune_cost[points.idx] = pow_lerp(prune_alpha, points.prune_cost, self.prune_cost[points.idx], k)
 
 
     def add_heuristics(self, rendering:Rendering):
-        in_view_idx = rendering.points_in_view
+        points = rendering.points.visible
 
-        self.split_score[in_view_idx] += rendering.split_score
-        self.prune_cost[in_view_idx] += rendering.prune_cost
+        self.split_score[points.idx] += points.split_score
+        self.prune_cost[points.idx] += points.prune_cost / points.visibility
 
     def add_in_view(self, rendering:Rendering, far_distance:float = 0.75):
-        in_view_idx = rendering.points_in_view
-        far_points = rendering.point_depth.squeeze(1) > rendering.point_depth.quantile(far_distance)
+        visible = rendering.points.visible
+        far_points = visible.depths.squeeze(1) > visible.depths.quantile(far_distance)
 
         # measure scale of far points in image
-        image_scale_px = rendering.point_scale.max(1).values
+        image_scale_px = visible.screen_scale.max(1).values
         image_scale_px[far_points] = 0.
 
-        self.max_scale_px[in_view_idx] = torch.maximum(self.max_scale_px[in_view_idx], image_scale_px)
-        self.points_in_view[in_view_idx] += 1
+        self.max_scale_px[visible.idx] = torch.maximum(self.max_scale_px[visible.idx], image_scale_px)
+        self.points_in_view[visible.idx] += 1
 
-        self.visibility[in_view_idx] += rendering.point_visibility
+        self.visibility[visible.idx] += visible.visibility
 
     def masked_heuristics(self, min_views:int):
         enough_views = self.points_in_view >= min_views
