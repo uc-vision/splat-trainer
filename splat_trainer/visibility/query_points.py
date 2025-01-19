@@ -86,26 +86,22 @@ def projections(cameras:Cameras, points:torch.Tensor) -> Iterator[Projected]:
     yield Projected(camera, xy, depth)
 
 
+
 @beartype
-def point_visibility(cameras:Cameras, 
-                     points:torch.Tensor, 
-                     far_threshold:Optional[float]=None, 
-                     quantile:float=1.0) -> torch.Tensor:
-  
+def point_visibility(cameras:Cameras, points:torch.Tensor) -> torch.Tensor:
   vis_counts = torch.zeros(points.shape[0], dtype=torch.int32, device=cameras.device)
-
   for proj in projections(cameras, points):
-    if far_threshold is None:
-      far_threshold = torch.quantile(proj.depths[proj.visible_mask], quantile)
-
-    near_mask = proj.visible_mask & (proj.depths < far_threshold)
-    vis_counts[near_mask] += 1
+    vis_counts[proj.visible_mask] += 1
   return vis_counts
 
 
+@beartype
+def camera_counts(cameras:Cameras, points:torch.Tensor) -> torch.Tensor:
+  cam_counts = torch.zeros(cameras.batch_size[0], dtype=torch.int32, device=cameras.device)
+  for i, proj in enumerate(projections(cameras, points)):
+    cam_counts[i] = proj.visible_mask.sum()
 
-
-
+  return cam_counts
 
 @beartype 
 def random_ndc(n, depth_range:Tuple[Number, Number], device=None) -> torch.Tensor:
@@ -144,23 +140,25 @@ def random_points(cameras:Cameras, count:int, weighting:Optional[torch.Tensor]=N
 
 
 
-def balanced_points(cameras:Cameras, count:int, min_overlap:int=4) -> torch.Tensor:
+def balanced_points(cameras:Cameras, count:int, min_overlap:int=4, existing_points:Optional[torch.Tensor]=None) -> Tuple[torch.Tensor, torch.Tensor]:
     """
     Generate random points in cameras, each point is visible in at least min_views cameras.
     Attempt to balance the number of points visible in each camera.
     """
 
+    if existing_points is not None:
+      valid_points = existing_points
+      cam_counts = camera_counts(cameras, valid_points)
+    else:
+      valid_points = torch.empty((0, 3), device=cameras.device)
+      cam_counts = torch.zeros(cameras.batch_size[0], dtype=torch.int32, device=cameras.device)
 
-    valid_points = torch.empty((0, 3), device=cameras.device)
-    cam_counts = torch.zeros(cameras.batch_size[0], dtype=torch.int32, device=cameras.device)
 
     while valid_points.shape[0] < count:
       points = random_points(cameras, count // 8, weighting= 1 / (cam_counts + 1))
       points = points[point_visibility(cameras, points) >= min_overlap]
 
-      for i, proj in enumerate(projections(cameras, points)):
-        cam_counts[i] += proj.visible_mask.sum()
-
+      cam_counts += camera_counts(cameras, points)
       valid_points = torch.cat([valid_points, points])
 
     return valid_points[:count], cam_counts
@@ -175,11 +173,36 @@ def random_cloud(cameras:Cameras, count:int) -> PointCloud:
 
 
 @beartype
-def balanced_cloud(cameras:Cameras, count:int, min_overlap:int=4) -> PointCloud:
-  points, _ = balanced_points(cameras, count, min_overlap)
+def balanced_cloud(cameras:Cameras, count:int, min_overlap:int=4, existing_points:Optional[PointCloud]=None) -> PointCloud:
 
-  colors = torch.rand(count, 3, device=points.device)
+  if existing_points is not None:
+    points, _ = balanced_points(cameras, count, min_overlap, existing_points.points)
+    colors = existing_points.colors[:count]
+    if colors.shape[0] < count:
+      colors = torch.cat([colors, torch.rand(count - colors.shape[0], 3, device=colors.device)])
+
+  else:
+    points, _ = balanced_points(cameras, count, min_overlap)
+    colors = torch.rand(count, 3, device=points.device)
+
   return PointCloud(points, colors, batch_size=(count,))
+
+
+@beartype
+def foreground_visibility(cameras:Cameras, 
+                     points:torch.Tensor, 
+                     far_threshold:Optional[float]=None, 
+                     quantile:float=1.0) -> torch.Tensor:
+  
+  vis_counts = torch.zeros(points.shape[0], dtype=torch.int32, device=cameras.device)
+
+  for proj in projections(cameras, points):
+    if far_threshold is None:
+      far_threshold = torch.quantile(proj.depths[proj.visible_mask], quantile)
+
+    near_mask = proj.visible_mask & (proj.depths < far_threshold)
+    vis_counts[near_mask] += 1
+  return vis_counts
 
 
 
@@ -187,7 +210,7 @@ def balanced_cloud(cameras:Cameras, count:int, min_overlap:int=4) -> PointCloud:
 def foreground_points(cameras:Cameras, points:torch.Tensor, 
                       far_threshold:Optional[float]=None, quantile:float=0.25, min_overlap:float=0.01) -> torch.Tensor:
   
-  near_counts = point_visibility(cameras, points, far_threshold, quantile=quantile)
+  near_counts = foreground_visibility(cameras, points, far_threshold, quantile=quantile)
   num_views = cameras.batch_size[0]
 
   return near_counts > (min_overlap * num_views)

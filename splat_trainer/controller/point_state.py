@@ -1,6 +1,7 @@
 from typing import Optional
 from taichi_splatting import Rendering
 import torch
+from splat_trainer.gaussians.split import clone_points
 from splat_trainer.logger.logger import Logger
 from splat_trainer.scene.scene import GaussianScene
 from splat_trainer.util.misc import exp_lerp, lerp, pow_lerp
@@ -31,53 +32,35 @@ class PointState:
         )
 
 
-    def lerp_heuristics(self, rendering:Rendering,
-                      split_alpha:float = 0.1, prune_alpha:float = 0.1):
-        points = rendering.points.visible
 
-        self.split_score[points.idx] = lerp(split_alpha, points.split_score, self.split_score[points.idx])
-        self.prune_cost[points.idx] = lerp(prune_alpha, points.prune_cost, self.prune_cost[points.idx])
-
-
-    def exp_lerp_heuristics(self, rendering:Rendering,
-                      split_alpha:float = 0.99, prune_alpha:float = 0.1):
-        points = rendering.points.visible
-
-        self.split_score[points.idx] = exp_lerp(split_alpha, points.split_score, self.split_score[points.idx])
-        self.prune_cost[points.idx] = exp_lerp(prune_alpha, points.prune_cost, self.prune_cost[points.idx])
-  
-    def pow_lerp_heuristics(self, rendering:Rendering,
-                      split_alpha:float = 0.1, prune_alpha:float = 0.1, k:float = 0.5):
-        points = rendering.points.visible
-
-        self.split_score[points.idx] = pow_lerp(split_alpha, points.split_score, self.split_score[points.idx], k)
-        self.prune_cost[points.idx] = pow_lerp(prune_alpha, points.prune_cost, self.prune_cost[points.idx], k)
-
-
-    def add_heuristics(self, rendering:Rendering):
-        points = rendering.points.visible
-
-        self.split_score[points.idx] += points.split_score
-        self.prune_cost[points.idx] += points.prune_cost / points.visibility
-
-    def add_in_view(self, rendering:Rendering, far_distance:float = 0.75):
-        visible = rendering.points.visible
-        far_points = visible.depths.squeeze(1) > visible.depths.quantile(far_distance)
+    def add_rendering(self, rendering:Rendering, far_distance:float = 0.75, 
+                      split_alpha:float = 0.01, prune_alpha:float = 0.9):
+        points = rendering.points
+        far_points = points.depths.squeeze(1) > points.depths.quantile(far_distance)
 
         # measure scale of far points in image
-        image_scale_px = visible.screen_scale.max(1).values
+        image_scale_px = points.screen_scale.max(1).values
         image_scale_px[far_points] = 0.
 
-        self.max_scale_px[visible.idx] = torch.maximum(self.max_scale_px[visible.idx], image_scale_px)
-        self.points_in_view[visible.idx] += 1
+        self.max_scale_px[points.idx] = torch.maximum(self.max_scale_px[points.idx], image_scale_px)
+        self.points_in_view[points.idx] += 1
 
-        self.visibility[visible.idx] += visible.visibility
+        self.visibility[points.idx] += points.visibility
+
+        # self.split_score[points.idx] = pow_lerp(split_alpha, self.split_score[points.idx], points.split_score, k=6)
+        # self.prune_cost[points.idx] = lerp(prune_alpha, self.prune_cost[points.idx], points.prune_cost)
+        
+
+        # self.split_score[points.idx] = max_decaying(split_alpha, self.split_score[points.idx], points.split_score)
+        self.split_score[points.idx] = exp_lerp(split_alpha, self.split_score[points.idx], points.split_score)
+        self.prune_cost[points.idx] = exp_lerp(prune_alpha, self.prune_cost[points.idx], points.prune_cost)
 
     def masked_heuristics(self, min_views:int):
         enough_views = self.points_in_view >= min_views
-        return torch.where(enough_views, self.prune_cost, torch.inf), torch.where(enough_views, self.split_score, 0.)
+        return torch.where(enough_views, self.prune_cost, torch.inf), self.split_score #torch.where(enough_views, self.split_score, 0.)
 
 
+    
 
 
 def log_histograms(points: PointState, logger: Logger, name: str = "densify"):
@@ -125,4 +108,6 @@ def densify_and_prune(points:PointState, scene:GaussianScene, split_mask:torch.T
         logger.log_values("densify", metrics)
         log_histograms(points, logger, "densify")
 
-    return torch.cat([points[keep_mask], PointState.new_zeros(n_split * 2, device=device)])
+    new_points = PointState.new_zeros(n_split * 2, device=device)
+
+    return torch.cat([points[keep_mask], new_points])

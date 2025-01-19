@@ -1,3 +1,4 @@
+from beartype import beartype
 import numpy as np
 from scipy.spatial import cKDTree
 import torch
@@ -8,6 +9,7 @@ from splat_trainer.util.pointcloud import PointCloud
 
 
 from taichi_splatting import Gaussians3D
+from pykeops.torch import LazyTensor
   
 
 def from_pointcloud(pcd:PointCloud, 
@@ -36,11 +38,23 @@ def to_pointcloud(gaussians:Gaussians3D) -> PointCloud:
     colors=gaussians.feature
   )
   
-def estimate_scale(pointcloud : PointCloud, num_neighbors:int = 3):
-  points = pointcloud.points.cpu().numpy()
-  tree = cKDTree(points)
 
-  dist, idx = tree.query(points, k=num_neighbors + 1, workers=-1)
+
+
+def estimate_scale(pointcloud : PointCloud, num_neighbors:int = 3):
+  """ Give the mean distance to num_neighbors nearest neighbors """
+  points = pointcloud.points
+  N, D = points.shape
+
+  x_i = LazyTensor(points.view(N, 1, D))  # (N, 1, D) samples
+  x_j = LazyTensor(points.view(1, N, D))  # (1, N, D) samples
+
+  # Compute pairwise squared distances
+  D_ij = ((x_i - x_j) ** 2).sum(-1)  # (N, N) symbolic squared distances
   
-  distance = np.mean(dist[:, 1:], axis=1)
-  return torch.from_numpy(distance).to(torch.float32)
+  # Get k nearest neighbors distances (k = num_neighbors)
+  # Sort distances and take mean of k nearest (excluding self)
+  knn_dists = D_ij.Kmin(num_neighbors + 1, dim=1)  # +1 to account for self
+  scales = knn_dists[:, 1:].sqrt().mean(dim=1)  # Skip first (self) distance
+  
+  return scales

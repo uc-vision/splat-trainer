@@ -11,7 +11,7 @@ from splat_trainer.config import eval_varying
 from splat_trainer.controller.point_state import PointState, densify_and_prune, log_histograms
 from splat_trainer.gaussians.split import sample_gaussians
 from splat_trainer.logger.logger import Logger
-from splat_trainer.util.misc import soft_lt
+from splat_trainer.util.misc import lerp, exp_lerp, pow_lerp
 from .controller import Controller, ControllerConfig
 from splat_trainer.scene import GaussianScene
 
@@ -58,7 +58,8 @@ class TargetController(Controller):
     self.logger = logger
 
     self.points = PointState.new_zeros(scene.num_points, device=scene.device)
-
+    self.densify_interval = eval_varying(self.config.densify_prune_interval, 0.)
+    self.next_densify = self.densify_interval
 
   def __repr__(self):
     return f"TargetController(points={self.points.batch_size[0]})"
@@ -73,18 +74,15 @@ class TargetController(Controller):
     n = self.points.batch_size[0]
 
     exceeds_scale = self.points.max_scale_px > config.max_scale_px
-    num_large = exceeds_scale.sum().item()
-
     prune_schedule = math.ceil(config.prune_rate * n * (1 - t))
 
     prune_cost, split_score = self.points.masked_heuristics(config.min_views)
-    prune_mask = take_n(prune_cost, prune_schedule - num_large, descending=False) | exceeds_scale
-                  
-    target_split = int(min(config.max_split_rate * n, (target_count - n) + prune_schedule)) 
+    
+    prune_mask = take_n(prune_cost, prune_schedule, descending=False) | exceeds_scale                  
+    target_split = int(min(config.max_split_rate * n, (target_count - n) + prune_mask.sum().item())) 
 
     split_score = self.points.split_score 
     split_score[prune_mask] = 0.
-
 
     if self.config.min_split_px > 0:
       # if min split is enabled, only split points above the threshold size
@@ -92,26 +90,28 @@ class TargetController(Controller):
       split_score[too_small] = 0.
 
     split_mask = take_n(split_score, target_split, descending=True)
-    return split_mask, prune_mask
+
+    both = (split_mask & prune_mask)
+    return split_mask ^ both, prune_mask ^ both
 
 
   def step(self, target_count:int, progress:Progress, log_details:bool=False):
-    densify_interval = eval_varying(self.config.densify_prune_interval, progress.t)
 
     if log_details:
       log_histograms(self.points, self.logger, "step")
 
-    if progress.step % densify_interval == 0:
+    if progress.step >= self.next_densify:
     
       split_mask, prune_mask = self.find_split_prune_indexes(target_count, progress.t)
       densify_and_prune(self.points, self.scene, split_mask, prune_mask, self.logger)
-
-      # reset points
+      
       self.points = PointState.new_zeros(self.scene.num_points, device=self.scene.device)
+  
+      self.densify_interval =  eval_varying(self.config.densify_prune_interval, progress.t)
+      self.next_densify = progress.step + self.densify_interval
 
       gc.collect()
-      torch.cuda.empty_cache()
-  
+      torch.cuda.empty_cache()      
     # else:
     #   enough_views = self.points.points_in_view > self.config.min_views
     #   # opacity = torch.sigmoid(self.scene.points['alpha_logit'].data)  
@@ -129,20 +129,16 @@ class TargetController(Controller):
 
 
   def add_rendering(self, image_idx:int, rendering:Rendering):
-    # self.points.pow_lerp_heuristics(rendering, split_alpha=0.1, prune_alpha=0.1, k=2)
-    # self.points.exp_lerp_heuristics(rendering, split_alpha=0.99, prune_alpha=0.1)
-    # self.points.lerp_heuristics(rendering, split_alpha=0.1, prune_alpha=0.01)
-    self.points.add_in_view(rendering)
-    # self.points.lerp_heuristics(rendering, split_alpha=0.1, prune_alpha=0.1)
-    self.points.add_heuristics(rendering)
+    self.points.add_rendering(rendering)
 
-    
 
 
 
 @beartype
 def take_n(t:torch.Tensor, n:int, descending=False):
   """ Return mask of n largest or smallest values in a tensor."""
+
+  assert n >= 0, f"n must be >= 0, got {n}"
   idx = torch.argsort(t, descending=descending)[:n]
 
   # convert to mask

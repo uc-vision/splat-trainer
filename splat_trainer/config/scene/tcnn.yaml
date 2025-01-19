@@ -21,7 +21,7 @@ trainer:
         lr: 0.1
 
       feature:
-        lr:  5.0 
+        lr:  5.0
         type: vector
 
 

@@ -13,11 +13,12 @@ trainer:
     _target_: splat_trainer.trainer.CloudInitConfig
     num_neighbors: 5
     initial_alpha: 0.2
-    initial_point_scale: 1.0
-    initial_points: 200000
+    initial_point_scale: 0.2
+
+    initial_points: null  
     limit_points: null
-    add_initial_points: False  # if true, add extra random points to the point cloud
-    load_dataset_cloud: True  # if false, use a random point cloud
+
+    min_point_overlap: 8 # minimum number of views a point must be visible in when adding random points
 
 
 
@@ -44,7 +45,7 @@ trainer:
 
   scale_reg: ${log_decay:0.01, 0.001}
   opacity_reg: ${log_decay:0.001, 0.001}
-  aspect_reg: 0.0001
+  # aspect_reg: 0.0001
 
   # view similarity
   vis_clusters: 1024

@@ -300,7 +300,7 @@ class TCNNScene(GaussianScene):
       return self.color_model(feature, self.points.position[point_indexes], 
                                                         camera_params.camera_position, glo_feature)
 
-  def query_visibility(self, camera_params:CameraParams):
+  def query_visibility(self, camera_params:CameraParams) -> tuple[torch.Tensor, torch.Tensor]:
     config = RasterConfig(compute_visibility=True)
     
     gaussians2d, depth, indexes = project_to_image(self.gaussians, camera_params, config)
@@ -308,12 +308,14 @@ class TCNNScene(GaussianScene):
     rendering = render_projected(indexes, gaussians2d, feature, depth, 
                             camera_params, config)
     
-    return rendering.visible
+    visible = rendering.points.visible
+    return visible.idx, visible.visibility
 
 
   def evaluate_sh_features(self):
       def eval_colors(point_indexes, camera_params, image_idx):
-        return self.eval_colors(point_indexes, camera_params, image_idx).sigmoid()
+        return self.color_model.activation(
+          self.eval_colors(point_indexes, camera_params, image_idx))
 
       glo_features = self.lookup_glo_feature(torch.arange(self.camera_table.num_images, device=self.device))
       return transfer_sh(eval_colors, self.query_visibility, self.camera_table, 
@@ -350,7 +352,7 @@ class TCNNScene(GaussianScene):
                             camera_params, config, **options)
     
 
-    rendering = replace(rendering, image = rendering.image.sigmoid())
+    rendering = replace(rendering, image = self.color_model.activation(rendering.image))
     return rendering
     
 

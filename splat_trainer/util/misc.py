@@ -55,30 +55,23 @@ def rgb_to_sh(rgb):
 def sh_to_rgb(sh):
     return sh * sh0 + 0.5
 
-@torch.compile
-def log_lerp(t, a, b):
-  return torch.exp(torch.lerp(torch.log(a), torch.log(b), t))
 
 @torch.compile
-def inv_lerp(t, a, b):
-  return 1 / (torch.lerp(1/a, 1/b, t))
+def inv_lerp(t:float | torch.Tensor, a:torch.Tensor, b:torch.Tensor) -> torch.Tensor:
+  return 1 / (lerp(1/a, 1/b, t))
 
 @torch.compile
-def exp_lerp(t, a, b):
+def exp_lerp(t:float | torch.Tensor, a:torch.Tensor, b:torch.Tensor) -> torch.Tensor:
     max_ab = torch.maximum(a, b)
-    return max_ab + torch.log(torch.lerp(torch.exp(a - max_ab), torch.exp(b - max_ab), t))
+    return max_ab + torch.log(lerp(t, torch.exp(a - max_ab), torch.exp(b - max_ab)))
 
 @torch.compile
-def pow_lerp(t, a, b, k=2):
-    return (a ** k + (b ** k - a ** k) * t) ** (1 / k)
+def pow_lerp(t:float | torch.Tensor, a:torch.Tensor, b:torch.Tensor, k:float=2) -> torch.Tensor:
+    return lerp(t, a**k, b**k)**(1/k)
 
-@torch.compile
-def lerp(t, a, b):
-  return a + (b - a) * t
+def lerp(t:float | torch.Tensor, a:torch.Tensor, b:torch.Tensor) -> torch.Tensor:
+  return torch.lerp(a, b, t)
 
-@torch.compile
-def max_decaying(x, t, decay):
-  return x * (1 - decay) + torch.maximum(x, t) * decay
 
 
 class CudaTimer:

@@ -143,11 +143,116 @@ class NullLogger(Logger):
 
 
 
-@dataclass
 class StepValue:
-  step:int
-  value:Any
+  def __init__(self, step: int, value: float):
+    self.step = step
+    self.value = value
 
+
+
+class StateTree:
+  def __init__(self):
+    self._data = {}
+
+  def get_leaf(self, parts: list[str]) -> Any:
+    node = self._data
+    for key in parts:
+      node = node[key]
+    return node
+
+  def _get_parent_and_key(self, parts: list[str]) -> tuple[dict, str]:
+    node = self._data
+    for key in parts[:-1]:
+      if not isinstance(node.get(key, {}), dict):
+        raise ValueError(f"Path conflict: '{'/'.join(parts)}' tries to traverse through '{key}' which is a leaf value")
+      if key not in node:
+        node[key] = {}
+      node = node[key]
+    return node, parts[-1]
+
+  def update_leaf(self, parts: list[str], default: Any, update_fn) -> Any:
+    parent, key = self._get_parent_and_key(parts)
+    if isinstance(parent.get(key, {}), dict) and parent[key]:
+      raise ValueError(f"Path conflict: Cannot replace subtree at '{'/'.join(parts)}' with a leaf value")
+    parent[key] = update_fn(parent.get(key, default))
+    return parent[key]
+
+  def set_leaf(self, parts: list[str], value: Any) -> Any:
+    return self.update_leaf(parts, value, lambda x: value)
+
+  def has_path(self, parts: list[str]) -> bool:
+    try:
+      self.get_leaf(parts)
+      return True
+    except KeyError:
+      return False
+    
+  def flatten(self) -> dict:
+    result = {}
+    def flatten_dict(prefix: list[str], node: dict):
+        for key, value in node.items():
+            path = prefix + [key]
+            if isinstance(value, dict):
+                flatten_dict(path, value)
+            else:
+                result["/".join(path)] = value
+    
+    flatten_dict([], self._data)
+    return result
+
+
+class StateLogger(NullLogger):
+  def __init__(self):
+    self._tree = StateTree()
+    self.current_step = 0
+
+  def __getitem__(self, path: str) -> dict | StepValue:
+    return self._tree.get_leaf(path.split("/"))
+
+  def __contains__(self, path: str) -> bool:
+    return self._tree.has_path(path.split("/"))
+
+  def step(self, progress: Progress):
+    self.current_step = progress.step
+
+  def log_config(self, config: dict):
+    self._tree._data["config"] = config
+  
+  def log_values(self, name: str, data: dict[str, float]):
+    for key, value in data.items():
+      self.log_value(f"{name}/{key}", value)
+
+  def log_value(self, name: str, value: float):
+    self._tree.set_leaf(name.split("/"), StepValue(self.current_step, value))
+
+  def flatten(self) -> dict:
+    return self._tree.flatten()
+
+class HistoryLogger(NullLogger):
+  def __init__(self):
+    self._tree = StateTree()
+
+  def __getitem__(self, path: str) -> dict | list[float]:
+    return self._tree.get_leaf(path.split("/"))
+
+  def __contains__(self, path: str) -> bool:
+    return self._tree.has_path(path.split("/"))
+
+  def step(self, progress: Progress):
+    pass
+
+  def log_config(self, config: dict):
+    self._tree._data["config"] = config
+  
+  def log_values(self, name: str, data: dict[str, float]):
+    for key, value in data.items():
+      self.log_value(f"{name}/{key}", value)
+
+  def log_value(self, name: str, value: float):
+    self._tree.update_leaf(name.split("/"), [], lambda l: l + [value])
+
+  def flatten(self) -> dict:
+    return self._tree.flatten()
 
 
 class LoggerWithState(CompositeLogger):
@@ -165,74 +270,3 @@ class LoggerWithState(CompositeLogger):
   def __contains__(self, path:str) -> bool:
     return path in self.state
   
-
-class StateLogger(NullLogger):
-  def __init__(self):
-    self.state = {}
-    self.current_step = 0
-
-
-  def _getitem(self, path:str) -> StepValue | dict:
-    d = self.state
-
-    paths = path.split("/")
-    for i, key in enumerate(paths):
-      if key not in d:
-        context = "at top level" if i == 0 else f"under path {paths[:i]}"
-        raise KeyError(f"{key} not found {context}, options are {d.keys()}")
-      
-      d = d[key]
-    return d
-  
-  def _getvalue(self, path:str) -> StepValue:
-    d = self._getitem(path)
-    if isinstance(d, StepValue):
-      return d
-    else:
-      raise KeyError(f"Expected a value at {path}, got category")
-
-
-  def get_value(self, path:str, default:Any = None) -> Any:
-    try:    
-      return self._getvalue(path).value 
-    except KeyError:
-      return default
-  
-  def __getitem__(self, path:str) -> dict | StepValue:
-    return self._getitem(path)
-
-  def __contains__(self, path:str) -> bool:
-    try:
-      self._getitem(path)
-      return True
-    except KeyError:
-      return False
-    
-  
-
-  def step(self, progress:Progress):
-    self.current_step = progress.step
-
-  def log_config(self, config:dict):
-    self.state["config"] = config
-  
-  def log_values(self, name:str, data:dict):
-    for key, value in data.items():
-      self.log_value(f"{name}/{key}", value)
-
-  def log_value(self, name:str, value:Any):
-    path = name.split("/")
-
-    d = self.state
-    for i, key in enumerate(path[:-1]):
-      if isinstance(d, StepValue):
-        raise ValueError(f"Inconsistent path, previously {path[:i]} was logged as a value")
-      
-      if key not in d:
-        d[key] = {}
-      d = d[key]
-    
-    d[path[-1]] = StepValue(self.current_step, value)
-      
-
-

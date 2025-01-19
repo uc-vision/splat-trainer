@@ -37,16 +37,14 @@ def evaluate_with_training(trainer:Trainer, train:bool) -> dict:
     pbar = tqdm(trainer.dataset.train(shuffle=True), desc="Training")
     with torch.enable_grad():
       for camera_view in pbar:
-        camera_view = trainer.load_data(camera_view)      
-        metrics = trainer.training_step([camera_view])
-
-        metrics = {k:f"{v:.4f}" for k, v in metrics.items() if k in ['l1', 'ssim', 'reg', 't']}
-        pbar.set_postfix(**metrics)
+        camera_view = trainer.load_data(camera_view)   
+           
+        trainer.training_step([camera_view])
+        trainer.update_progress()
 
 
   train = trainer.dataset.train(shuffle=False)
   metrics = [eval.metrics for eval in tqdm(trainer.evaluations(train), desc="Evaluating", total=len(train))]
-  return mean_rows(metrics)
 
 
 def show_pruning(trainer:Trainer, cloud:Gaussians3D, prune_mask:torch.Tensor):

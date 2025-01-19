@@ -59,9 +59,10 @@ class ColorModel(torch.nn.Module):
     super().__init__()
 
     self.feature_size = glo_features + point_features
+    self.color_channels = color_channels
     
-    self.color_model = AffineMLP( 
-        inputs=self.feature_size, outputs=color_channels,
+    self.color_model = AffineMLP(
+        inputs=self.feature_size, outputs=color_channels + 1,
         hidden_layers=hidden_layers, 
         hidden=hidden_features,
         sh_degree=sh_degree,
@@ -80,7 +81,21 @@ class ColorModel(torch.nn.Module):
     feature = torch.cat([point_features, glo_feature], dim=1)
 
     dir = F.normalize(positions.detach() - cam_pos.unsqueeze(0), dim=1)
-    return self.color_model(dir, feature).to(torch.float32)
+    features = self.color_model(dir, feature).to(torch.float32)
+
+    n = self.color_channels
+    colors, intensity = features[:, :n], features[:, n:n+1]
+    intensity = intensity.exp()
+
+    colors = colors.sigmoid() * intensity
+    return torch.cat([colors, intensity], dim=1)
+  
+  def activation(self, image:torch.Tensor, eps:float = 1e-6) -> torch.Tensor:
+    n = self.color_channels
+    colors, intensity = image[..., :n], image[..., n:n+1]
+    
+    
+    return colors / (intensity + eps)
   
 
   def optimizer(self, lr_nn:VaryingFloat) -> torch.optim.Optimizer:

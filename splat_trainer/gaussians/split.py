@@ -76,6 +76,14 @@ def split_gaussians(points: TensorDict, k:int=2, scaling:Optional[float]=None) -
   return split_with_offsets(scaled, offsets)
 
 
+def clone_points(points: TensorDict, k:int=2) -> TensorDict:
+  """ Clone gaussians (or any TensorDict) with identical parameters by repeat_interleave
+  """
+
+  return points.apply(
+    partial(torch.repeat_interleave, repeats=k, dim=0), 
+    batch_size=[points.batch_size[0] * k])
+
 def split_gaussians_uniform(points: TensorDict, k:int=2, 
                             scaling:Optional[float]=None, sep:float=0.7, 
                             random_axis:bool=False, 

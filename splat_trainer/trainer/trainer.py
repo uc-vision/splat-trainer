@@ -174,6 +174,11 @@ class Trainer(Dispatcher):
     config = replace(self.config, **kwargs)
     return self.from_state_dict(config, self.dataset, logger or self.logger, trainer)
 
+  def update_config(self, **kwargs):
+    self.config = replace(self.config, **kwargs)
+    
+
+
   @property
   def output_path(self):
     return Path.cwd() 
@@ -246,8 +251,6 @@ class Trainer(Dispatcher):
         ).to(self.device, dtype=torch.float32)
 
 
-  def update_config(self, **kwargs):
-    self.config = replace(self.config, **kwargs)
 
   @beartype
   def render(self, camera_params:CameraParams, image_idx:Optional[int]=None, **options):
@@ -303,7 +306,7 @@ class Trainer(Dispatcher):
         view_features.append(point_clusters.view_features(points.idx, points.visibility))
         
         pbar.update(1)
-        pbar.set_postfix_str(", ".join([f"{k}:{v:.3f}" for k, v in eval.metrics.items()]))
+        pbar.set_postfix_str(", ".join([f"{k}:{v:.4f}" for k, v in eval.metrics.items()]))
 
     for i, (_, eval) in enumerate(worst):
         self.log_evaluation_images(f"{name}_images/worst_{i}", eval, log_source=True)
@@ -346,7 +349,7 @@ class Trainer(Dispatcher):
 
   def log_evaluation_images(self, name:str, eval:Evaluation, log_source:bool=True):
     self.logger.log_image(f"{name}/render", eval.rendering.image, 
-                    caption=f"{eval.filename} PSNR={eval.psnr:.2f} L1={eval.l1:.2f} ssim={eval.ssim:.2f}")
+                    caption=f"{eval.filename} PSNR={eval.psnr:.3f} L1={eval.l1:.2f} ssim={eval.ssim:.2f}")
     self.logger.log_image(f"{name}/depth", 
         colorize(self.color_map, eval.rendering.median_ndc_image), caption=eval.filename)
     
@@ -364,7 +367,7 @@ class Trainer(Dispatcher):
         self.logger.log_value(f"eval_{name}/{k}", means[k])
         self.logger.log_histogram(f"eval_{name}/{k}_hist", torch.tensor(v))
 
-    self.print(f"{name} step={self.step:<6d} n={self.scene.num_points:<7} {format_dict(means,  precision=3)}")
+    self.print(f"{name} step={self.step:<6d} n={self.scene.num_points:<7} {format_dict(means,  precision=4)}")
 
 
   def evaluate(self):
@@ -390,9 +393,6 @@ class Trainer(Dispatcher):
         loss += (1.0 - self.ssim(pred, ref)) 
 
       return loss / levels, ssim.item()
-
-
-
 
   def reg_loss(self, rendering:Rendering) -> Tuple[torch.Tensor, dict]:
     points = rendering.points.visible
@@ -420,46 +420,53 @@ class Trainer(Dispatcher):
     metrics["reg"] = total.item()
     return total, metrics
 
-  def losses(self, rendering:Rendering, image:torch.Tensor):
+  def compute_losses(self, rendering:Rendering, image:torch.Tensor):
     metrics = {}
+    losses = {}
     loss = torch.tensor(0.0, device=self.device)
 
     if self.config.l1_weight > 0:
       l1 = torch.nn.functional.l1_loss(rendering.image, image)
       metrics["l1"] = l1.item()
       loss += l1 * self.config.l1_weight 
+      losses["l1"] = l1.item()
 
     if self.config.mse_weight > 0:
       mse = torch.nn.functional.mse_loss(rendering.image, image)
       metrics["mse"] = mse.item()
       loss += mse * self.config.mse_weight 
+      losses["mse"] = mse.item()
 
     if self.config.ssim_weight > 0:  
       ssim_loss, ssim_metric = self.compute_ssim_loss(rendering.image, image, self.config.ssim_levels)
       loss += ssim_loss * self.config.ssim_weight 
       metrics["ssim"] = ssim_metric
+      losses["ssim"] = ssim_loss.item()
 
     reg_loss, reg_losses = self.reg_loss(rendering)
-    metrics.update(reg_losses)
+    losses.update(reg_losses)
     loss += reg_loss 
 
-    return loss, metrics
+    losses["total"] = loss.item()
 
-  def evaluate_backward_with(self, batch:List[ImageView], f:Callable[[int, Rendering], None]) -> dict:
-    metrics = []
+    if self.step % self.config.log_interval == 0:
+      self.logger.log_values("train/loss", losses)
+      self.logger.log_values("train/metrics", metrics)
+
+    return loss
+
+  def evaluate_backward_with(self, batch:List[ImageView], f:Callable[[int, Rendering], None]):
     for image_view in batch:
 
       camera_params = self.camera_params(image_view.image_idx)
       with torch.enable_grad():
         rendering = self.render(camera_params, image_view.image_idx)
 
-        loss, loss_metrics = self.losses(rendering, image_view.image)
+        loss = self.compute_losses(rendering, image_view.image)
         loss.backward()
 
       f(image_view.image_idx, rendering)
-      metrics.append(loss_metrics)
 
-    return metrics
   
 
   def log_rendering_histograms(self, rendering:Rendering):
@@ -476,7 +483,7 @@ class Trainer(Dispatcher):
 
 
 
-  def training_step(self, batch:List[ImageView], log_details:bool=False) -> dict:
+  def training_step(self, batch:List[ImageView], log_details:bool=False):
 
     @torch.no_grad()
     def f(image_idx:int, rendering:Rendering):
@@ -486,14 +493,12 @@ class Trainer(Dispatcher):
       if log_details:
         self.log_rendering_histograms(rendering)
 
-    metrics = self.evaluate_backward_with(batch, f)
+    self.evaluate_backward_with(batch, f)
     self.step += len(batch)
 
     self.scene.step(self.progress, log_details=log_details)
     self.logger.step(self.progress)
 
-    return dict(**mean_rows(metrics), t = self.progress.t)
-  
 
   def load_data(self, image_view:ImageView) -> ImageView:
 
@@ -538,31 +543,39 @@ class Trainer(Dispatcher):
     self.last_checkpoint = self.step
     torch.cuda.empty_cache()
 
-  def update_progress(self):
-    if self.pbar is None:
-      return
-
-    self.pbar.update(self.progress.step - self.pbar.n)
+  def pbar_metrics(self):
     desc = []
 
     if "densify" in self.logger:
       pruned, split, n = [self.logger[k].value for k in ["densify/prune", "densify/split", "densify/n"]]
       desc.append(f"points(+{split:d} -{pruned:d} = {n:d})")
 
-    if "train" in self.logger:
-      values = self.logger["train"]
-      for k in ["l1", "mse", "ssim", "reg"]:
+    if "train/metrics" in self.logger:
+      values = self.logger["train/metrics"]
+      for k in ["l1", "mse", "ssim"]:
         if k in values:
           desc.append(f"{k}:{values[k].value:.3f}")
 
-    self.pbar.set_postfix_str(" ".join(desc))
+    if "train/loss" in self.logger:
+      values = self.logger["train/loss"]
+      for k in ["l1", "mse", "ssim", "reg", "total"]:
+        if k in values:
+          desc.append(f"{k}:{values[k].value:.3f}")
+
+    return desc
+
+  def update_progress(self):
+    if self.pbar is None:
+      return
+
+    self.pbar.update(self.progress.step - self.pbar.n)
+    self.pbar.set_postfix_str(" ".join(self.pbar_metrics()))
 
 
   def train(self, state:TrainerState = TrainerState.Training):
     self.state = state
 
     self.checkpoint(self.config.save_checkpoints)
-    steps = []
 
     # Create batch loader that loads log_interval batches at a time
     self.loader = ThreadedLoader(self.iter_batches())
@@ -574,11 +587,7 @@ class Trainer(Dispatcher):
           self.checkpoint(self.config.save_checkpoints)
 
       is_logging_step = self.step % self.config.log_interval == 0
-      if is_logging_step and len(steps) > 0:
-        self.logger.log_values("train", mean_rows(steps))
-
-        steps = []
-
+      if is_logging_step and self.step > 0:
         self.emit("on_update")
         if self.state == TrainerState.Paused:
             time.sleep(0.1)
@@ -586,9 +595,7 @@ class Trainer(Dispatcher):
 
         self.update_progress()
 
-
-      step = self.training_step(self.loader.next(), log_details=self.config.log_details and is_logging_step)
-      steps.append(step)
+      self.training_step(self.loader.next(), log_details=self.config.log_details and is_logging_step)
 
       last_period = self.step >= self.config.total_steps - self.config.eval_steps
       if not last_period:
