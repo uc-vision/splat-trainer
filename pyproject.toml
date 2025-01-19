@@ -55,14 +55,13 @@ dependency_links = ["https://pypi.taichi.graphics/simple/"]
 
 [project.scripts]  # Optional
 splat-trainer = "splat_trainer.scripts.train_scan:main"
+splat-trainer-multirun = "splat_trainer.multirun.scripts.train_scan_multirun:main"
 to-colmap = "splat_trainer.scripts.to_colmap:main"
 
 eval-checkpoint = "splat_trainer.scripts.checkpoint:evaluate"
 resume-checkpoint = "splat_trainer.scripts.checkpoint:resume"
 vis-checkpoint = "splat_trainer.scripts.checkpoint:visualize"
 
-grid-search-trainer = "splat_trainer.multirun.scripts.grid_search:main"
-bayesian-optimize-trainer = "splat_trainer.multirun.scripts.bayesian_optimize:main"
 rq-worker-launcher = "splat_trainer.multirun.scripts.rq_worker_launcher:main"
 shutdown-workers = "splat_trainer.multirun.scripts.shutdown_all_workers:main"
 

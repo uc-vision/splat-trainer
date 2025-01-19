@@ -1,5 +1,3 @@
-# @package _global_
-
 defaults:
   - _self_
   - dataset: scan
@@ -9,6 +7,8 @@ defaults:
   - color_corrector: nil
   - trainer: default
   - viewer: none
+  
+
 hydra:
   job: 
     chdir: True

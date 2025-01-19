@@ -3,7 +3,6 @@ from pathlib import Path
 import hydra
 import numpy as np
 from omegaconf import OmegaConf
-from taichi_splatting import TaichiQueue
 from termcolor import colored
 from splat_trainer.logger.logger import Logger
 from splat_trainer import config
@@ -166,7 +165,7 @@ def train_with_config(cfg) -> dict | str:
 
   output_path = Path.cwd()
   print(f"Output path {colored(output_path, 'light_green')}")
-
+  
   with open(output_path / "config.yaml", "w") as f:
       OmegaConf.save(cfg, f)
 
@@ -186,7 +185,7 @@ def train_with_config(cfg) -> dict | str:
     trainer = Trainer.initialize(train_config, dataset, logger)
     trainer.warmup()
 
-    viewer = hydra.utils.instantiate(cfg.viewer).create_viewer(trainer, enable_training=True)
+    viewer: Viewer = hydra.utils.instantiate(cfg.viewer).create_viewer(trainer, enable_training=True)
     result = trainer.train()
 
     # allow viewer to run if enabled

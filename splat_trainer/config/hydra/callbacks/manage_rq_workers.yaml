@@ -5,7 +5,7 @@ hydra:
   callbacks:
     manage_rq_workers:
       _target_: splat_trainer.multirun.manage_rq_worker.ManageRQWorkers
-      config_file: ${worker_machines}
+      config_file: test
       flask_port: 8000
       redis_port: 6379
       get_pass: False

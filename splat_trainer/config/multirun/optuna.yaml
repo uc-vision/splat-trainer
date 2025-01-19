@@ -1,20 +1,25 @@
 # @package _global_
 
 defaults:
-  - controller: target
-  - scene: sh
-  - color_corrector: nil
-  - trainer: default
-  - override hydra/sweeper: optuna
-  - override hydra/sweeper/sampler: cmaes
+  - override /controller: target
+  - override /scene: sh
+  - override /color_corrector: nil
+  - override /trainer: default
+  - override /hydra/sweeper: optuna
+  - override /hydra/sweeper/sampler: cmaes
+  - override /dataset: null
   - _self_
+
+
+logger:
+  group: ${hydra:job.num}
 
 
 hydra:
   job: 
     chdir: True
   sweep:
-    dir: ${project}
+    dir: ${oc.env:HOME}/multirun/${project}
     subdir: ${hydra.job.num}
  
   mode: MULTIRUN
@@ -33,17 +38,13 @@ hydra:
       trainer.scene.parameters.rotation.lr: interval(0.001, 0.1)
       trainer.scene.parameters.alpha_logit.lr: interval(0.001, 0.1)
       trainer.scene.parameters.feature.lr: interval(0.001, 0.1)
-      # trainer.scene.beta1: interval(0.5, 1)
-      # trainer.scene.beta2: interval(0.7, 1)
 
-
-trainer.optimizer: VisibilityAwareAdam
 
 project: optuna_multirun__${now:%Y-%m-%d}__${now:%H-%M-%S}
-group_name: ${format:${hydra:job.num}}
+run_name: ${logger.group}
 
 
-optimize_algorithm: ${hydra:sweeper.sampler}
+algorithm: ${hydra:sweeper.sampler}
 
 wait_exit: False
 debug: False

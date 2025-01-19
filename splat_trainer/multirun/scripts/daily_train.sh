@@ -2,10 +2,11 @@
 
 
 DATE=$(date +"%Y-%m-%d__%H-%M-%S")
-BASE_PATH=/local/splat_trainer_daily_multirun
+PROJECT="splat_trainer_daily_multirun"
+BASE_PATH=/local/${PROJECT}
 
 mkdir -p ${BASE_PATH}/${DATE}
-LOG_FILE="${BASE_PATH}/${DATE}/daily_train_log_${DATE}.log"
+LOG_FILE="${BASE_PATH}/${DATE}/daily_multirun_log_${DATE}.log"
 
 echo "Script started at $(date)" >> "$LOG_FILE"
 
@@ -25,18 +26,6 @@ pip install -e .
 source ~/.bashrc
 conda activate splat-trainer
 
-grid-search-trainer \
-    logger=wandb \
-    logger.entity=UCVision \
-    scene=sh \
-    project=splat_trainer_daily_multirun  \
-    group_name=${DATE} \
-    hydra.sweep.dir=${BASE_PATH}/${DATE} \
-    trainer.num_logged_images=-1 \
-    trainer.log_worst_images=-1 \
-    >> "$LOG_FILE" 2>&1
+splat-trainer-multirun multirun=+daily_multirun logger.group=${DATE} >> "$LOG_FILE" 2>&1
 
 echo "Script completed at $(date)" >> "$LOG_FILE"
-
-# ~defaults=[override hydra/launcher]
-# hydra.callbacks=[average_result]

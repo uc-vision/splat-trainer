@@ -1,0 +1,17 @@
+# @package _global_
+
+
+hydra:
+  callbacks:
+    push_stats:
+      _target_: splat_trainer.multirun.push_stats.PushStats
+      user: maara
+      docker_host: 172.18.0.2
+      remote_host: csse-maaratech1
+      local_port: 2003
+      remote_port: 2003
+
+      redis_host: localhost
+      redis_port: 6379
+
+      result_key: multirun_result:1

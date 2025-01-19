@@ -1,0 +1,51 @@
+# @package _global_
+
+defaults:
+  - /test_datasets: default
+  - override /logger: wandb
+  - override /controller: target
+  - override /scene: sh
+  - override /color_corrector: nil
+  - override /trainer: default
+  - override /viewer: none
+  - override /hydra/callbacks:
+    - push_stats
+    - average_result
+  - _self_
+
+
+logger:
+  group: ${now:%Y-%m-%d}__${now:%H-%M-%S}
+  entity: UCvision
+
+
+trainer:
+  save_checkpoints: False
+  save_output: False
+  num_logged_images: -1
+  log_worst_images: -1
+
+  steps: 100
+
+hydra:
+  job: 
+    chdir: True
+  sweep:
+    dir: /local/${project}/${logger.group}
+    subdir: ${hydra.job.num}__${test_scene}
+ 
+  mode: MULTIRUN
+  sweeper:
+    params:
+      +test_scene: scan_1457_east, scan_1457_west, scan_21
+
+
+project: splat_trainer_daily_multirun
+run_name: ${hydra:job.num}__${test_scene}
+
+
+algorithm: grid-search
+
+
+wait_exit: False
+debug: False

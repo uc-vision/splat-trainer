@@ -5,5 +5,5 @@ logger:
   entity: UCVision
   project: ${..project}
   name: ${..run_name}
-  group: ${..group_name}
+  group: null
 

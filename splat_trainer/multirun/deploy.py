@@ -106,7 +106,7 @@ def deploy_all(config, connect_kwargs, args):
 
 
 def deployer(args):
-  config_path = Path(__file__).parent / 'config'
+  config_path = Path(__file__).parent.parent / 'config' / 'multirun' / 'hosts'
   config = read_config(config_path / f"{args.config}.yaml")
 
   connect_kwargs = get_connect_keys(args.getpass)

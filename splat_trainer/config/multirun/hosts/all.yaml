@@ -1,41 +1,11 @@
 groups:
-  # room347:
-  #   - cs24001kw
-  #   - cs24002kw
-  #   - cs24003kw
-    # - cs24004kw
+  room347:
+    - cs24001kw
+    - cs24002kw
+    - cs24003kw
+    - cs24004kw
 
-  lab3:
-    - cs19090bs
-    - cs19091bs
-    - cs19092bs
-    - cs19093bs
-    - cs19094bs
-    - cs19095bs
-    - cs19096bs
-    - cs19097bs
-    - cs19098bs
-    - cs19099bs
-    - cs19100bs
-    - cs19101bs
-    - cs19102bs
-    - cs19103bs
-    - cs19104bs
-    - cs19105bs
-    - cs19106bs
-    - cs19107bs
-    - cs19108bs
-    - cs19109bs
-    - cs19110bs
-    - cs19111bs
-    - cs19112bs
-    - cs19113bs
-    - cs19114bs
-    - cs19115bs
-    - cs19116bs
-    - cs19117bs
-    - cs19118bs
-    - cs19119bs
+  lab3: ???
 
   lab4:
     - cs23010jv
