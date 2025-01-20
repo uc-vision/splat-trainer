@@ -1,5 +1,5 @@
 import socket
-from splat_trainer.multirun.deploy import shutdown_all_workers, shutdown_all, get_connect_keys, read_config
+from splat_trainer.multirun.deploy import shutdown_all_workers, kill_all_rq_worker_process, get_connect_keys, read_config
 from pathlib import Path
 
 
@@ -14,7 +14,7 @@ def main():
     connect_kwargs = get_connect_keys(False)
     hosts = [ host for hosts in config['groups'].values() for host in hosts ]
 
-    shutdown_all(hosts, connect_kwargs)
+    kill_all_rq_worker_process(hosts, connect_kwargs)
     print("All RQ Workers are shutdown.")
 
 

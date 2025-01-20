@@ -1,13 +1,19 @@
+import logging
 import subprocess
 
 import hydra
 from hydra.core.hydra_config import HydraConfig
 from omegaconf import DictConfig, OmegaConf
 import redis
+import pandas as pd
 
 from splat_trainer.scripts.train_scan import train_with_config
 
 
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+)
 
 
 def find_dataset_config(name:str, test_datasets:DictConfig):
@@ -34,31 +40,26 @@ def main(cfg : DictConfig) -> None:
     return result
   
   else:
+    
     sweeper_params = HydraConfig.get().sweeper.params
-  
-    def flatten_cfg(d, parent_key=''):
-      items=[]
-      for k, v in d.items():
-          new_key = f"{parent_key}.{k}" if parent_key else k
-          if isinstance(v, (dict, DictConfig)):
-              items.extend(flatten_cfg(v, new_key))
-          elif isinstance(v, list):
-              items.append((new_key, f"[{', '.join(map(str, v))}]"))
-          else:
-              items.append((new_key, v))
-      return items
+    cfg_dict = OmegaConf.to_container(cfg, throw_on_missing=False, resolve=True)
+    df = pd.json_normalize(cfg_dict)
+    override_strings = [f"{k}={df[k].iloc[0]}" for k in sweeper_params.keys() if k in df.columns ]
     
-    cfg = OmegaConf.to_container(cfg, throw_on_missing=False, resolve=True)
-    override_strings = [f"{k}={v}" for k, v in flatten_cfg(cfg) if v and k in sweeper_params or k in ['project']]
+    sweep_dir = f"{HydraConfig.get().sweep.dir}/{HydraConfig.get().sweep.subdir}"
+    subprocess.run([
+        'splat-trainer-multirun', 
+        '+multirun=grid_search', 
+        f'hydra.sweep.dir={sweep_dir}', 
+        f'logger.group={int(cfg.logger.group):04d}', 
+        f'project={cfg.project}',
+        *override_strings
+      ], check=True)
     
-    dir = f"{HydraConfig.get().sweep.dir}/{HydraConfig.get().sweep.subdir}"
-    group = f'{int(cfg["logger"]["group"]):04d}'
-    subprocess.run(['splat-trainer-multirun', '+multirun=grid_search', f'hydra.sweep.dir={dir}', f'logger.group={group}', *override_strings])
-    
-    redis_client = redis.Redis(host='localhost', port=6379, decode_responses=True)
-    average_result = redis_client.hgetall("multirun_result:1")
+    redis_db = redis.Redis(host='localhost', port=cfg.conn.redis.port, decode_responses=True)
+    average_result = redis_db.hgetall(cfg.conn.graphite.result_key)
 
-    assert average_result, "Error: 'multirun_result:1' not found or empty in Redis. Check if the key exists and data is stored correctly."
+    assert average_result, "Error: 'multirun_result:1' not found or empty in Redis."
       
     results = float(average_result['train_psnr'])
 

@@ -2,6 +2,7 @@
 
 defaults:
   - /test_datasets: default
+  - /multirun/conn: default
   - override /logger: wandb
   - override /controller: target
   - override /scene: sh
@@ -37,7 +38,7 @@ hydra:
   mode: MULTIRUN
   sweeper:
     params:
-      +test_scene: scan_1457_east, scan_1457_west, scan_21
+      +test_scene: scan_1457_east, scan_1457_west, scan_21, scan_23
 
 
 project: splat_trainer_daily_multirun

@@ -26,6 +26,6 @@ pip install -e .
 source ~/.bashrc
 conda activate splat-trainer
 
-splat-trainer-multirun multirun=+daily_multirun logger.group=${DATE} >> "$LOG_FILE" 2>&1
+splat-trainer-multirun +multirun=daily_multirun logger.group=${DATE} >> "$LOG_FILE" 2>&1
 
 echo "Script completed at $(date)" >> "$LOG_FILE"

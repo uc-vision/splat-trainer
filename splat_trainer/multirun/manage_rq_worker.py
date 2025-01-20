@@ -4,7 +4,7 @@ import socket
 import sys
 import threading
 import traceback
-from typing import Any, Optional, Union
+from typing import Any
 from types import SimpleNamespace
 
 import redis
@@ -12,43 +12,49 @@ import rq_dashboard
 import signal
 from flask import Flask, render_template
 from hydra.experimental.callback import Callback
-from omegaconf import DictConfig, OmegaConf
-from rq import Worker
+from omegaconf import DictConfig
 
 from splat_trainer.multirun.deploy import deploy_workers, shutdown_all_workers, flush_all
 
 
+log = logging.getLogger(__name__)
+
+
 class ManageRQWorkers(Callback):
     def __init__(self, 
-                config_file: str, 
-                flask_port: int=8000, 
-                redis_port: int=6379, 
+                config: str, 
+                flask_port: int, 
+                redis_port: int, 
                 get_pass: bool=False,
                 max_num_worker_on_each_machine: int=1):
         self.data = {}
+        
+        self.hostname = socket.gethostname()
+        self.redis_url = f'redis://{self.hostname}:{redis_port}'
+        self.flask_port = flask_port
 
         self.args = SimpleNamespace(
-            config=config_file,
+            config=config,
             getpass=get_pass,
-            flask_port=flask_port,
-            redis_url=f'redis://{socket.gethostname()}:{redis_port}',
+            redis_url=self.redis_url,
             max_num_worker=max_num_worker_on_each_machine
         )
 
         signal.signal(signal.SIGINT, self.signal_handler)
-        signal.signal(signal.SIGTSTP, self.signal_handler)
+        signal.signal(signal.SIGTERM, self.signal_handler)
 
 
     def on_multirun_start(self, config: DictConfig, **kwargs: Any) -> None:
-        flush_all(self.args.redis_url)
+        flush_all(self.redis_url)
 
         try:
             result = deploy_workers(self.args)
         
         except Exception as e:
             error_message = ''.join(traceback.format_exception(type(e), e, e.__traceback__))
-            raise SystemExit(error_message)  
             self.shutdown_all_workers()
+            raise SystemExit(error_message)  
+
 
         self.data.update(result)
 
@@ -58,7 +64,6 @@ class ManageRQWorkers(Callback):
 
     def on_multirun_end(self, config: DictConfig, **kwargs: Any) -> None:
         self.shutdown_all_workers()
-        pass
         
 
     def signal_handler(self, signum, frame):
@@ -68,18 +73,19 @@ class ManageRQWorkers(Callback):
 
     def shutdown_all_workers(self):
         try:
-            print("Shutting down all workers and exiting.")
-            shutdown_all_workers(self.args.redis_url)
+            log.info("Shutting down all workers and exiting.")
+            redis_conn = redis.from_url(self.redis_url)
+            shutdown_all_workers(redis_conn)
 
         except Exception as e:
-            print(f"Error while shutting down workers: {e}")
+            log.error(f"Error while shutting down workers: {e}")
 
         # finally:
         #     sys.exit(0)
 
     
     def run_flask_app(self):
-        flask_url = f"http://127.0.0.1:{self.args.flask_port}"
+        flask_url = f"http://127.0.0.1:{self.flask_port}"
 
         print(" " + "-" * 61)
         print(f"|{' ' * 61}|")
@@ -105,7 +111,7 @@ class ManageRQWorkers(Callback):
         def index():
             return render_template('index.html', data=self.data)
 
-        app.run(host="0.0.0.0", debug=True, port=self.args.flask_port, use_reloader=False)
+        app.run(host="0.0.0.0", debug=True, port=self.flask_port, use_reloader=False)
 
 
 

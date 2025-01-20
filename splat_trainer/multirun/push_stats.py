@@ -5,6 +5,7 @@ from typing import Any, Optional
 from fabric import Connection
 from omegaconf import DictConfig
 import redis
+import socket
 import traceback
 
 from hydra.experimental.callback import Callback
@@ -19,7 +20,6 @@ class PushStats(Callback):
                  remote_host: str,
                  local_port: int, 
                  remote_port: int,
-                 redis_host: str, 
                  redis_port: int,
                  result_key: str) -> None:
         self.user = user
@@ -28,7 +28,7 @@ class PushStats(Callback):
         self.local_port = local_port
         self.remote_port = remote_port
         
-        self.redis_host = redis_host
+        self.redis_host = socket.gethostname()
         self.redis_port = redis_port
         
         self.result_key = result_key
@@ -56,7 +56,7 @@ class PushStats(Callback):
             redis_client = redis.Redis(host=self.redis_host, port=self.redis_port, decode_responses=True)
             averaged_results = redis_client.hgetall(self.result_key)
 
-        graphite_pusher = GraphitePusher(hostname='127.0.0.1', prefix='training_stats.test.')
+        graphite_pusher = GraphitePusher(hostname='127.0.0.1', port=self.local_port, prefix='training_stats.test.')
 
         with Connection(self.remote_host, user=self.user).forward_local(self.local_port, self.remote_port, self.docker_host):
             timestamp = int(time.time())
@@ -65,4 +65,3 @@ class PushStats(Callback):
 
             time.sleep(10)
         
-      

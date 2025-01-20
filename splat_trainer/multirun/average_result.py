@@ -8,6 +8,7 @@ from pathlib import Path
 import traceback
 from typing import Any, Optional, Union
 
+import numpy as np
 import pandas as pd
 import redis
 import rq
@@ -18,33 +19,31 @@ from hydra.core.utils import JobReturn, JobStatus
 from hydra.experimental.callback import Callback
 from omegaconf import DictConfig, OmegaConf
 
-from splat_trainer.multirun.deploy import kill_rq_worker_by_name
+from splat_trainer.multirun.deploy import shutdown_workers_on_host
 
 
 log = logging.getLogger(__name__)
-log.setLevel(logging.INFO)
-
-
 
 class AverageResult(Callback):
-    def __init__(self, output_dir: str, sweep_params: DictConfig) -> None:
+    def __init__(self, output_dir: str, sweep_params: DictConfig, redis_port: int) -> None:
         self.output_dir = output_dir
         self.sweep_params = sweep_params
         self.log = logging.getLogger(f"{__name__}.{self.__class__.__name__}")
         self.redis_host = socket.gethostname()
+        self.redis_port = redis_port
         
         
-    def _get_redis_client(self) -> redis.Redis:
-        return redis.Redis(host=self.redis_host, port=6379, decode_responses=True)
+    def _get_redis_db(self) -> redis.Redis:
+        return redis.Redis(host=self.redis_host, port=self.redis_port, decode_responses=True)
         
         
     def on_job_start(self, config: DictConfig, **kwargs: Any) -> None:
-        redis_client = self._get_redis_client()
+        redis_db = self._get_redis_db()
         project = OmegaConf.select(config, 'project')
         group = OmegaConf.select(config, 'logger.group')
         
-        redis_client.set('project', str(project))
-        redis_client.set('group', str(group))
+        redis_db.set('project', str(project))
+        redis_db.set('group', str(group))
         
         self.params = {".".join(k.lstrip('+').split(".")[-2:]): v for k, v in (override.split('=') 
                     for override in OmegaConf.select(config, "hydra.overrides.task")) if k in self.sweep_params}
@@ -96,7 +95,8 @@ class AverageResult(Callback):
             }
             
             if "Permission" in str(job_return._return_value):
-                kill_rq_worker_by_name()
+                redis_conn = redis.Redis(host=self.redis_host, port=self.redis_port)
+                shutdown_workers_on_host(redis_conn, hostname)
 
             failed_jobs_file = os.path.join(self.output_dir, "failed_jobs.json")
             self.save_to_json(failed_jobs_file, job_data)
@@ -105,9 +105,9 @@ class AverageResult(Callback):
 
 
     def on_multirun_end(self, config: DictConfig, **kwargs: Any) -> None: 
-        redis_client = self._get_redis_client() 
-        project = redis_client.get('project')
-        group = redis_client.get('group')
+        redis_db = self._get_redis_db() 
+        project = redis_db.get('project')
+        group = redis_db.get('group')
 
         try:
             result, df = average_results(self.output_dir)
@@ -117,7 +117,8 @@ class AverageResult(Callback):
             self.log.error(f"Error occurred while averaging the results: {e}")
             self.log.error(f"Stack trace: {traceback.format_exc()}")
         
-        redis_client.hset('multirun_result:1', mapping=result)
+        if config.algorithm != 'grid-search':
+            redis_db.hset(config.conn.graphite.result_key, mapping=result)
         
         self.log_wandb(df, project, group)
         self.save_to_csv(df, self.output_dir)
@@ -173,14 +174,19 @@ class AverageResult(Callback):
         if project:
             try:
                 run = wandb.init(project=project, 
-                                group=group,
+                                group="average_result",
                                 name=f"averaged_result__{group}", 
                                 dir=Path.cwd(), 
                                 entity='UCVision',
                                 settings=wandb.Settings(silent=True))
                 
-                df.columns = [".".join(map(str, filter(pd.notna, col))) if isinstance(col, tuple) else str(col) for col in df.columns]
+                df.columns = [":".join([name for name in col if name]) if isinstance(col, tuple) else str(col) for col in df.columns]
                 df = df.drop(columns=["index"], errors="ignore")
+                df = df.dropna(axis=1, how='all')
+                
+                for col in df.columns[df.columns.str.startswith("average_result")]:
+                    df.loc[df[col].duplicated(), col] = np.nan
+                
                 run.log({f"average_result": wandb.Table(dataframe=df)})
                 
                 run.finish()
@@ -192,7 +198,7 @@ class AverageResult(Callback):
                 log.error(f"Unexpected error occurred while logging to wandb: {e}")
             
     
-def average_results(file_path: Path | str | None):
+def average_results(file_path: Path | str | None) -> tuple[dict, pd.DataFrame]:
     
     if not file_path:
         file_path = get_args().path
@@ -202,6 +208,7 @@ def average_results(file_path: Path | str | None):
     
     df = pd.json_normalize(result, sep=':')
     df.columns = pd.MultiIndex.from_tuples([col.split(":") for col in df.columns])
+    df.columns = pd.MultiIndex.from_tuples([tuple('' if pd.isna(name) else name for name in col) for col in df.columns])
     
     param_columns = [("params", col) for col in df.get("params", pd.DataFrame()).columns.tolist()]
     result_columns = [("result", col) for col in df.get("result", pd.DataFrame()).columns.tolist()]
@@ -215,9 +222,12 @@ def average_results(file_path: Path | str | None):
     result_avg.columns = pd.MultiIndex.from_product([["average_result"], result_avg['result'].columns])
     
     df = df.join(result_avg).reset_index()
-    df.sort_values(by=('average_result', 'train_psnr'), ascending=False)
-
-    result = result_avg.iloc[0]['average_result'].to_dict()
+    
+    columns_to_sort = result_avg.columns.tolist() + param_columns + [('test_scene', '')]
+    sort_orders = [False if any('psnr' or 'ssim' in item for item in col) else True for col in result_avg.columns.tolist()] + [True] * (len(param_columns) + 1)
+    df.sort_values(columns_to_sort, ascending=sort_orders, inplace=True)
+    
+    result = df.iloc[0]['average_result'].to_dict()
     
     return result, df
 

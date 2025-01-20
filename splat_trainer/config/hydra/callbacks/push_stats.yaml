@@ -5,13 +5,12 @@ hydra:
   callbacks:
     push_stats:
       _target_: splat_trainer.multirun.push_stats.PushStats
-      user: maara
-      docker_host: 172.18.0.2
-      remote_host: csse-maaratech1
-      local_port: 2003
-      remote_port: 2003
+      user: ${conn.graphite.user}
+      docker_host: ${conn.graphite.docker_host}
+      remote_host: ${conn.graphite.remote_host}
+      local_port: ${conn.graphite.local_port}
+      remote_port: ${conn.graphite.remote_port}
 
-      redis_host: localhost
-      redis_port: 6379
+      redis_port: ${conn.redis.port}
 
-      result_key: multirun_result:1
+      result_key: ${conn.graphite.result_key}

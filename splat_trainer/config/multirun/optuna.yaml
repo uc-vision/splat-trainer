@@ -1,6 +1,7 @@
 # @package _global_
 
 defaults:
+  - /multirun/conn: default
   - override /controller: target
   - override /scene: sh
   - override /color_corrector: nil
@@ -8,8 +9,9 @@ defaults:
   - override /hydra/sweeper: optuna
   - override /hydra/sweeper/sampler: cmaes
   - override /dataset: null
+  - override /hydra/callbacks:
+    - log_best_result
   - _self_
-
 
 logger:
   group: ${hydra:job.num}
@@ -31,7 +33,7 @@ hydra:
     direction: maximize
     study_name: splat-trainer
     storage: null
-    n_trials: 1000
+    n_trials: 10
     n_jobs: 1
     params:
       trainer.scene.parameters.log_scaling.lr: interval(0.001, 0.1)

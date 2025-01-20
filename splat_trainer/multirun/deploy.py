@@ -4,6 +4,7 @@ from collections import Counter
 from dataclasses import dataclass
 from functools import partial
 from getpass import getpass, getuser
+import logging
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
@@ -12,6 +13,7 @@ import fabric
 import keyring
 import yaml
 import redis
+from redis import Redis
 import uuid
 from rq.worker import Worker, WorkerStatus
 from rq.command import send_shutdown_command, send_kill_horse_command
@@ -19,6 +21,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from paramiko.ssh_exception import SSHException, AuthenticationException
 
 
+log = logging.getLogger(__name__)
 
 @dataclass
 class Machine:
@@ -30,7 +33,7 @@ class Machine:
 def deploy_group(group_name: str, hosts:List[str], connect_kwargs, args):
 
   def deploy(host: str):
-    count = get_worker_num(host, args.redis_url)
+    count = get_worker_num_on_host(host, args.redis_url)
 
     try:
       with fabric.Connection(host, connect_kwargs=connect_kwargs) as c:
@@ -45,10 +48,11 @@ def deploy_group(group_name: str, hosts:List[str], connect_kwargs, args):
               kill_command = f"kill -9 {worker_pid}"
               # kill_command = "pkill -f rq:worker"
               c.run(kill_command, warn=True)
-              print(f"Killed existing RQ worker with PID {worker_pid.strip()} on {host}")
+              log.info(f"Killed existing RQ worker with PID {worker_pid.strip()} on {host}")
 
           if count == args.max_num_worker:
-            return Machine(host, msg=f"RQ worker already exists on {host}")
+            return Machine(host, msg=f"{count} maximum RQ worker already exists on {host}")
+          
         worker_name = f'{host}_{str(uuid.uuid4())}'
         command = """
           export TORCH_EXTENSIONS_DIR=~/.cache/torch_extensions/py311_cu121_{group_name}
@@ -140,43 +144,37 @@ def read_config(config_path):
       return yaml.safe_load(f)
 
 
-def get_all_workers(redis_url):
-  redis_conn = redis.from_url(redis_url)
-  workers = Worker.all(connection=redis_conn)
-
-  return workers
+def get_all_workers(redis: Redis):
+  return Worker.all(redis)
 
 
-def shutdown_all_workers(redis_url):
-  redis_conn = redis.from_url(redis_url)
-  workers = get_all_workers(redis_url)
+def shutdown_all_workers(redis: Redis):
+  all_workers = get_all_workers(redis)
   
-  for worker in workers:
-    shutdown_worker(worker, redis_url)
+  for worker in all_workers:
+    shutdown_worker(worker, redis)
     
 
-def shutdown_worker(worker, redis_url):
-  redis_conn = redis.from_url(redis_url)
+def shutdown_worker(worker, redis: Redis):
   if worker.state == WorkerStatus.BUSY:
-    send_kill_horse_command(redis_conn, worker.name)
-
-  send_shutdown_command(redis_conn, worker.name)
+    send_kill_horse_command(redis, worker.name)
+    
+  send_shutdown_command(redis, worker.name)
   
 
-def kill_rq_worker_by_name():
-  redis_url = "redis://cs24004kw:6379"
-  hostname = socket.gethostname()
-  workers = get_all_workers(redis_url)
-  for worker in workers:
-      if hostname in worker.name:
-          shutdown_worker(worker, redis_url)
+def shutdown_workers_on_host(redis: Redis, host: str):
+  all_workers = get_all_workers(redis)
+  for worker in all_workers:
+    if host in worker.name:
+        shutdown_worker(worker, redis)
 
 
-def get_worker_num(name: str, redis_url: str):
-  workers = get_all_workers(redis_url)
+def get_worker_num_on_host(host: str, redis_url: str):
+  redis_conn = redis.from_url(redis_url)
+  workers = get_all_workers(redis_conn)
   count = 0
   for worker in workers:
-    if name in worker.name:
+    if host in worker.name:
       count += 1
   return count
 
@@ -186,7 +184,7 @@ def flush_all(redis_url: str):
   redis_conn.flushall()
 
 
-def shutdown_all(hosts, connect_kwargs):
+def kill_all_rq_worker_process(hosts, connect_kwargs):
   def shutdown(host: str):
     try:
       with fabric.Connection(host, connect_kwargs=connect_kwargs) as c:
