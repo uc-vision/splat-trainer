@@ -1,4 +1,5 @@
 import argparse
+from functools import partial
 from pathlib import Path
 import traceback
 from typing import Dict, List, Optional, Tuple
@@ -42,8 +43,7 @@ def load_scan(scan_file:str, image_scale:Optional[float]=None, resize_longest:Op
     for k, camera in cameras.items():
         print(k, camera)
 
-    print("Loading images...")
-    all_cameras = preload_images(scan, cameras)
+    all_cameras = preload_images(scan, cameras, progress=partial(tqdm, desc="Loading images"))
     return scan.copy(cameras=cameras), all_cameras
 
 

@@ -42,6 +42,9 @@ class Dataset(metaclass=ABCMeta):
   def pointcloud(self) -> PointCloud:
     raise NotImplementedError
 
+  @abstractmethod
+  def load_images(self):
+    raise NotImplementedError
 
   
 

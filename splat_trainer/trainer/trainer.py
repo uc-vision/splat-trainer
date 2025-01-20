@@ -3,6 +3,7 @@ from dataclasses import replace
 from enum import Enum
 from functools import partial
 import json
+import math
 from pathlib import Path
 import time
 from types import SimpleNamespace
@@ -40,6 +41,7 @@ from splat_trainer.logger.logger import CompositeLogger, LoggerWithState, StateL
 from splat_trainer.scene.io import read_gaussians, write_gaussians
 from splat_trainer.scene.scene import GaussianScene
 
+from splat_trainer.util.colors import mse_to_psnr
 from splat_trainer.visibility import cluster
 
 from splat_trainer.util.colorize import colorize, get_cv_colormap
@@ -264,9 +266,7 @@ class Trainer(Dispatcher):
   @beartype
   def evaluate_image(self, image_view:ImageView):
     image_view = self.load_data(image_view)
-
     camera_params = self.camera_params(image_view.image_idx)
-
 
     rendering = self.render(camera_params, image_view.image_idx, render_median_depth=True)
     return Evaluation(image_view.filename, rendering.detach(), image_view.image)
@@ -286,8 +286,7 @@ class Trainer(Dispatcher):
 
     # Track metrics for all images
     metrics = {}
-
-    point_clusters = cluster.PointClusters.cluster(self.scene.points['position'], self.config.vis_clusters)
+    point_clusters = cluster.PointClusters.cluster(self.scene.gaussians.position, self.config.vis_clusters)
 
     rng = np.random.RandomState(random_seed)
     log_indices = set(rng.choice(len(image_views), self.config.num_logged_images, replace=False))
@@ -344,7 +343,6 @@ class Trainer(Dispatcher):
   def log_colormapped(self, name, values):
     colorized = colorize(self.color_map, values)
     self.logger.log_image(name, colorized, compressed=False)
-
 
 
   def log_evaluation_images(self, name:str, eval:Evaluation, log_source:bool=True):
@@ -412,48 +410,44 @@ class Trainer(Dispatcher):
       aspect_reg    =  (points.visibility  * aspect_term).mean() * aspect_weight
     )
 
-
-    # include total as "reg"
     metrics = {k:v.item() for k, v in regs.items()} 
-    total = sum(regs.values())
-
-    metrics["reg"] = total.item()
-    return total, metrics
+    return sum(regs.values()), metrics
 
   def compute_losses(self, rendering:Rendering, image:torch.Tensor):
-    metrics = {}
-    losses = {}
-    loss = torch.tensor(0.0, device=self.device)
-
-    if self.config.l1_weight > 0:
+    
+    def compute_l1(rendering:Rendering, image:torch.Tensor):
       l1 = torch.nn.functional.l1_loss(rendering.image, image)
-      metrics["l1"] = l1.item()
-      loss += l1 * self.config.l1_weight 
-      losses["l1"] = l1.item()
-
-    if self.config.mse_weight > 0:
+      weighted_l1 = l1 * self.config.l1_weight 
+      return weighted_l1, l1.item()
+    
+    def compute_mse(rendering:Rendering, image:torch.Tensor):
       mse = torch.nn.functional.mse_loss(rendering.image, image)
-      metrics["mse"] = mse.item()
-      loss += mse * self.config.mse_weight 
-      losses["mse"] = mse.item()
-
-    if self.config.ssim_weight > 0:  
+      weighted_mse = mse * self.config.mse_weight 
+      return weighted_mse, mse.item()
+    
+    def compute_ssim(rendering:Rendering, image:torch.Tensor):
       ssim_loss, ssim_metric = self.compute_ssim_loss(rendering.image, image, self.config.ssim_levels)
-      loss += ssim_loss * self.config.ssim_weight 
-      metrics["ssim"] = ssim_metric
-      losses["ssim"] = ssim_loss.item()
+      weighted_ssim = ssim_loss * self.config.ssim_weight 
+      return weighted_ssim, ssim_metric
+
+    loss_funcs = dict(l1=compute_l1, mse=compute_mse, ssim=compute_ssim)
+    loss_metrics = [func(rendering, image) for func in loss_funcs.values()]
+
+    losses, metrics = zip(*loss_metrics)
 
     reg_loss, reg_losses = self.reg_loss(rendering)
-    losses.update(reg_losses)
-    loss += reg_loss 
-
-    losses["total"] = loss.item()
-
+    total = sum(losses) + reg_loss
+    
     if self.step % self.config.log_interval == 0:
-      self.logger.log_values("train/loss", losses)
-      self.logger.log_values("train/metrics", metrics)
+      loss_dict = {k:v.item() for k, v in zip(loss_funcs.keys(), losses)}
+      metrics_dict = dict(zip(loss_funcs.keys(), metrics))
+      psnr = 10 * math.log10(1 / metrics_dict['mse'])  
 
-    return loss
+      self.logger.log_values("train/loss", dict(**loss_dict, reg=reg_loss.item(), total=total.item()))
+      self.logger.log_values("train/metrics", dict(**metrics_dict, psnr = psnr))
+      self.logger.log_values("train/reg", reg_losses)
+    
+    return total
 
   def evaluate_backward_with(self, batch:List[ImageView], f:Callable[[int, Rendering], None]):
     for image_view in batch:
@@ -544,23 +538,24 @@ class Trainer(Dispatcher):
     torch.cuda.empty_cache()
 
   def pbar_metrics(self):
+    """ Fetch metrics from logger and format them for the progress bar """
     desc = []
 
     if "densify" in self.logger:
-      pruned, split, n = [self.logger[k].value for k in ["densify/prune", "densify/split", "densify/n"]]
+      pruned, split, n = [self.logger[k].value 
+          for k in ["densify/prune", "densify/split", "densify/n"]]
       desc.append(f"points(+{split:d} -{pruned:d} = {n:d})")
 
     if "train/metrics" in self.logger:
-      values = self.logger["train/metrics"]
-      for k in ["l1", "mse", "ssim"]:
-        if k in values:
-          desc.append(f"{k}:{values[k].value:.3f}")
+      ssim, psnr = [self.logger[k].value 
+          for k in ["train/metrics/ssim", "train/metrics/psnr"]]
+      
+      desc.append(f"ssim:{ssim:.3f} psnr:{psnr:.3f}")
 
     if "train/loss" in self.logger:
       values = self.logger["train/loss"]
-      for k in ["l1", "mse", "ssim", "reg", "total"]:
-        if k in values:
-          desc.append(f"{k}:{values[k].value:.3f}")
+      for k, v in values.items():
+        desc.append(f"{k}:{v.value:.3f}")
 
     return desc
 
@@ -574,6 +569,9 @@ class Trainer(Dispatcher):
 
   def train(self, state:TrainerState = TrainerState.Training):
     self.state = state
+
+    # Explicitly load images to avoid progress bars being messed up
+    self.dataset.load_images()
 
     self.checkpoint(self.config.save_checkpoints)
 

@@ -1,5 +1,6 @@
 
 from dataclasses import dataclass
+from functools import partial
 from pathlib import Path
 from typing import Optional, Sequence, Tuple
 from beartype.typing import Dict, Iterator, List
@@ -53,8 +54,7 @@ def load_scan(scan_file:str, image_scale:Optional[float]=None,
     for k, camera in cameras.items():
         print(k, camera)
 
-    print("Loading images...")
-    all_cameras = preload_images(scan, cameras)
+    all_cameras = preload_images(scan, cameras, progress=partial(tqdm, desc="Loading images"))
     return scan.copy(cameras=cameras), all_cameras
 
 
@@ -87,7 +87,7 @@ def concat_lists(xs):
 
 
 @beartype
-def preload_images(scan:FrameSet, undistorted:Dict[str, Camera]) -> List[CameraImage]:
+def preload_images(scan:FrameSet, undistorted:Dict[str, Camera], progress=None) -> List[CameraImage]:
   undistortions = {k:Undistortion(camera, undistorted[k]) 
     for k, camera in scan.cameras.items() }
 
@@ -111,7 +111,7 @@ def preload_images(scan:FrameSet, undistorted:Dict[str, Camera]) -> List[CameraI
         filename=image_file
     )
 
-  frames = load_frames_with(scan, undistortions, load)
+  frames = load_frames_with(scan, undistortions, load, progress=progress)
   return concat_lists(frames)
 
 class PreloadedImages(Sequence[ImageView]):

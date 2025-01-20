@@ -1,6 +1,6 @@
 [project]
 name = "splat-trainer"  
-version = "0.2.0"  
+version = "0.3.0"  
 description = "Gaussian Splatting scene reconstruction with taichi-splatting"  
 readme = "README.md" 
 requires-python = ">=3.10"
