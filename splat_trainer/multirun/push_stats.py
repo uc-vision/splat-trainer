@@ -62,7 +62,7 @@ class PushStats(Callback):
         assert averaged_results, "Error: result data not found or empty in Redis."
         
         try:
-            graphite_pusher = GraphitePusher(hostname='127.0.0.1', port=self.local_port, prefix='training_stats.test.')
+            graphite_pusher = GraphitePusher(hostname='127.0.0.1', port=self.local_port, prefix='training_stats.splat_trainer.')
 
             with Connection(self.remote_host, user=self.user).forward_local(self.local_port, self.remote_port, self.docker_host):
                 timestamp = int(time.time())

@@ -27,7 +27,7 @@ trainer:
   num_logged_images: -1
   log_worst_images: -1
 
-  steps: 100
+  steps: 20000
 
 hydra:
   job: 

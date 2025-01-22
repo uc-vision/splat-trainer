@@ -26,7 +26,7 @@ pip install -e .
 source ~/.bashrc
 conda activate splat-trainer
 
-rm -rf /csse/users/yya164/.cache/torch_extensions/py311_cu121_room347
+rm -rf $HOME/.cache/torch_extensions/py311_cu121_room347
 
 splat-trainer-multirun +multirun=daily_multirun logger.group=${DATE} >> "$LOG_FILE" 2>&1
 
