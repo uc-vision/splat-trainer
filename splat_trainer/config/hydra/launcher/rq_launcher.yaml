@@ -1,0 +1,9 @@
+defaults:
+ - rq
+
+
+redis:
+  port: ${conn.redis.port}
+  db: ${conn.redis.db_num}
+
+

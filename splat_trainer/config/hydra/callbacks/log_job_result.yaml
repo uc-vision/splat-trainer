@@ -3,9 +3,9 @@
 
 hydra:
   callbacks:
-    average_result:
-      _target_: splat_trainer.multirun.average_result.AverageResult
+    log_job_result:
+      _target_: splat_trainer.multirun.log_job_result.LogJobResult
       output_dir: ${hydra.sweep.dir}
       sweep_params: ${hydra.sweeper.params}
       redis_port: ${conn.redis.port}
-
+      redis_db: ${conn.redis.db_num}

@@ -11,6 +11,7 @@ import traceback
 from hydra.experimental.callback import Callback
 from grafana_analytics.plugins.util import GraphitePusher
 
+log = logging.getLogger(__name__)
 
 
 class PushStats(Callback):
@@ -21,6 +22,7 @@ class PushStats(Callback):
                  local_port: int, 
                  remote_port: int,
                  redis_port: int,
+                 redis_db: int,
                  result_key: str) -> None:
         self.user = user
         self.docker_host = docker_host
@@ -30,6 +32,7 @@ class PushStats(Callback):
         
         self.redis_host = socket.gethostname()
         self.redis_port = redis_port
+        self.redis_db = redis_db
         
         self.result_key = result_key
         
@@ -53,15 +56,23 @@ class PushStats(Callback):
     def push_stats(self, averaged_results: Optional[dict]=None):
         
         if not averaged_results:
-            redis_client = redis.Redis(host=self.redis_host, port=self.redis_port, decode_responses=True)
+            redis_client = redis.Redis(host=self.redis_host, port=self.redis_port, db=self.redis_db, decode_responses=True)
             averaged_results = redis_client.hgetall(self.result_key)
-
-        graphite_pusher = GraphitePusher(hostname='127.0.0.1', port=self.local_port, prefix='training_stats.test.')
-
-        with Connection(self.remote_host, user=self.user).forward_local(self.local_port, self.remote_port, self.docker_host):
-            timestamp = int(time.time())
-            for metric, value in averaged_results.items():
-                graphite_pusher.push_stat(metric, float(value), timestamp)
-
-            time.sleep(10)
         
+        assert averaged_results, "Error: result data not found or empty in Redis."
+        
+        try:
+            graphite_pusher = GraphitePusher(hostname='127.0.0.1', port=self.local_port, prefix='training_stats.test.')
+
+            with Connection(self.remote_host, user=self.user).forward_local(self.local_port, self.remote_port, self.docker_host):
+                timestamp = int(time.time())
+                for metric, value in averaged_results.items():
+                    graphite_pusher.push_stat(metric, float(value), timestamp)
+
+                time.sleep(10)
+                
+        except Exception as e:
+            log.error(f"Failed pushing data to Graphite database with error: {e}")
+
+    
+    

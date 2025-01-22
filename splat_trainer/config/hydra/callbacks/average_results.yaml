@@ -1,0 +1,11 @@
+# @package _global_
+
+
+hydra:
+  callbacks:
+    average_results:
+      _target_: splat_trainer.multirun.average_results.AverageResults
+      output_dir: ${hydra.sweep.dir}
+      redis_port: ${conn.redis.port}
+      redis_db: ${conn.redis.db_num}
+

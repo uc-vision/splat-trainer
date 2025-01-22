@@ -62,7 +62,6 @@ eval-checkpoint = "splat_trainer.scripts.checkpoint:evaluate"
 resume-checkpoint = "splat_trainer.scripts.checkpoint:resume"
 vis-checkpoint = "splat_trainer.scripts.checkpoint:visualize"
 
-rq-worker-launcher = "splat_trainer.multirun.scripts.rq_worker_launcher:main"
 shutdown-workers = "splat_trainer.multirun.scripts.shutdown_all_workers:main"
 
 [tool.setuptools.package-data]

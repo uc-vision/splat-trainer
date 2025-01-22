@@ -9,10 +9,11 @@ defaults:
   - override /color_corrector: nil
   - override /trainer: default
   - override /viewer: none
-  - override /hydra/launcher: rq
+  - override /hydra/launcher: rq_launcher
   - override /hydra/callbacks:
     - manage_rq_workers
-    - average_result
+    - average_results
+    - log_job_result
   - _self_
 
 
@@ -29,31 +30,28 @@ trainer:
 
   steps: 100
 
+test_scene: ???
 
 hydra:
   sweep:
     dir: ${oc.env:HOME}/multirun/${project}
-    # subdir: ${run_name:${hydra:overrides.task}}_/${hydra.job.num}__test_scene=${test_scene}
+    subdir: ${hydra.job.num}__test_scene=${test_scene}
   job:
     chdir: True
-    config:
-      override_dirname:
-        exclude_keys:
-         - test_scene
+
+
   mode: MULTIRUN
   sweeper:
     params:
-      +test_scene: scan_23, scan_1457_west
-      trainer.scene.parameters.log_scaling.lr: 0.03, 0.3
-      trainer.scene.parameters.rotation.lr: 0.01, 0.1
+      test_scene: scan_23, scan_1457_west
+      # trainer.scene.parameters.log_scaling.lr: 0.03, 0.3
+      # trainer.scene.parameters.rotation.lr: 0.01, 0.1
       
-
-
 
 project: grid_search__${now:%Y-%m-%d}__${now:%H-%M-%S}
 run_name: ${hydra:job.num}__test_scene=${test_scene}
 
 
-algorithm: grid-search
+algorithm: grid_search
 
 debug: False

@@ -1,0 +1,23 @@
+# @package _global_
+
+conn:
+  redis:
+    port: 6379
+    db_num: 0
+    key_for_graphite: daily_multirun:avg_result
+    key_for_optuna_result: optuna:avg_result
+
+
+  flask:
+    port: 8000
+
+
+  graphite:
+    docker_host: 172.18.0.2
+    remote_host: csse-maaratech1
+    user: maara
+    local_port: 2003
+    remote_port: 2003
+
+
+  host: test
