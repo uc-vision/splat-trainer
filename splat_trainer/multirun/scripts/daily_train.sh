@@ -31,3 +31,5 @@ rm -rf $HOME/.cache/torch_extensions/py311_cu121_room347
 splat-trainer-multirun +multirun=daily_multirun logger.group=${DATE} >> "$LOG_FILE" 2>&1
 
 echo "Script completed at $(date)" >> "$LOG_FILE"
+
+rm -rf ${BASE_PATH}/splat-trainer
