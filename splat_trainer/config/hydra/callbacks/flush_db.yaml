@@ -1,0 +1,9 @@
+# @package _global_
+
+
+hydra:
+  callbacks:
+    flush_db:
+      _target_: splat_trainer.multirun.flush_db.FlushDB
+      redis_port: ${conn.redis.port}
+      redis_db_num: ${conn.redis.db_num}

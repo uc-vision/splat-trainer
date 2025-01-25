@@ -22,7 +22,7 @@ class PushStats(Callback):
                  local_port: int, 
                  remote_port: int,
                  redis_port: int,
-                 redis_db: int,
+                 redis_db_num: int,
                  result_key: str) -> None:
         self.user = user
         self.docker_host = docker_host
@@ -32,7 +32,7 @@ class PushStats(Callback):
         
         self.redis_host = socket.gethostname()
         self.redis_port = redis_port
-        self.redis_db = redis_db
+        self.redis_db_num = redis_db_num
         
         self.result_key = result_key
         
@@ -43,8 +43,6 @@ class PushStats(Callback):
         self.log.error(f"Start pushing training metrics to Graphite database...")
         try: 
             self.push_stats()
-            self.log.info(f"Training metrics pushed to Graphite.")
-            self.log.setLevel(logging.INFO)
             
         except Exception as e:
             self.log.error(f"Error occurred while pushing data to Graphite: {e}")
@@ -56,7 +54,7 @@ class PushStats(Callback):
     def push_stats(self, averaged_results: Optional[dict]=None):
         
         if not averaged_results:
-            redis_client = redis.Redis(host=self.redis_host, port=self.redis_port, db=self.redis_db, decode_responses=True)
+            redis_client = redis.Redis(host=self.redis_host, port=self.redis_port, db=self.redis_db_num, decode_responses=True)
             averaged_results = redis_client.hgetall(self.result_key)
         
         assert averaged_results, "Error: result data not found or empty in Redis."
@@ -70,6 +68,8 @@ class PushStats(Callback):
                     graphite_pusher.push_stat(metric, float(value), timestamp)
 
                 time.sleep(10)
+                
+            self.log.info(f"Training metrics pushed to Graphite.")
                 
         except Exception as e:
             log.error(f"Failed pushing data to Graphite database with error: {e}")

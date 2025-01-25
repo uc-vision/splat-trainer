@@ -24,13 +24,13 @@ class ManageRQWorkers(Callback):
                 config: str, 
                 flask_port: int, 
                 redis_port: int, 
-                redis_db: int,
+                redis_db_num: int,
                 get_pass: bool=False,
                 max_num_worker_on_each_machine: int=1):
         self.data = {}
         
         self.hostname = socket.gethostname()
-        self.redis_url = f'redis://{self.hostname}:{redis_port}/{redis_db}'
+        self.redis_url = f'redis://{self.hostname}:{redis_port}/{redis_db_num}'
         self.flask_port = flask_port
 
         self.args = SimpleNamespace(
@@ -46,7 +46,6 @@ class ManageRQWorkers(Callback):
 
     def on_multirun_start(self, config: DictConfig, **kwargs: Any) -> None:
         shutdown_all_workers(self.redis_url)
-        flush_db(self.redis_url)
         
         try:
             result = deploy_workers(self.args)

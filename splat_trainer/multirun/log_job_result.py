@@ -10,29 +10,30 @@ from hydra.experimental.callback import Callback
 from omegaconf import DictConfig, OmegaConf
 
 from splat_trainer.multirun.deploy import shutdown_workers_on_host
-from splat_trainer.multirun.util import save_to_json
+from splat_trainer.multirun.util import save_to_json, get_sweep_params_dict
 
 
 
 class LogJobResult(Callback):
-    def __init__(self, output_dir: str, sweep_params: DictConfig, redis_port: int, redis_db: int) -> None:
+    def __init__(self, output_dir: str, sweep_params: DictConfig, redis_port: int, redis_db_num: int) -> None:
         self.output_dir = output_dir
         self.sweep_params = sweep_params
         self.log = logging.getLogger(f"{__name__}.{self.__class__.__name__}")
         self.redis_port = redis_port
-        self.redis_db = redis_db
+        self.redis_db_num = redis_db_num
         self.redis_host = socket.gethostname()
         
         
     def on_job_start(self, config: DictConfig, **kwargs: Any) -> None:
         
-        self.params = {".".join(k.lstrip('+').split(".")[-2:]): v for k, v in (override.split('=') 
-                    for override in OmegaConf.select(config, "hydra.overrides.task")) if k in self.sweep_params}
+        self.params = get_sweep_params_dict(config, self.sweep_params)
                 
         self.start_time = time.time()
     
     
     def on_job_end(self, config: DictConfig, job_return: JobReturn, **kwargs: Any) -> None:
+        
+        runtime = time.time() - self.start_time if self.start_time else None
      
         job_num = config.hydra.job.num
         hostname = socket.gethostname()
@@ -50,7 +51,7 @@ class LogJobResult(Callback):
                 "result": job_return.return_value if isinstance(job_return.return_value, dict) else {"metric": job_return.return_value},
             }
             
-            result_data["result"]["runtime"] = time.time() - self.start_time if self.start_time else None
+            result_data["result"]["runtime"] = runtime
             
             results_file = os.path.join(self.output_dir, "results.json")
             save_to_json(results_file, result_data)
@@ -72,7 +73,7 @@ class LogJobResult(Callback):
             }
             
             if "Permission" in str(job_return._return_value):
-                redis_url = f"redis://{self.redis_host}:{self.redis_port}/{self.redis_db}"
+                redis_url = f"redis://{self.redis_host}:{self.redis_port}/{self.redis_db_num}"
                 shutdown_workers_on_host(redis_url, hostname)
 
             failed_jobs_file = os.path.join(self.output_dir, "failed_jobs.json")

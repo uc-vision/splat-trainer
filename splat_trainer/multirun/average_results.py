@@ -18,12 +18,12 @@ from splat_trainer.multirun.util import compute_average_across_scenes, save_to_c
 
 
 class AverageResults(Callback):
-    def __init__(self, output_dir: str, redis_port: int, redis_db: int) -> None:
+    def __init__(self, output_dir: str, redis_port: int, redis_db_num: int) -> None:
         self.output_dir = output_dir
         self.log = logging.getLogger(f"{__name__}.{self.__class__.__name__}")
         self.redis_host = socket.gethostname()
         self.redis_port = redis_port
-        self.redis_db = redis_db
+        self.redis_db_num = redis_db_num
         
         
     def on_multirun_start(self, config: DictConfig, **kwargs: Any) -> None: 
@@ -44,24 +44,14 @@ class AverageResults(Callback):
 
         assert average, "Error: average is empty!"
         
-        redis_db = redis.Redis(host=self.redis_host, port=self.redis_port, db=self.redis_db, decode_responses=True)
+        redis_db = redis.Redis(host=self.redis_host, port=self.redis_port, db=self.redis_db_num, decode_responses=True)
         if 'push_stats' in config.hydra.callbacks:
             redis_db.hset(config.conn.redis.key_for_graphite, mapping=average)
+            self.log.info("Averaged results uploaded to redis.")
             
         if config.algorithm != 'grid_search':
-            redis_db.hset(config.conn.redis.key_for_optuna_result, mapping=average)
-        
-        # TODO: log time series data 
-        # if 'log_best_result' in config.hydra.callbacks:
-        #     timestamp = int(time.time() * 1000)
-        #     redis_db.set("project", self.project)
-        #     for metric, value in average.items():
-        #         # redis_db.execute_command("TS.ADD", f"{self.project}:result:{metric}", timestamp, value)
-        #     # params = df['param'].iloc[0].to_dict()
-        #     # redis_db.hset(f"{self.project}:params:{timestamp}", mapping=params)
-        #     # redis_db.zadd
-            
-            
+            redis_db.hset(f"{self.project}:result", mapping=average)
+  
         self.log_average_to_wandb(df, self.project, self.group)
             
         output_file = Path(self.output_dir) / "averaged_results.csv"
@@ -100,8 +90,3 @@ class AverageResults(Callback):
                 self.log.error(f"Failed to upload results to wandb: {e}")
             except Exception as e:
                 self.log.error(f"Unexpected error occurred while logging to wandb: {e}")
-
-
-
-
-    

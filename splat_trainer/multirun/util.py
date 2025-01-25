@@ -5,6 +5,7 @@ import os
 from typing import Union
 
 from filelock import FileLock
+from omegaconf import DictConfig, OmegaConf
 import pandas as pd
 import redis
 
@@ -78,6 +79,11 @@ def compute_average_across_scenes(results_file: Path | str | None) -> tuple[dict
     result = df.iloc[0]['average_result'].to_dict()
     
     return result, df
+
+
+def get_sweep_params_dict(config: DictConfig, sweep_params: DictConfig):
+    return {".".join(k.lstrip('+').split(".")[-2:]): v for k, v in (override.split('=') 
+                    for override in OmegaConf.select(config, "hydra.overrides.task")) if k in sweep_params}
 
 
 

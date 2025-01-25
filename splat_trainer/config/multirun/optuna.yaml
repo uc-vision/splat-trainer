@@ -10,6 +10,7 @@ defaults:
   - override /hydra/sweeper/sampler: cmaes
   - override /dataset: null
   - override /hydra/callbacks:
+    - flush_db
     - log_best_result
     - log_job_result
   - _self_
@@ -34,7 +35,7 @@ hydra:
     direction: maximize
     study_name: splat-trainer
     storage: null
-    n_trials: 3
+    n_trials: 50
     n_jobs: 1
     params:
       trainer.scene.parameters.log_scaling.lr: interval(0.001, 0.1)

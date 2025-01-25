@@ -12,5 +12,5 @@ hydra:
       remote_port: ${conn.graphite.remote_port}
 
       redis_port: ${conn.redis.port}
-      redis_db: ${conn.redis.db_num}
+      redis_db_num: ${conn.redis.db_num}
       result_key: ${conn.redis.key_for_graphite}

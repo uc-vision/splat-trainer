@@ -8,4 +8,4 @@ hydra:
       output_dir: ${hydra.sweep.dir}
       sweep_params: ${hydra.sweeper.params}
       redis_port: ${conn.redis.port}
-      redis_db: ${conn.redis.db_num}
+      redis_db_num: ${conn.redis.db_num}
