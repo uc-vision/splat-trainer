@@ -60,5 +60,6 @@ class LogBestResult(Callback):
         self.run.log({f"optuna_optimization_param/{param_name}": float(param_value) for param_name, param_value in self.params.items()}, step=current_step)
         self.run.log({f"optuna_optimization_best_value/best_train_psnr": best_result['train_psnr']}, step=current_step)
 
-        
-        
+    
+    def on_multirun_end(self, config: DictConfig, **kwargs: Any) -> None: 
+        self.run.finish()

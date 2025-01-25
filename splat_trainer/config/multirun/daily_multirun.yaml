@@ -10,6 +10,7 @@ defaults:
   - override /trainer: default
   - override /viewer: none
   - override /hydra/callbacks:
+    - flush_db
     - push_stats
     - average_results
     - log_job_result

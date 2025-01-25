@@ -5,7 +5,6 @@ conn:
     port: 6379
     db_num: 0
     key_for_graphite: daily_multirun:avg_result
-    key_for_optuna_result: optuna:avg_result
 
 
   flask:

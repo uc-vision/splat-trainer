@@ -19,7 +19,3 @@ class FlushDB(Callback):
     def on_multirun_start(self, config: DictConfig, **kwargs: Any) -> None: 
         flush_db(self.redis_url)
         
-
-    def on_multirun_end(self, config: DictConfig, **kwargs: Any) -> None: 
-        flush_db(self.redis_url)
-        
