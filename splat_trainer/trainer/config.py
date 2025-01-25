@@ -28,8 +28,8 @@ class CloudInitConfig:
   limit_points: Optional[int] = None
   initial_points : Optional[int] = None
   
-  min_point_overlap: int = 4
-
+  min_view_overlap: int = 4
+  clamp_near: float = 0.0
 
 @beartype
 @dataclass(kw_only=True, frozen=True)

@@ -11,7 +11,7 @@ maintainers = [
 ]
 
 dependencies = [
-  'taichi-splatting >= 0.30.0',
+  'taichi-splatting >= 0.31.0',
   'tqdm',
   'plyfile',
   'pypcd4',
@@ -73,6 +73,7 @@ checkpoint-write-sh = "splat_trainer.scripts.checkpoint:write_sh_gaussians"
 checkpoint-show-batch = "splat_trainer.scripts.view_batching:main"
 checkpoint-benchmark = "splat_trainer.scripts.benchmark:main"
 checkpoint-view-clusters = "splat_trainer.scripts.view_clusters:main"
+checkpoint-render-image = "splat_trainer.scripts.render_image:main"
 
 checkpoint-eval-pruning = "splat_trainer.scripts.eval_pruning:main"
 

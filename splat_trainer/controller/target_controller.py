@@ -7,11 +7,9 @@ from beartype import beartype
 from taichi_splatting import Rendering
 import torch
 
-from splat_trainer.config import eval_varying
+from splat_trainer.config import clamp, eval_varying, smoothstep
 from splat_trainer.controller.point_state import PointState, densify_and_prune, log_histograms
-from splat_trainer.gaussians.split import sample_gaussians
 from splat_trainer.logger.logger import Logger
-from splat_trainer.util.misc import lerp, exp_lerp, pow_lerp
 from .controller import Controller, ControllerConfig
 from splat_trainer.scene import GaussianScene
 
@@ -23,8 +21,8 @@ class TargetConfig(ControllerConfig):
   # base rate (relative to count) to prune points 
   prune_rate:float = 0.04
 
-  # maximum split rate (relative to count when count is less than target)
-  max_split_rate:float = 0.06
+  # proportion of training when we hit the target count
+  target_count_t:float = 0.8
 
   # minimum number of times point is in view before it is able to be pruned
   min_views:int = 10
@@ -39,11 +37,11 @@ class TargetConfig(ControllerConfig):
 
 
 
-  def make_controller(self, scene:GaussianScene, logger:Logger):
-    return TargetController(self, scene, logger)
+  def make_controller(self, scene:GaussianScene, target_points:int, progress:Progress, logger:Logger):
+    return TargetController(self, scene, target_points, progress, logger)
 
-  def from_state_dict(self, state_dict:dict, scene:GaussianScene, logger:Logger) -> Controller:
-    controller = TargetController(self, scene, logger)
+  def from_state_dict(self, state_dict:dict, scene:GaussianScene, target_points:int, progress:Progress, logger:Logger) -> Controller:
+    controller = TargetController(self, scene, target_points, progress, logger, start_points=state_dict['start_points'])
     controller.points.load_state_dict(state_dict['points'])
     return controller
 
@@ -51,36 +49,40 @@ class TargetConfig(ControllerConfig):
 
 class TargetController(Controller):
   def __init__(self, config:TargetConfig, 
-               scene:GaussianScene, logger:Logger):
+               scene:GaussianScene, target_points:int, progress:Progress, logger:Logger, start_points:int=None):
     
     self.config = config
     self.scene = scene
     self.logger = logger
 
     self.points = PointState.new_zeros(scene.num_points, device=scene.device)
-    self.densify_interval = eval_varying(self.config.densify_prune_interval, 0.)
-    self.next_densify = self.densify_interval
+    self.start_points = start_points or scene.num_points
 
+    self.next_densify = self.find_next_densify(progress) + 50
+    self.max_points = target_points
+    
   def __repr__(self):
     return f"TargetController(points={self.points.batch_size[0]})"
 
 
   def state_dict(self) -> dict:
-    return dict(points=self.points.state_dict())
+    return dict(points=self.points.state_dict(), start_points=self.start_points)
 
 
-  def find_split_prune_indexes(self, target_count:int, t:float):
+
+  def find_split_prune_indexes(self, t:float, target_points:int):
     config = self.config  
     n = self.points.batch_size[0]
 
     exceeds_scale = self.points.max_scale_px > config.max_scale_px
-    prune_schedule = math.ceil(config.prune_rate * n * (1 - t))
+    prune_schedule = int(math.ceil(config.prune_rate * n * (1 - t)))
 
     prune_cost, split_score = self.points.masked_heuristics(config.min_views)
     
-    prune_mask = take_n(prune_cost, prune_schedule, descending=False) | exceeds_scale                  
-    target_split = int(min(config.max_split_rate * n, (target_count - n) + prune_mask.sum().item())) 
+    prune_mask = take_n(prune_cost, prune_schedule, descending=False) | exceeds_scale 
 
+    target_split = (target_points - n) + prune_mask.sum().item()
+    
     split_score = self.points.split_score 
     split_score[prune_mask] = 0.
 
@@ -95,20 +97,30 @@ class TargetController(Controller):
     return split_mask ^ both, prune_mask ^ both
 
 
-  def step(self, target_count:int, progress:Progress, log_details:bool=False):
+  def find_next_densify(self, progress:Progress):
+    densify_interval =  eval_varying(self.config.densify_prune_interval, progress.t)
+    next_densify = progress.step + densify_interval
+
+    return next_densify if (next_densify + densify_interval < progress.total_steps) else None
+
+
+  def target_points(self, progress:Progress):
+    target_step = self.config.target_count_t * progress.total_steps
+    t = clamp(progress.step / target_step, 0.0, 1.0)
+    return int(smoothstep(t, self.start_points, self.max_points))   
+
+  def step(self, progress:Progress, log_details:bool=False):
 
     if log_details:
       log_histograms(self.points, self.logger, "step")
 
-    if progress.step >= self.next_densify:
-    
-      split_mask, prune_mask = self.find_split_prune_indexes(target_count, progress.t)
+    next_densify = self.next_densify
+    if next_densify is not None and progress.step >= next_densify:
+      split_mask, prune_mask = self.find_split_prune_indexes(progress.t, self.target_points(progress))
       densify_and_prune(self.points, self.scene, split_mask, prune_mask, self.logger)
       
       self.points = PointState.new_zeros(self.scene.num_points, device=self.scene.device)
-  
-      self.densify_interval =  eval_varying(self.config.densify_prune_interval, progress.t)
-      self.next_densify = progress.step + self.densify_interval
+      self.next_densify = self.find_next_densify(progress)
 
       gc.collect()
       torch.cuda.empty_cache()      
@@ -128,7 +140,7 @@ class TargetController(Controller):
     #   position += sample_gaussians(points, noise)
 
 
-  def add_rendering(self, image_idx:int, rendering:Rendering):
+  def add_rendering(self, image_idx:int, rendering:Rendering, progress:Progress):
     self.points.add_rendering(rendering)
 
 

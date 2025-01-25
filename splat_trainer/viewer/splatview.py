@@ -1,5 +1,5 @@
 from abc import ABCMeta, abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from functools import partial
 import time
 from typing import Any
@@ -20,6 +20,7 @@ from taichi_splatting.perspective import CameraParams
 
 from splat_trainer.camera_table.camera_table import Camera, Cameras
 from splat_trainer.trainer import Trainer, TrainerState
+from splat_trainer.visibility.query_points import foreground_points
 
 from .viewer import ViewerConfig, Viewer
 from .logger import StatsLogger
@@ -53,16 +54,21 @@ class SplatviewViewer(Viewer):
     self.config = config  
     self.trainer = trainer
     self.zoom = 1.0
+    self.far_modifier = 1.0
+    self.near_modifier = 1.0
     self.server = viser.ViserServer(port=self.config.port, verbose=False)
 
     self.logger = StatsLogger()
 
-    trainer.add_logger(self.logger)
+    # trainer.add_logger(self.logger)
     trainer.bind(on_update=self.update)
+    self.original_scene = self.trainer.scene.clone()
+
     self.create_ui(enable_training)
 
-    cameras = self.trainer.camera_table.cameras
-    up = F.normalize(cameras.up).mean(dim=0)
+    self.cameras = self.trainer.camera_table.cameras
+
+    up = F.normalize(self.cameras.up).mean(dim=0)
     self.server.scene.set_up_direction(up.cpu().numpy())
 
     self.viewer = splatview.Viewer(
@@ -80,7 +86,7 @@ class SplatviewViewer(Viewer):
       
       with self.server.gui.add_folder("Progress") as self.progress_folder:    
         self.training = self.server.gui.add_markdown(self.progress_text)
-        self.progress = self.server.gui.add_progress_bar(self.trainer.t * 100.)
+        self.progress = self.server.gui.add_progress_bar(self.trainer.progress.t * 100.)
 
         self.paused_checkbox = self.server.gui.add_checkbox("Paused", initial_value=self.trainer.state == TrainerState.Paused, disabled=not enable_training)
         self.paused_checkbox.on_update(self.on_pause_train)
@@ -98,18 +104,36 @@ class SplatviewViewer(Viewer):
         self.zoom_slider = self.server.gui.add_slider("Zoom", min=0.1, max=10, step=0.1, initial_value=1.0)
         self.zoom_slider.on_update(self.on_set_zoom)
 
+        self.far_slider = self.server.gui.add_slider("Far", min=0.1, max=10., step=0.01, initial_value=1.0)
+        self.far_slider.on_update(self.on_set_far)
+
+        self.near_slider = self.server.gui.add_slider("Near", min=0.1, max=1, step=0.01, initial_value=0.1)
+        self.near_slider.on_update(self.on_set_near)
+
+
+      with self.server.gui.add_folder("Renderer") as self.renderer_folder:
         self.antialias_checkbox = self.server.gui.add_checkbox("Antialias", initial_value=self.trainer.config.antialias)
         self.antialias_checkbox.on_update(self.on_set_antialias)
 
-          
+        self.specular_checkbox = self.server.gui.add_checkbox("Enable Specular", initial_value=True)
+        self.specular_checkbox.on_update(self.on_set_specular)
+
+      with self.server.gui.add_folder("Scene") as self.scene_folder:
+        self.quantile_slider = self.server.gui.add_slider("Depth quantile", min=0.0, max=1.0, step=0.01, initial_value=1.0)
+        self.min_overlap_slider = self.server.gui.add_slider("Min overlap", min=0.0, max=1.0, step=0.01, initial_value=0.01)
+
+        self.crop_button = self.server.gui.add_button("Crop")
+        self.crop_button.on_click(self.on_crop)
+        
 
   @property
   def progress_text(self):
-    return f"<sub>{self.trainer.step}/{self.trainer.total_steps}</sub>"
+    progress = self.trainer.progress
+    return f"<sub>{progress.step}/{progress.total_steps}</sub>"
 
   def update_training(self):
     self.training.content = self.progress_text
-    self.progress.value = self.trainer.t * 100.
+    self.progress.value = self.trainer.progress.t * 100.
 
     self.paused_checkbox.value = self.trainer.state == TrainerState.Paused
     
@@ -131,8 +155,44 @@ class SplatviewViewer(Viewer):
     self.viewer.client(event.client.client_id).redraw()
 
   @with_traceback
+  def on_set_far(self, event: viser.GuiEvent[viser.GuiSliderHandle]):
+    self.far_modifier = event.target.value
+    self.viewer.client(event.client.client_id).redraw()
+
+  @with_traceback
+  def on_set_near(self, event: viser.GuiEvent[viser.GuiSliderHandle]):
+    self.near_modifier = event.target.value
+    self.viewer.client(event.client.client_id).redraw()
+
+
+  @with_traceback
   def on_set_antialias(self, event: viser.GuiEvent[viser.GuiCheckboxHandle]):
     self.trainer.update_config(antialias=event.target.value)
+    self.viewer.client(event.client.client_id).redraw()
+
+  @with_traceback
+  def on_set_specular(self, event: viser.GuiEvent[viser.GuiCheckboxHandle]):
+    scene_config = self.trainer.config.scene
+
+    if not hasattr(scene_config, 'enable_specular'):
+      print("Warning: scene config does not have enable_specular field")
+      return
+    
+
+    self.trainer =self.trainer.replace(
+      scene=replace(scene_config, enable_specular=event.target.value))
+    self.viewer.client(event.client.client_id).redraw()
+
+  @with_traceback
+  def on_crop(self, event: viser.GuiEvent[viser.GuiButtonHandle]):
+    quantile = self.quantile_slider.value
+    min_overlap = self.min_overlap_slider.value
+
+    mask = foreground_points(self.cameras, self.original_scene.gaussians.position, quantile=quantile, min_overlap=min_overlap)
+    scene = self.original_scene.clone()
+    scene.split_and_prune(keep_mask=mask)
+
+    self.trainer.scene = scene
     self.viewer.client(event.client.client_id).redraw()
 
 
@@ -193,7 +253,7 @@ class SplatviewViewer(Viewer):
 
     camera_params = CameraParams(projection=torch.tensor(projection, device=self.trainer.device),
                                  T_camera_world=torch.inverse(world_t_camera),
-                                 near_plane=near, far_plane=far,
+                                 near_plane=near * self.near_modifier, far_plane=far * self.far_modifier,
                                  image_size=camera.image_size)
     
     camera_params = camera_params.to(device=self.trainer.device, dtype=torch.float32)

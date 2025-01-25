@@ -18,9 +18,8 @@ trainer:
     initial_points: null  
     limit_points: null
 
-    min_point_overlap: 8 # minimum number of views a point must be visible in when adding random points
-
-
+    clamp_near: 1.0
+    min_view_overlap: 4 # minimum number of views a point must be visible in when adding random points
 
   # Scheduling settings
   total_steps: ${int_mul:20000,${training_scale}}
@@ -44,8 +43,8 @@ trainer:
   ssim_levels: 3
 
   scale_reg: ${log_decay:0.01, 0.001}
-  opacity_reg: ${log_decay:0.001, 0.001}
-  # aspect_reg: 0.0001
+  opacity_reg: ${log_decay:1.0, 100.0}
+  aspect_reg: 0.0001
 
   # view similarity
   vis_clusters: 1024

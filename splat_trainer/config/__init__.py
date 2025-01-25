@@ -34,34 +34,59 @@ class Progress:
     return float(self.t)
 
 
-
 class Varying(Generic[T], metaclass=ABCMeta):
   @abstractmethod
   def __call__(self, t:float) -> T:
-    pass
+    raise NotImplementedError
+  
+  def __mul__(self, scale:float) -> 'Varying':
+    raise NotImplementedError
+  
+  def __truediv__(self, scale:float) -> 'Varying':
+    return self * (1.0 / scale)
 
 class Constant(Varying[T]):
   def __init__(self, value:T):
     self.value = value
 
+  def __mul__(self, scale:float) -> 'Constant':
+    return Constant(self.value * scale)
+
   def __call__(self, t:float) -> T:
     return self.value
+  
+  def __repr__(self):
+    return f"Constant({self.value})"
   
 class Linear(Varying[T]):
   def __init__(self, start:T, end:T):
     self.start = start
     self.end = end
 
+
+  def __mul__(self, scale:float) -> 'Linear':
+    return Linear(self.start * scale, self.end * scale)    
+
   def __call__(self, t:float) -> T:
     return self.start * (1 - t) + self.end * t
   
+
+  def __repr__(self):
+    return f"Linear({self.start}, {self.end})"
+
 class LogDecay(Varying[T]):
   def __init__(self, start:T, factor:T):
     self.start = start
     self.factor = factor
 
+  def __mul__(self, scale:float) -> 'LogDecay':
+    return LogDecay(self.start * scale, self.factor)
+
   def __call__(self, t:float) -> T:
     return self.start * self.factor ** t
+  
+  def __repr__(self):
+    return f"LogDecay({self.start}, {self.factor})"
 
 
 class LogLinear(Varying[T]):
@@ -69,14 +94,23 @@ class LogLinear(Varying[T]):
     self.start = start
     self.end = end
 
+  def __mul__(self, scale:float) -> 'LogLinear':
+    return LogLinear(self.start * scale, self.end * scale)
+
   def __call__(self, t:float) -> T:
     return math.exp(math.log(self.start) * (1 - t) + math.log(self.end) * t)
+  
+  def __repr__(self):
+    return f"LogLinear({self.start}, {self.end})"
 
 class Piecewise(Varying[T]):
   def __init__(self, start:T, steps:list[tuple[float, T]], scale:float = 1.0):
     self.start = start
     self.steps = steps
     self.scale = scale
+
+  def __mul__(self, scale:float) -> 'Piecewise':
+    return Piecewise(self.start, self.steps, self.scale * scale)
 
   def __call__(self, t:float) -> T:
     value = self.start
@@ -87,6 +121,8 @@ class Piecewise(Varying[T]):
 
     return value * self.scale
   
+  def __repr__(self):
+    return f"Piecewise({self.start}, {self.steps}, {self.scale})"
 
 def smoothstep(t, a, b, interval=(0, 1)):
   # interpolate with smoothstep function
@@ -101,9 +137,14 @@ class SmoothStep(Varying[float]):
     self.start = start
     self.end = end
 
+  def __mul__(self, scale:float) -> 'SmoothStep':
+    return SmoothStep(self.start * scale, self.end * scale)
+
   def __call__(self, t:float) -> float:
     return smoothstep(t, self.start, self.end)
   
+  def __repr__(self):
+    return f"SmoothStep({self.start}, {self.end})"
 
 
 def clamp(x:float, min_val:float, max_val:float):
@@ -158,7 +199,9 @@ class Between(Varying[T]):
     return self.varying(t)
 
 
-  
+  def __repr__(self):
+    return f"Between({self.t_start}, {self.t_end}, {self.varying})"
+
 @beartype
 def schedule_lr(v:Varying[float] | float, t:float,  optimizer:Optimizer):
   lr = v(t) if isinstance(v, Varying) else v
@@ -171,7 +214,7 @@ def schedule_groups(groups:dict[str, VaryingFloat], t:float, optimizer:Optimizer
   group_dict = {param_group['name']: param_group for param_group in optimizer.param_groups}
 
   for name, lr in groups.items(): 
-      if not name in group_dict:
+      if name not in group_dict:
           raise KeyError(f"Group {name} not found in optimizer")
       
       group_dict[name]['lr'] = eval_varying(lr, t)
@@ -221,7 +264,7 @@ def add_resolvers():
         lambda x, y: target('LogLinear', start=x, end=y))
 
     OmegaConf.register_new_resolver("log_decay", 
-        lambda x, y: target('LogLinear', start=x, end=x * y))
+        lambda x, y: target('LogDecay', start=x, factor=y))
     
     OmegaConf.register_new_resolver("linear_decay", 
         lambda x, y: target('Linear', start=x, end=x * y))

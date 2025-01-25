@@ -34,7 +34,7 @@ class PointState:
 
 
     def add_rendering(self, rendering:Rendering, far_distance:float = 0.75, 
-                      split_alpha:float = 0.01, prune_alpha:float = 0.9):
+                      split_alpha:float = 0.01, prune_alpha:float = 0.1):
         points = rendering.points
         far_points = points.depths.squeeze(1) > points.depths.quantile(far_distance)
 

@@ -12,10 +12,12 @@ from splat_trainer import config
 from taichi_splatting import TaichiQueue
 
 import torch
+import torch._logging
+
 import os
 
 from splat_trainer.viewer.viewer import Viewer
-
+import logging
 
 
 
@@ -130,7 +132,7 @@ def cfg_from_args():
     assert not args.limit_points, "Cannot use both --limit_points and --random_points"
     assert not args.initial_points, "Cannot use both --initial_points and --random_points"
 
-    overrides.append(f"trainer.cloud_init.limit_points=0")
+    overrides.append("trainer.cloud_init.limit_points=0")
     overrides.append(f"trainer.cloud_init.initial_points={args.random_points}")
 
 
@@ -187,6 +189,9 @@ def train_with_config(cfg) -> dict | str:
 
   torch.set_grad_enabled(False)
   torch.set_float32_matmul_precision('high')
+  
+  # suppress triton and torch dynamo verbosity
+  # torch._logging.set_logs(dynamo=logging.CRITICAL, inductor=logging.CRITICAL)
 
   torch.set_printoptions(precision=4, sci_mode=False)
   np.set_printoptions(precision=4, suppress=True)

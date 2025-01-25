@@ -1,23 +1,21 @@
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from numbers import Number
 from typing import Iterator, Optional, Tuple
 from beartype import beartype
-from taichi_splatting import Gaussians3D
 import torch
 
-from splat_trainer.camera_table.camera_table import  Camera, Cameras, CameraTable
+from splat_trainer.camera_table.camera_table import  Camera, Cameras
 from splat_trainer.util.pointcloud import PointCloud
 from splat_trainer.util.transforms import expand_proj, transform44
 import torch.nn.functional as F
 
-from tensordict.tensorclass import tensorclass
 
 def make_homog(points):
   shape = list(points.shape)
   shape[-1] = 1
   return torch.concatenate([points, torch.ones(shape, dtype=torch.float32, device=points.device)], axis=-1)
 
-def _transform_points(transform, points):
+def transform_points(transform, points):
   assert points.shape[
       -1] == 3, 'transform_points: expected 3d points of ...x3, got:' + str(
           points.shape)
@@ -27,7 +25,7 @@ def _transform_points(transform, points):
   return transformed[..., 0].reshape(-1, 4)
 
 def project_points(transform, xyz):
-  homog = _transform_points(transform, xyz)
+  homog = transform_points(transform, xyz)
   depth = homog[..., 2:3]
   xy = homog[..., 0:2] 
   return (xy / depth), depth

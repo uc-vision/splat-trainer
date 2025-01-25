@@ -1,6 +1,7 @@
 
 # @package _global_
 
+
 trainer:
   scene: 
     _target_: splat_trainer.scene.TCNNConfig
@@ -25,25 +26,37 @@ trainer:
         type: vector
 
 
-
     beta1: 0.8
     beta2: 0.95
 
     vis_beta: 0.999
+    vis_smooth: 0.001
 
     # TCNN specific
-    image_features: 48
+    image_features: 16
     point_features: 16
 
-    hidden_features: 64
-    hidden_layers: 1
 
-    sh_degree: 5
+    color_model: 
+      _target_: splat_trainer.scene.ColorModelConfig
+      hidden_features: 32
+      hidden_layers: 1
+
+      sh_degree: 5
+      hdr: false
+
+      color_channels: 3
+
+      lr_diffuse: ${log_decay:0.001, 0.1}
+      lr_specular: ${log_decay:0.0001, 0.1}
+      
 
     # Per image features (as opposed to per-camera features)
-    per_image: True
+    per_image: False
 
     lr_image_feature: 2.0
-    lr_nn: ${log_decay:0.003, 0.1}
+
+    enable_specular: true
+    autotune: true
 
 

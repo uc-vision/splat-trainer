@@ -37,11 +37,11 @@ class MCMCConfig(ControllerConfig):
 
 
 
-  def make_controller(self, scene:GaussianScene, logger:Logger):
-    return MCMCController(self, scene, logger)
+  def make_controller(self, scene:GaussianScene, target_points:int, progress:Progress, logger:Logger):
+    return MCMCController(self, scene, target_points, progress, logger)
 
-  def from_state_dict(self, state_dict:dict, scene:GaussianScene, logger:Logger) -> Controller:
-    controller = MCMCController(self, scene, logger)
+  def from_state_dict(self, state_dict:dict, scene:GaussianScene, target_points:int, progress:Progress, logger:Logger) -> Controller:
+    controller = MCMCController(self, scene, target_points, progress, logger)
     controller.points.load_state_dict(state_dict['points'])
     return controller
 
@@ -49,12 +49,12 @@ class MCMCConfig(ControllerConfig):
 
 class MCMCController(Controller):
   def __init__(self, config:MCMCConfig, 
-               scene:GaussianScene, logger:Logger):
+               scene:GaussianScene, target_points:int, progress:Progress, logger:Logger):
     
     self.config = config
     self.scene = scene
     self.logger = logger
-
+    self.target_points = target_points
     self.points = PointState.new_zeros(scene.num_points, device=scene.device)
     self.num_points = scene.num_points
 
@@ -67,7 +67,7 @@ class MCMCController(Controller):
 
     
   @torch.no_grad()
-  def step(self, target_count:int, progress:Progress, log_details:bool=False):
+  def step(self, progress:Progress, log_details:bool=False):
     points:ParameterClass = self.scene.points
     enough_views = self.points.points_in_view > self.config.min_views
 
@@ -80,9 +80,6 @@ class MCMCController(Controller):
         | (opacity < self.config.opacity_threshold)
       )
       n = prune_mask.sum().item()
-
-
-
 
       too_small = self.points.max_scale_px < self.config.min_split_px
       split_score = torch.where(prune_mask | too_small, 0, self.points.split_score)
@@ -107,11 +104,9 @@ class MCMCController(Controller):
 
       # self.scene.points.update_group('position', point_lr=mult)
 
-
       
-  def add_rendering(self, image_idx:int, rendering:Rendering):
-    self.points.lerp_heuristics(rendering)
-    self.points.add_in_view(rendering)
+  def add_rendering(self, image_idx:int, rendering:Rendering, progress:Progress):
+    self.points.add_rendering(rendering)
 
 
 

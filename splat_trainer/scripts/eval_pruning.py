@@ -5,7 +5,7 @@ import torch
 from tqdm import tqdm
 
 from splat_trainer.controller import DisabledConfig
-from splat_trainer.controller.threshold_controller import take_n
+from splat_trainer.controller.target_controller import take_n
 from splat_trainer.scene.point_statistics import PointStatistics
 from splat_trainer.scene.scene import GaussianScene
 from splat_trainer.scripts.checkpoint import arguments, with_trainer
@@ -45,6 +45,8 @@ def evaluate_with_training(trainer:Trainer, train:bool) -> dict:
 
   train = trainer.dataset.train(shuffle=False)
   metrics = [eval.metrics for eval in tqdm(trainer.evaluations(train), desc="Evaluating", total=len(train))]
+
+  return mean_rows(metrics)
 
 
 def show_pruning(trainer:Trainer, cloud:Gaussians3D, prune_mask:torch.Tensor):

@@ -12,12 +12,12 @@ import roma
     
 
     
-
+@torch.compile(dynamic=True)
 def point_basis(log_scaling:torch.Tensor, rotation_quat:torch.Tensor, eps:float=1e-4):
   scale = torch.clamp_min(torch.exp(log_scaling), eps)
   r = F.normalize(rotation_quat, dim=1)
-
   return roma.unitquat_to_rotmat(r) * scale.unsqueeze(-2)
+
 
 
 def multi_sample_gaussians(points:TensorDict,           # (N,)      - TensorDict of gaussians with log_scaling and rotation

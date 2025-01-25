@@ -72,7 +72,8 @@ def pow_lerp(t:float | torch.Tensor, a:torch.Tensor, b:torch.Tensor, k:float=2) 
 def lerp(t:float | torch.Tensor, a:torch.Tensor, b:torch.Tensor) -> torch.Tensor:
   return torch.lerp(a, b, t)
 
-
+def saturate(t, gain=6.0, k=1.0):
+  return (1 - 1/torch.exp(gain * t)).pow(k)
 
 class CudaTimer:
   def __init__(self):

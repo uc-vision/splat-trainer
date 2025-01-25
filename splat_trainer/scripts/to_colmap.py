@@ -18,7 +18,6 @@ from splat_trainer.dataset.scan.loading import CameraImage, camera_rig_table, pr
 import camera_geometry 
 from scipy.spatial.transform import Rotation as R
 
-import torch
 from splat_trainer.util.pointcloud import PointCloud
 from splat_trainer.visibility.query_points import random_cloud
 

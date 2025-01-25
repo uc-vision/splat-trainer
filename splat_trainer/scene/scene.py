@@ -34,11 +34,11 @@ class GaussianScene(metaclass=ABCMeta):
     raise NotImplementedError
   
   @abstractmethod
-  def render(self, camera_params:CameraParams, cam_idx:Optional[int], **options) -> Rendering:
+  def render(self, camera_params:CameraParams, cam_idx:Optional[int], point_mask:Optional[torch.Tensor]=None, **options) -> Rendering:
     raise NotImplementedError
 
   @abstractmethod
-  def split_and_prune(self, keep_mask:torch.Tensor, split_idx:torch.Tensor):
+  def split_and_prune(self, keep_mask:torch.Tensor, split_idx:Optional[torch.Tensor]=None):
     raise NotImplementedError
 
   @abstractmethod

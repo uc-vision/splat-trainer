@@ -67,6 +67,11 @@ class Projections:
   def fov(self) -> torch.Tensor:
     f = self.focal_length
     return 2.0 * torch.atan(0.5 * self.image_size / f)
+  
+  @beartype
+  @property
+  def device(self) -> torch.device:
+    return self.intrinsics.device
 
 
 
@@ -96,6 +101,14 @@ class Camera:
   @property
   def position(self) -> torch.Tensor:
     return self.world_t_camera[..., :3, 3]
+
+  @property
+  def near(self) -> torch.Tensor:
+    return self.depth_range[0]
+
+  @property
+  def far(self) -> torch.Tensor:
+    return self.depth_range[1]
 
   @property
   def world_t_camera(self) -> torch.Tensor:
@@ -214,11 +227,15 @@ class Cameras:
   def count_label(self, label:Label) -> int:
     """ Get number of cameras with the given label."""
     return self.has_label(label).shape[0]
+  
+
+  def clamp_near(self, near:float) -> 'Cameras':
+    depth_range = torch.clamp_min(self.projection.depth_range, near)
+    return self.replace(self, projection=self.projection.replace(depth_range=depth_range))
 
 
   def item(self) -> Camera:
     assert np.prod(self.batch_size) == 1, f"Expected batch size 1, got shape: {self.batch_size}"
-
 
     return Camera(
       intrinsics=self.intrinsics.squeeze(0),
@@ -239,8 +256,6 @@ class CameraTable(nn.Module, metaclass=abc.ABCMeta):
   @abstractmethod
   def forward(self, image_idx: torch.Tensor) -> Cameras:
     raise NotImplementedError
-  
-
   
   @property
   def num_projections(self) -> int:
@@ -274,13 +289,11 @@ class CameraTable(nn.Module, metaclass=abc.ABCMeta):
   def image_names(self) -> List[str]:
     raise NotImplementedError
   
+  
   @property
   def cameras(self) -> Cameras:
     return self.forward(torch.arange(self.num_images))
   
-
-  
-
 
   @beartype
   def __getitem__(self, image_idx:int | torch.Tensor) -> Cameras:
@@ -375,15 +388,17 @@ class CameraRigTable(CameraTable):
     self._labels:torch.Tensor = labels
 
   @beartype
-  def forward(self, image_idx:torch.Tensor) -> Cameras:     
+  def forward(self, image_idx:torch.Tensor) -> Cameras:   
+
     assert image_idx.dim() <= 1, f"Expected 1D tensor, got: {image_idx.shape}"
     assert (image_idx < self.num_images).all(), f"Image index out of range: {image_idx} >= {self.num_images}"
+
+    image_idx = image_idx.to(self.device)
 
     num_cameras = self._camera_poses.num_cameras
     frame_idx = image_idx // num_cameras
     camera_idx = image_idx % num_cameras
 
-    
     return Cameras(
       camera_t_world=self._camera_poses(frame_idx, camera_idx),
       projection=self.projections[camera_idx],
@@ -413,10 +428,10 @@ class CameraRigTable(CameraTable):
   def num_frames(self) -> int:
     return self._camera_poses.num_frames
   
-  
+  @beartype
   @property
-  def device(self):
-    return self._camera_projection.device
+  def device(self) -> torch.device:
+    return self.projections.device
   
 
 
@@ -460,6 +475,8 @@ class MultiCameraTable(CameraTable):
   def forward(self, image_idx:torch.Tensor) -> Cameras:
     assert image_idx.dim() == 1, f"Expected 1D tensor, got: {image_idx.shape}"
 
+    image_idx = image_idx.to(self.device)
+
     cam_idx = self._camera_idx[image_idx]
     return Cameras(
       camera_t_world=self._camera_t_world(image_idx),
@@ -484,9 +501,10 @@ class MultiCameraTable(CameraTable):
   def num_frames(self) -> int:
     return self.num_images
 
+  @beartype
   @property
-  def device(self):
-    return self._camera_projection.device
+  def device(self) -> torch.device:
+    return self.projections.device
 
 
 

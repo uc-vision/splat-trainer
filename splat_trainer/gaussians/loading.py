@@ -4,6 +4,7 @@ from scipy.spatial import cKDTree
 import torch
 import torch.nn.functional as F
 
+from splat_trainer.gaussians.split import point_basis
 from splat_trainer.util.misc import inverse_sigmoid
 from splat_trainer.util.pointcloud import PointCloud
 
@@ -58,3 +59,8 @@ def estimate_scale(pointcloud : PointCloud, num_neighbors:int = 3):
   scales = knn_dists[:, 1:].sqrt().mean(dim=1)  # Skip first (self) distance
   
   return scales
+
+
+def point_cov(gaussians:Gaussians3D):
+  basis = point_basis(gaussians.log_scaling, gaussians.rotation)
+  return torch.bmm(basis.transpose(1, 2), basis)

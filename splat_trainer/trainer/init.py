@@ -2,6 +2,7 @@ from typing import Optional
 from taichi_splatting import Gaussians3D
 from termcolor import colored
 import torch
+from splat_trainer.camera_table.camera_table import Cameras
 from splat_trainer.dataset.dataset import Dataset
 from splat_trainer.gaussians.loading import estimate_scale, from_pointcloud, from_scaled_pointcloud
 from splat_trainer.trainer.config import CloudInitConfig
@@ -11,7 +12,7 @@ from splat_trainer.visibility.query_points import balanced_cloud, crop_cloud, pr
 
 def get_initial_gaussians(config:CloudInitConfig, dataset:Dataset, device:torch.device) -> Gaussians3D:
     camera_table = dataset.camera_table().to(device)
-    cameras = camera_table.cameras
+    cameras:Cameras = camera_table.cameras
 
     points:Optional[PointCloud] = dataset.pointcloud()
 
@@ -40,7 +41,9 @@ def get_initial_gaussians(config:CloudInitConfig, dataset:Dataset, device:torch.
       n_random = n - n_dataset
       
       print(f"Initializing with {n} total points, from dataset {n_dataset}, random {n_random}")
-      points = balanced_cloud(cameras, n, config.min_point_overlap, points)
+      cameras = cameras.clamp_near(config.clamp_near)
+
+      points = balanced_cloud(cameras, n, config.min_view_overlap, points)
 
 
     scales = estimate_scale(points, num_neighbors=config.num_neighbors)
@@ -48,3 +51,4 @@ def get_initial_gaussians(config:CloudInitConfig, dataset:Dataset, device:torch.
                                           initial_alpha=config.initial_alpha)
 
     return initial_gaussians
+    
