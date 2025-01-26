@@ -42,6 +42,7 @@ hydra:
       trainer.scene.parameters.rotation.lr: interval(0.001, 0.1)
       trainer.scene.parameters.alpha_logit.lr: interval(0.001, 0.1)
       trainer.scene.parameters.feature.lr: interval(0.001, 0.1)
+      trainer.scene.parameters.position.lr: interval(0.001, 0.1)
 
 
 project: optuna_multirun__${now:%Y-%m-%d}__${now:%H-%M-%S}
