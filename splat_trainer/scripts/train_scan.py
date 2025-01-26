@@ -63,6 +63,7 @@ def cfg_from_args():
   # Rendering group
   rendering_group = parser.add_argument_group("Rendering")
   rendering_group.add_argument("--antialias", action="store_true", help="Use antialiasing")
+  rendering_group.add_argument("--no_autotune", action="store_true", help="Disable autotuning for easier development")
 
 
   # Output group
@@ -156,6 +157,9 @@ def cfg_from_args():
 
   if args.antialias:
     overrides.append("trainer.antialias=true")
+
+  if args.no_autotune:
+    overrides.append("trainer.scene.autotune=false")
 
   # Output group
   if args.wandb is True:

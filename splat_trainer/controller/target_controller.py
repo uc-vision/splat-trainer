@@ -116,6 +116,7 @@ class TargetController(Controller):
 
     next_densify = self.next_densify
     if next_densify is not None and progress.step >= next_densify:
+      
       split_mask, prune_mask = self.find_split_prune_indexes(progress.t, self.target_points(progress))
       densify_and_prune(self.points, self.scene, split_mask, prune_mask, self.logger)
       

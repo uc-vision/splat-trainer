@@ -5,9 +5,9 @@ defaults:
   - dataset: scan
   - logger: none
   - trainer: default
+  - scene: mlp
 
   - controller: target
-  - scene: tcnn
   - viewer: none
   - view_selection: random
 

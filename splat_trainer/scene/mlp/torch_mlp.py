@@ -1,4 +1,5 @@
 from functools import partial
+from beartype import beartype
 from splat_trainer.scene.mlp import rsh
 import torch
 from torch import Tensor, nn
@@ -25,7 +26,7 @@ class ProjectSH(torch.nn.Module):
     super().__init__()
 
     self.get_coeffs = sh_coeffs[sh_degree]
-    self.mlp = glu_mlp((sh_degree + 1)**2, out_features, hidden, hidden_layers)
+    self.mlp = MLP((sh_degree + 1)**2, out_features, hidden, hidden_layers)
 
   def forward(self, dir):
     coeffs = self.get_coeffs(dir).to(dtype=dir.dtype)
@@ -38,7 +39,7 @@ class DirectionalMLP(torch.nn.Module):
 
     self.get_coeffs = sh_coeffs[sh_degree]
     sh_size = (sh_degree + 1) ** 2
-    self.mlp = glu_mlp(inputs + sh_size, outputs, hidden, hidden_layers)
+    self.mlp = MLP(inputs + sh_size, outputs, hidden, hidden_layers)
 
   def forward(self, dir, x):
     coeffs = self.get_coeffs(dir).to(dtype=x.dtype)
@@ -54,7 +55,7 @@ class AffineMLP(torch.nn.Module):
 
     self.get_coeffs = sh_coeffs[sh_degree]
 
-    self.mlp = glu_mlp(inputs, outputs, hidden, hidden_layers)
+    self.mlp = MLP(inputs, outputs, hidden, hidden_layers)
     self.encode_dir = ProjectSH(out_features=inputs * 2, sh_degree=sh_degree, hidden=hidden, hidden_layers=proj_hidden_layers)
 
 
@@ -94,7 +95,14 @@ class GLULayer(nn.Module):
     def forward(self, x: Tensor) -> Tensor:
         return self.act(self.m(x))
 
+
+def layer(activation: nn.Module):
+     def _layer(in_features: int, out_features:int):
+          return Layer(in_features, out_features, activation())
+     return _layer
+
 class Layer(nn.Module):
+    @beartype
     def __init__(self, in_features: int, out_features:int, activation: nn.Module):
         super().__init__()
         self.m = nn.Linear(in_features, out_features)
@@ -105,7 +113,10 @@ class Layer(nn.Module):
 
 
 class MLP(torch.nn.Module):
-  def __init__(self, layer_type: type[nn.Module], inputs: int, outputs: int, hidden: int, hidden_layers: int):
+  @beartype
+  def __init__(self, inputs: int, outputs: int, hidden: int, hidden_layers: int, 
+               layer_type: type[nn.Module]=GLULayer):
+    
     super().__init__()
     feature_sizes = [inputs] + [hidden] * hidden_layers
 
@@ -123,12 +134,6 @@ class MLP(torch.nn.Module):
 
     return x
 
-
-def glu_mlp(inputs: int, outputs: int, hidden: int, hidden_layers: int):
-  return MLP(GLULayer, inputs, outputs, hidden, hidden_layers)
-
-def selu_mlp(inputs: int, outputs: int, hidden: int, hidden_layers: int):
-  return MLP(partial(Layer, activation=nn.SELU), inputs, outputs, hidden, hidden_layers)
 
 
 class EnvMap(torch.nn.Module):
