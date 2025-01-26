@@ -1,0 +1,11 @@
+# @package _global_
+
+
+hydra:
+  callbacks:
+    log_best_result:
+      _target_: splat_trainer.multirun.log_best_result.LogBestResult
+      redis_port: ${conn.redis.port}
+      redis_db_num: ${conn.redis.db_num}
+      project: ${project}
+      sweep_params: ${hydra.sweeper.params}

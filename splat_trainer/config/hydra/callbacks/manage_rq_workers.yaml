@@ -1,0 +1,13 @@
+# @package _global_
+
+
+hydra:
+  callbacks:
+    manage_rq_workers:
+      _target_: splat_trainer.multirun.manage_rq_worker.ManageRQWorkers
+      config: ${conn.host}
+      flask_port: ${conn.flask.port}
+      redis_port: ${conn.redis.port}
+      redis_db_num: ${conn.redis.db_num}
+      get_pass: False
+      max_num_worker_on_each_machine: 1

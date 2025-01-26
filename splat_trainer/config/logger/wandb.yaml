@@ -5,3 +5,4 @@ logger:
   entity: null
   project: ${..project}
   name: ${..run_name}
+  group: null

@@ -1,0 +1,11 @@
+# @package _global_
+
+
+hydra:
+  callbacks:
+    log_job_result:
+      _target_: splat_trainer.multirun.log_job_result.LogJobResult
+      output_dir: ${hydra.sweep.dir}
+      sweep_params: ${hydra.sweeper.params}
+      redis_port: ${conn.redis.port}
+      redis_db_num: ${conn.redis.db_num}

@@ -1,0 +1,16 @@
+# @package _global_
+
+
+hydra:
+  callbacks:
+    push_stats:
+      _target_: splat_trainer.multirun.push_stats.PushStats
+      user: ${conn.graphite.user}
+      docker_host: ${conn.graphite.docker_host}
+      remote_host: ${conn.graphite.remote_host}
+      local_port: ${conn.graphite.local_port}
+      remote_port: ${conn.graphite.remote_port}
+
+      redis_port: ${conn.redis.port}
+      redis_db_num: ${conn.redis.db_num}
+      result_key: ${conn.redis.key_for_graphite}

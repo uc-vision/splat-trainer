@@ -1,0 +1,54 @@
+# @package _global_
+
+defaults:
+  - /multirun/conn: default
+  - override /controller: target
+  - override /scene: sh
+  - override /color_corrector: nil
+  - override /trainer: default
+  - override /hydra/sweeper: optuna
+  - override /hydra/sweeper/sampler: cmaes
+  - override /dataset: null
+  - override /hydra/callbacks:
+    - flush_db
+    - log_best_result
+    - log_job_result
+  - _self_
+
+logger:
+  group: ${hydra:job.num}
+
+
+hydra:
+  job: 
+    chdir: True
+  sweep:
+    dir: ${oc.env:HOME}/multirun/${project}
+    subdir: ${hydra.job.num}
+ 
+  mode: MULTIRUN
+
+  sweeper:
+    sampler:
+      seed: 42
+
+    direction: maximize
+    study_name: splat-trainer
+    storage: sqlite:///db.sqlite3
+    n_trials: 50
+    n_jobs: 1
+    params:
+      trainer.scene.parameters.log_scaling.lr: interval(0.001, 0.1)
+      trainer.scene.parameters.rotation.lr: interval(0.001, 0.1)
+      trainer.scene.parameters.alpha_logit.lr: interval(0.001, 0.1)
+      trainer.scene.parameters.feature.lr: interval(0.001, 0.1)
+
+
+project: optuna_multirun__${now:%Y-%m-%d}__${now:%H-%M-%S}
+run_name: ${logger.group}
+test_scene: ???
+
+algorithm: ${hydra:sweeper.sampler}
+
+wait_exit: False
+debug: False

@@ -1,0 +1,57 @@
+# @package _global_
+
+defaults:
+  - /test_datasets: default
+  - /multirun/conn: default
+  - override /logger: wandb
+  - override /controller: target
+  - override /scene: sh
+  - override /color_corrector: nil
+  - override /trainer: default
+  - override /viewer: none
+  - override /hydra/launcher: rq_launcher
+  - override /hydra/callbacks:
+    - manage_rq_workers
+    - average_results
+    - log_job_result
+  - _self_
+
+
+logger:
+  entity: UCvision
+  group: null
+
+
+trainer:
+  save_checkpoints: False
+  save_output: False
+  num_logged_images: -1
+  log_worst_images: -1
+
+  steps: 100
+
+test_scene: ???
+
+hydra:
+  sweep:
+    dir: ${oc.env:HOME}/multirun/${project}
+    subdir: ${hydra.job.num}__test_scene=${test_scene}
+  job:
+    chdir: True
+
+
+  mode: MULTIRUN
+  sweeper:
+    params:
+      test_scene: scan_23, scan_1457_west
+      # trainer.scene.parameters.log_scaling.lr: 0.03, 0.3
+      # trainer.scene.parameters.rotation.lr: 0.01, 0.1
+      
+
+project: grid_search__${now:%Y-%m-%d}__${now:%H-%M-%S}
+run_name: ${hydra:job.num}__test_scene=${test_scene}
+
+
+algorithm: grid_search
+
+debug: False
