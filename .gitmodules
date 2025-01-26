@@ -1,12 +1,9 @@
 [submodule "taichi-splatting"]
 	path = taichi-splatting
 	url = git@github.com:uc-vision/taichi-splatting.git
-<<<<<<< HEAD
-=======
 [submodule "splat-viewer"]
 	path = splat-viewer
 	url = git@github.com:uc-vision/splat-viewer.git
 [submodule "splat-transfer"]
 	path = splat-transfer
 	url = git@github.com:uc-vision/splat-transfer.git
->>>>>>> points_rendering
