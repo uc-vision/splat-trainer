@@ -58,7 +58,7 @@ class TargetController(Controller):
     self.points = PointState.new_zeros(scene.num_points, device=scene.device)
     self.start_points = start_points or scene.num_points
 
-    self.next_densify = self.find_next_densify(progress) + 50
+    self.next_densify = self.find_next_densify(progress)
     self.max_points = target_points
     
   def __repr__(self):

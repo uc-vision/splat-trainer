@@ -422,11 +422,11 @@ class Trainer(Dispatcher):
     
     aspect_term = (scale.max(-1).values / (scale.min(-1).values + 1e-6))
 
-
-    opacity_term = saturate(points.opacity, gain=6.0, k=2.0) * norm_scale
+    opacity_term = saturate(points.opacity, gain=4.0, k=2.0) * norm_scale
 
     scale_weight, opacity_weight, aspect_weight = [eval_varying(x, self.progress) 
           for x in [self.config.scale_reg, self.config.opacity_reg, self.config.aspect_reg]]
+    
     
     regs = dict(
       # scale_reg     =  (points.visibility * norm_scale.pow(2).sum(1)).mean() * scale_weight,

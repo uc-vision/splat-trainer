@@ -1,4 +1,3 @@
-
 from functools import partial
 from splat_trainer.scene.mlp import rsh
 import torch
@@ -69,7 +68,6 @@ class AffineMLP(torch.nn.Module):
 def gated(x: Tensor, f:nn.Module) -> Tensor:
     assert x.shape[-1] % 2 == 0
     a, b = x.chunk(2, dim=-1)
-    print(a.shape, b.shape)
     return a * f(b)
 
 

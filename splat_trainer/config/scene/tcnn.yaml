@@ -8,11 +8,11 @@ trainer:
 
     parameters:
       position:
-        lr: 0.4
+        lr: 0.3
         type: local_vector
 
       log_scaling:
-        lr: 0.1
+        lr: 0.08
 
       rotation:
         lr: 0.01
@@ -29,8 +29,8 @@ trainer:
     beta1: 0.8
     beta2: 0.95
 
-    vis_beta: 0.999
-    vis_smooth: 0.001
+    vis_beta: 0.9995
+    vis_smooth: 0.01
 
     # TCNN specific
     image_features: 16
@@ -47,8 +47,8 @@ trainer:
 
       color_channels: 3
 
-      lr_diffuse: ${log_decay:0.001, 0.1}
-      lr_specular: ${log_decay:0.0001, 0.1}
+      lr_diffuse: ${log_decay:0.001, 0.01}
+      lr_specular: ${log_decay:0.0001, 0.01}
       
 
     # Per image features (as opposed to per-camera features)

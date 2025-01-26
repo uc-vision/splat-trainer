@@ -288,21 +288,21 @@ class TCNNScene(GaussianScene):
 
     glo_feature = self.color_table(image_idx)
     
-    return torch.sum(similarity * glo_feature, dim=0).unsqueeze(0)
+    return torch.sum(similarity * glo_feature, dim=0)
 
   @beartype
   def eval_colors(self, point_indexes:torch.Tensor, camera_params:CameraParams, image_idx:int | None):
     if image_idx is not None:
-      glo_feature = self.lookup_glo_feature(image_idx)
+      glo_feature = self.lookup_glo_feature(image_idx).unsqueeze(0)
     else:
-      glo_feature = self.interpolated_glo_feature(torch.inverse(camera_params.T_camera_world))
+      glo_feature = self.interpolated_glo_feature(torch.inverse(camera_params.T_camera_world)).unsqueeze(0)
 
 
     with torch.autocast(device_type=self.device.type, dtype=torch.float16):
       feature = self.points.feature[point_indexes]
     
       return self.color_model(feature, self.points.position[point_indexes], 
-                                                        camera_params.camera_position, glo_feature.unsqueeze(0),
+                                                        camera_params.camera_position, glo_feature,
                                                         enable_specular=self.config.enable_specular)
 
   def query_visibility(self, camera_params:CameraParams) -> tuple[torch.Tensor, torch.Tensor]:
