@@ -16,7 +16,7 @@ trainer:
       scale:    ${log_decay:0.01, 0.01}   # avoid overly large points
       opacity:  ${log_decay:1.0, 100.0}    # avoid large points with low opacity near the camera
       aspect:   1e-4   # try to prevent points becoming too elongated
-      specular: 1e-4   # prevent the specular term (direction dependent) from compensating for the base color
+      specular: 1e-5   # prevent the specular term (direction dependent) from compensating for the base color
 
     lr_glo_feature: 2.0
     per_image: False   # Per image glo features (as opposed to per-camera features)
@@ -24,7 +24,7 @@ trainer:
     beta1: 0.8
     beta2: 0.95
 
-    vis_beta: 0.999
+    vis_beta: 0.9995
     vis_smooth: 0.01
 
     image_features: 32
