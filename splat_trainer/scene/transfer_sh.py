@@ -49,9 +49,6 @@ class TransferSH(torch.nn.Module):
     return colors.clamp(0, 1)
   
 
-
-
-
 @beartype
 def transfer_sh(eval_colors:Callable[[torch.Tensor, CameraParams, int], torch.Tensor], 
                 query_visibility:Callable[[CameraParams], Tuple[torch.Tensor, torch.Tensor]], 
@@ -76,7 +73,7 @@ def transfer_sh(eval_colors:Callable[[torch.Tensor, CameraParams, int], torch.Te
         camera_params = camera_table[i].item().resized(0.5).to_camera_params()
         yield i, camera_params
 
-  pbar = tqdm(iter(), total=train_idx.shape[0] * epochs, desc="Transferring SH colors", leave=False)
+  pbar = tqdm(iter(), total=train_idx.shape[0] * epochs, desc="Transferring SH colors")
 
   loss_avg = 0.0
   mse_avg = 0.0

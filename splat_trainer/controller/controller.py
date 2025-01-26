@@ -9,22 +9,22 @@ from splat_trainer.scene import GaussianScene
 class ControllerConfig(metaclass=ABCMeta):
 
   @abstractmethod
-  def make_controller(self, scene:GaussianScene, logger:Logger) -> 'Controller':
+  def make_controller(self, scene:GaussianScene, target_points:int, progress:Progress, logger:Logger) -> 'Controller':
     raise NotImplementedError
   
   @abstractmethod
-  def from_state_dict(self, state_dict:dict, scene:GaussianScene, logger:Logger) -> 'Controller':
+  def from_state_dict(self, state_dict:dict, scene:GaussianScene, target_points:int, progress:Progress, logger:Logger) -> 'Controller':
     raise NotImplementedError
 
 
 class Controller(metaclass=ABCMeta):
   @abstractmethod
-  def step(self, target_count:int, progress:Progress):
+  def step(self, progress:Progress, log_details:bool=False):
     """ Perform densification and pruning """
     raise NotImplementedError
 
   @abstractmethod
-  def add_rendering(self, image_idx:int, rendering:Rendering):
+  def add_rendering(self, image_idx:int, rendering:Rendering, progress:Progress):
     """ Add a rendering to the controller """
     raise NotImplementedError
 

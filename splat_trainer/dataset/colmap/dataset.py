@@ -120,20 +120,26 @@ class COLMAPDataset(Dataset):
     args += [f"near={self.camera_depth_range[0]:.3f}", f"far={self.camera_depth_range[1]:.3f}"]
     return f"COLMAPDataset({self.base_path} {', '.join(args)})"
   
-  
-  @cached_property
-  def camera_images(self) -> List[CameraImage]:
+
+  def _load_camera_images(self) -> List[CameraImage]:
     images = load_images(list(self.image_names), Path(self.base_path) / self.image_dir, 
                          image_scale=self.image_scale, resize_longest=self.resize_longest)
     
     cameras = [CameraImage(filename, torch.from_numpy(image).pin_memory(), i) 
                for i, (filename, image) in enumerate(zip(self.image_names, images))]  
     return cameras
+  
+  def load_images(self) -> List[CameraImage]:
+    if self._images is None:
+      self._images = self._load_camera_images()
+
+    return self._images
+
 
   @beartype
   def loader(self, idx:torch.Tensor, shuffle:bool=False) -> Sequence[ImageView]:
-    images = [self.camera_images[i] for i in idx.cpu().numpy()]
-    return Images(images, shuffle=shuffle)
+    images = self.load_images()
+    return Images([images[i] for i in idx.cpu().numpy()], shuffle=shuffle)
 
   def train(self, shuffle=False) -> Sequence[ImageView]:
     return self.loader(self.train_idx, shuffle=shuffle)

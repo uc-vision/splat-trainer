@@ -12,10 +12,12 @@ from splat_trainer import config
 from taichi_splatting import TaichiQueue
 
 import torch
+import torch._logging
+
 import os
 
 from splat_trainer.viewer.viewer import Viewer
-
+import logging
 
 
 
@@ -43,9 +45,11 @@ def cfg_from_args():
   training_group.add_argument("--total_steps", type=int, default=None, help="Number of total training steps")
   training_group.add_argument("--training_scale", type=float, default=1.0, help="Scale the number of steps by a constant factor")
   
-  training_group.add_argument("--add_points", type=int, default=None, help="Add random background points")
+  training_group.add_argument("--initial_points", type=int, default=None, help="Start with N points in the point cloud (add random points to make up the difference)")
   training_group.add_argument("--limit_points", type=int, default=None, help="Limit the number of points from the dataset to N")
-  training_group.add_argument("--random_points", type=int, default=None, help="Initialise with N random points only")
+  
+  
+  training_group.add_argument("--random_points", type=int, default=None, help="Use N random points only")
 
   training_group.add_argument("--tcnn", action="store_true", help="Use tcnn scene")
   training_group.add_argument("--bilateral", action="store_true", help="Use bilateral color correction")
@@ -117,19 +121,19 @@ def cfg_from_args():
     overrides.append(f"training_scale={args.training_scale}")
 
   # Pointcloud initialisation from dataset
-  assert args.add_points is None or args.random_points is None, "Cannot specify both background and random points"
-  assert args.limit_points is None or args.random_points is None, "Cannot specify both limit and random points"
 
-  if args.add_points is not None:
-    overrides.append(f"trainer.cloud_init.initial_points={args.add_points}")
-    overrides.append("trainer.cloud_init.add_initial_points=true")
+  if args.initial_points is not None:
+    overrides.append(f"trainer.cloud_init.initial_points={args.initial_points}")
 
   if args.limit_points is not None:
     overrides.append(f"trainer.cloud_init.limit_points={args.limit_points}")
 
   if args.random_points is not None:
+    assert not args.limit_points, "Cannot use both --limit_points and --random_points"
+    assert not args.initial_points, "Cannot use both --initial_points and --random_points"
+
+    overrides.append("trainer.cloud_init.limit_points=0")
     overrides.append(f"trainer.cloud_init.initial_points={args.random_points}")
-    overrides.append("trainer.cloud_init.load_dataset_cloud=false")
 
 
   # Scene
@@ -185,6 +189,9 @@ def train_with_config(cfg) -> dict | str:
 
   torch.set_grad_enabled(False)
   torch.set_float32_matmul_precision('high')
+  
+  # suppress triton and torch dynamo verbosity
+  # torch._logging.set_logs(dynamo=logging.CRITICAL, inductor=logging.CRITICAL)
 
   torch.set_printoptions(precision=4, sci_mode=False)
   np.set_printoptions(precision=4, suppress=True)

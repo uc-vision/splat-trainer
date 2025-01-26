@@ -8,11 +8,11 @@ from splat_trainer.controller.point_state import PointState, log_histograms
 
 
 class DisabledConfig(ControllerConfig):
-  def make_controller(self, scene:GaussianScene, logger:Logger) -> 'DisabledController':
+  def make_controller(self, scene:GaussianScene, target_points:int, progress:Progress, logger:Logger) -> 'DisabledController':
     return DisabledController(scene, logger)
   
-  def from_state_dict(self, state_dict:dict, scene:GaussianScene, logger:Logger) -> 'DisabledController':
-    return self.make_controller(scene, logger)
+  def from_state_dict(self, state_dict:dict, scene:GaussianScene, target_points:int, progress:Progress, logger:Logger) -> 'DisabledController':
+    return self.make_controller(scene, target_points, progress, logger)
   
 
 
@@ -23,16 +23,15 @@ class DisabledController(Controller):
 
     self.points = PointState.new_zeros(scene.num_points, device=scene.device)
 
-  def step(self, target_count:int, progress:Progress, log_details:bool=False):
+  def step(self, progress:Progress, log_details:bool=False):
 
     if log_details:
       log_histograms(self.points, self.logger, "step")
 
     self.points = PointState.new_zeros(self.points.batch_size[0], device=self.points.prune_cost.device)
 
-  def add_rendering(self, image_idx:int, rendering:Rendering):
-    self.points.add_heuristics(rendering)
-    self.points.add_in_view(rendering)
+  def add_rendering(self, image_idx:int, rendering:Rendering, progress:Progress):
+    self.points.add_rendering(rendering)
 
   def state_dict(self) -> dict:
     return {}

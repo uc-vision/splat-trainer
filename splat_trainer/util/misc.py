@@ -2,13 +2,6 @@ import heapq
 import numpy as np
 import torch
 
-def strided_indexes(subset:int, total:int):
-  if subset > 0:
-    stride = max(total // subset, 1)
-    return torch.arange(0, total, stride).to(torch.long)
-  else:
-    return torch.tensor([])
-
 
 def split_stride(images, stride=0):
   assert stride == 0 or stride > 1, f"val_stride {stride}, must be zero, or greater than 1"
@@ -22,12 +15,34 @@ def split_stride(images, stride=0):
 def next_multiple(x, multiple):
   return x + multiple - x % multiple
 
+def format_dict(d:dict, precision:int=4, align:str="<"):
+  return " ".join([f"{k}: {v:{align}{precision+3}.{precision}g}" for k,v in d.items()])
 
 def sigmoid(x):
   return 1 / (1 + np.exp(-x))
 
 def inverse_sigmoid(x):
   return np.log(x) - np.log(1 - x)
+
+
+def soft_gt(t:torch.Tensor, threshold:float, margin:float=8.0):
+  """ Soft threshold (greater than threshold) using sigmoid.
+  Args:
+    t: tensor to threshold
+    threshold: threshold value (sigmoid is centered at this value)
+    margin: scales width of the sigmoid response (larger margin -> sharper threshold)
+  """  
+  return torch.sigmoid((t - threshold)* margin/threshold)
+
+def soft_lt(t:torch.Tensor, threshold:float, margin:float=8.0):
+  """ Soft threshold (less than threshold) using sigmoid.
+  Args:
+    t: tensor to threshold
+    threshold: threshold value (sigmoid is centered at this value)
+    margin: scales width of the sigmoid response (larger margin -> sharper threshold)
+  """  
+  return 1 - soft_gt(t, threshold, margin)
+
 
 
 sh0 = 0.282094791773878
@@ -40,31 +55,25 @@ def rgb_to_sh(rgb):
 def sh_to_rgb(sh):
     return sh * sh0 + 0.5
 
-@torch.compile
-def log_lerp(t, a, b):
-  return torch.exp(torch.lerp(torch.log(a), torch.log(b), t))
 
 @torch.compile
-def inv_lerp(t, a, b):
-  return 1 / (torch.lerp(1/a, 1/b, t))
+def inv_lerp(t:float | torch.Tensor, a:torch.Tensor, b:torch.Tensor) -> torch.Tensor:
+  return 1 / (lerp(1/a, 1/b, t))
 
 @torch.compile
-def exp_lerp(t, a, b):
+def exp_lerp(t:float | torch.Tensor, a:torch.Tensor, b:torch.Tensor) -> torch.Tensor:
     max_ab = torch.maximum(a, b)
-    return max_ab + torch.log(torch.lerp(torch.exp(a - max_ab), torch.exp(b - max_ab), t))
+    return max_ab + torch.log(lerp(t, torch.exp(a - max_ab), torch.exp(b - max_ab)))
 
 @torch.compile
-def pow_lerp(t, a, b, k=2):
-    return (a ** k + (b ** k - a ** k) * t) ** (1 / k)
+def pow_lerp(t:float | torch.Tensor, a:torch.Tensor, b:torch.Tensor, k:float=2) -> torch.Tensor:
+    return lerp(t, a**k, b**k)**(1/k)
 
-@torch.compile
-def lerp(t, a, b):
-  return a + (b - a) * t
+def lerp(t:float | torch.Tensor, a:torch.Tensor, b:torch.Tensor) -> torch.Tensor:
+  return torch.lerp(a, b, t)
 
-@torch.compile
-def max_decaying(x, t, decay):
-  return x * (1 - decay) + torch.maximum(x, t) * decay
-
+def saturate(t, gain=6.0, k=1.0):
+  return (1 - 1/torch.exp(gain * t)).pow(k)
 
 class CudaTimer:
   def __init__(self):
@@ -83,6 +92,7 @@ class CudaTimer:
   def wrap(self, f, *args, **kwargs):
     with self:
       return f(*args, **kwargs)
+  
   
 
 

@@ -1,4 +1,4 @@
-from functools import cached_property
+from functools import cached_property, partial
 
 from pathlib import Path
 from typing import Iterable, List, Optional, Sequence
@@ -30,7 +30,7 @@ class ScanDataset(Dataset):
     self.scan_file = scan_file
     self.image_scale = image_scale
     self.resize_longest = resize_longest
-
+    self._images = None
 
     scan = FrameSet.load_file(Path(scan_file))
     self.loaded_scan = scan
@@ -59,6 +59,11 @@ class ScanDataset(Dataset):
     self.train_idx = torch.tensor(train_idx, dtype=torch.long)
     self.val_idx = torch.tensor(val_idx, dtype=torch.long)
     
+  def load_images(self) -> PreloadedImages:
+    if self._images is None:
+      self._images = preload_images(self.loaded_scan, self.cameras, progress=partial(tqdm, desc="Loading images"))
+
+    return self._images
     
   def __repr__(self) -> str:
     args = [] 
@@ -73,11 +78,6 @@ class ScanDataset(Dataset):
 
     return f"ScanDataset({self.scan_file} {', '.join(args)})"
 
-  @cached_property
-  def _images(self) -> PreloadedImages:
-    """ Load all images into memory, DO NOT use this property unless you want to load the images """
-    print("Loading images...")
-    return preload_images(self.loaded_scan, self.cameras)
 
   @property
   def num_images(self) -> int:
@@ -85,7 +85,9 @@ class ScanDataset(Dataset):
 
   @beartype
   def loader(self, idx:torch.Tensor, shuffle:bool=False) -> Sequence[ImageView]:
-    images = [self._images[i] for i in idx.cpu().numpy()]
+    images = self.load_images()
+
+    images = [images[i] for i in idx.cpu().numpy()]
     return PreloadedImages(images, shuffle=shuffle)
     
 

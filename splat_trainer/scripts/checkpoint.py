@@ -84,8 +84,7 @@ def with_trainer(f:Callable[[Trainer], None], args:Namespace):
   torch.set_printoptions(precision=4, sci_mode=False)
   np.set_printoptions(precision=4, suppress=True)
 
-  TaichiQueue.init(arch=ti.cuda, debug=args.debug, threaded=False)
-
+  TaichiQueue.init(arch=ti.cuda, debug=args.debug, threaded=True)
   add_resolvers()
 
   state_dict, workspace_path = load_checkpoint(args.splat_path, args.step)
@@ -173,7 +172,6 @@ def add_viewer_args(parser:ArgumentParser):
   parser.add_argument("--host", type=str, default="0.0.0.0", help="Host to run the web viewer on")
 
 def start_with_viewer(trainer:Trainer, args:Namespace, enable_training: bool = False):
-  trainer.warmup()
 
   config = SplatviewConfig(port=args.port, host=args.host)
   viewer = config.create_viewer(trainer, enable_training)

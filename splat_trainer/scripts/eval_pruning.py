@@ -5,7 +5,7 @@ import torch
 from tqdm import tqdm
 
 from splat_trainer.controller import DisabledConfig
-from splat_trainer.controller.threshold_controller import take_n
+from splat_trainer.controller.target_controller import take_n
 from splat_trainer.scene.point_statistics import PointStatistics
 from splat_trainer.scene.scene import GaussianScene
 from splat_trainer.scripts.checkpoint import arguments, with_trainer
@@ -37,15 +37,15 @@ def evaluate_with_training(trainer:Trainer, train:bool) -> dict:
     pbar = tqdm(trainer.dataset.train(shuffle=True), desc="Training")
     with torch.enable_grad():
       for camera_view in pbar:
-        camera_view = trainer.load_data(camera_view)      
-        metrics = trainer.training_step([camera_view])
-
-        metrics = {k:f"{v:.4f}" for k, v in metrics.items() if k in ['l1', 'ssim', 'reg', 't']}
-        pbar.set_postfix(**metrics)
+        camera_view = trainer.load_data(camera_view)   
+           
+        trainer.training_step([camera_view])
+        trainer.update_progress()
 
 
   train = trainer.dataset.train(shuffle=False)
   metrics = [eval.metrics for eval in tqdm(trainer.evaluations(train), desc="Evaluating", total=len(train))]
+
   return mean_rows(metrics)
 
 

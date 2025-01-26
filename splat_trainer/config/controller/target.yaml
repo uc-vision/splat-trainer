@@ -6,10 +6,10 @@ trainer:
     
 
     # rate of splitting proportional to current size
-    prune_rate: 0.03
+    prune_rate: 0.025
 
-    # maximum split rate (relative to count when count is less than target)
-    max_split_rate: 0.04
+    # hit target count at time t
+    target_count_t: 0.8
 
     # minimum number of times point is in view before it is able to be pruned
     min_views: 5
@@ -21,6 +21,5 @@ trainer:
       _target_: splat_trainer.config.Piecewise
       start: 50
       steps:
-        - [0.2, 100]
-        - [0.5, 200]
+        - [0.1, 100]
       scale: ${training_scale}
