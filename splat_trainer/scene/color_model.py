@@ -69,8 +69,9 @@ class ColorModelConfig:
 def luminance_activation(rgbl:torch.Tensor, intensity_bias:float = 0.):
     colors, intensity = rgbl[:, 1:], rgbl[:, 0:1]
     lum = (intensity + intensity_bias).exp()
-
-    return torch.cat([F.sigmoid(colors) * lum, lum], dim=1)
+    
+    return colors.sigmoid() * lum
+    # return torch.cat([F.sigmoid(colors) * lum, lum], dim=1)
 
 @tensorclass
 class Colors:
@@ -97,11 +98,11 @@ class ColorModel(torch.nn.Module):
 
     self.norm = nn.LayerNorm(self.feature_size, elementwise_affine=False)
 
-    n_render = config.color_channels + 1  # rgb + intensity
+    n_out = config.color_channels + 1  # rgb + intensity
 
     self.directional_model = AffineMLP(
         inputs=self.feature_size,
-        outputs=n_render,
+        outputs=n_out,
 
         hidden_layers=1, 
         hidden=config.hidden_features,
@@ -111,7 +112,7 @@ class ColorModel(torch.nn.Module):
 
     self.base_model = MLP(
       inputs=self.feature_size, 
-      outputs=n_render, 
+      outputs=n_out, 
 
       hidden=config.hidden_features, 
       hidden_layers=1
@@ -151,9 +152,9 @@ class ColorModel(torch.nn.Module):
   def post_activation(self, image:torch.Tensor, eps:float = 1e-6) -> torch.Tensor:      
     if not self.config.hdr:
       rgb = image[..., :3]
-      lum = image[..., 3:4]
-
-      return (rgb / (lum + eps)).clamp(0, 1)
+      return rgb.clamp(0, 1)
+      # lum = image[..., 3:4]
+      # return (rgb / (lum + eps)).clamp(0, 1)
     else:
       return image
   

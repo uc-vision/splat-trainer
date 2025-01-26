@@ -391,13 +391,13 @@ class MLPScene(GaussianScene):
 
   @beartype
   def render(self, camera_params:CameraParams,  
-             image_idx:Optional[int] = None,   specular_bias:float = 1.0, **options) -> Rendering:
+             image_idx:Optional[int] = None,   specular_weight:float = 1.0, **options) -> Rendering:
 
     config = pop_raster_config(options)
     gaussians2d, depth, indexes = project_to_image(self.gaussians, camera_params, config)
 
     colors = TaichiQueue.run_sync(self.eval_colors, indexes, camera_params, image_idx)
-    rendering = render_projected(indexes, gaussians2d, colors.total(specular_bias), depth, 
+    rendering = render_projected(indexes, gaussians2d, colors.total(specular_weight), depth, 
                             camera_params, config, **options)
     
 

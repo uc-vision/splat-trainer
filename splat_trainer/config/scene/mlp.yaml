@@ -38,8 +38,8 @@ trainer:
       sh_degree: 5
       color_channels: 3
 
-      lr_diffuse: ${log_decay:0.01, 0.01}
-      lr_specular: ${log_decay:0.01, 0.01}
+      lr_diffuse: ${log_decay:0.01, 0.0001}
+      lr_specular: ${log_decay:0.01, 0.0001}
 
       hdr: false
 
