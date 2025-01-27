@@ -8,12 +8,14 @@ import redis
 import pandas as pd
 
 from splat_trainer.scripts.train_scan import train_with_config
-
+from splat_trainer import config
 
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
+
+config.add_resolvers()
 
 
 def find_dataset_config(name:str, test_datasets:DictConfig):

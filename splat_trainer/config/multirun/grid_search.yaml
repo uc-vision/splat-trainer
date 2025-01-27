@@ -5,13 +5,11 @@ defaults:
   - /multirun/conn: default
   - override /logger: wandb
   - override /controller: target
-  - override /scene: sh
-  - override /color_corrector: nil
+  - override /scene: tcnn
   - override /trainer: default
   - override /viewer: none
   - override /hydra/launcher: rq_launcher
   - override /hydra/callbacks:
-    - manage_rq_workers
     - average_results
     - log_job_result
   - _self_
@@ -28,7 +26,6 @@ trainer:
   num_logged_images: -1
   log_worst_images: -1
 
-  steps: 100
 
 test_scene: ???
 

@@ -85,7 +85,7 @@ class ManageRQWorkers(Callback):
         log = logging.getLogger('werkzeug')
         log.setLevel(logging.ERROR)
 
-        with importlib.resources.path('splat_trainer', 'templates') as template_folder:
+        with importlib.resources.path('splat_trainer.multirun', 'templates') as template_folder:
             app = Flask(__name__, template_folder=str(template_folder))
 
         app.config.from_object(rq_dashboard.default_settings)

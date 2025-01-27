@@ -3,13 +3,13 @@
 defaults:
   - /multirun/conn: default
   - override /controller: target
-  - override /scene: sh
-  - override /color_corrector: nil
+  - override /scene: tcnn
   - override /trainer: default
   - override /hydra/sweeper: optuna
   - override /hydra/sweeper/sampler: cmaes
   - override /dataset: null
   - override /hydra/callbacks:
+    - manage_rq_workers
     - flush_db
     - log_best_result
     - log_job_result
