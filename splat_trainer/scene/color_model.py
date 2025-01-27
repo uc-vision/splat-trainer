@@ -50,6 +50,8 @@ class GLOTable(torch.nn.Module):
 @dataclass
 class ColorModelConfig:
   hidden_features:int      = 32  
+  hidden_layers:int = 2
+
   sh_degree:int = 5
 
   lr_diffuse:VaryingFloat = 1e-3
@@ -104,7 +106,7 @@ class ColorModel(torch.nn.Module):
         inputs=self.feature_size,
         outputs=n_out,
 
-        hidden_layers=1, 
+        hidden_layers=config.hidden_layers, 
         hidden=config.hidden_features,
         proj_hidden_layers=0,
         sh_degree=config.sh_degree
@@ -115,7 +117,7 @@ class ColorModel(torch.nn.Module):
       outputs=n_out, 
 
       hidden=config.hidden_features, 
-      hidden_layers=1
+      hidden_layers=config.hidden_layers
     )
 
 

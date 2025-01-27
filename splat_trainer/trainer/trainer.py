@@ -112,7 +112,7 @@ class Trainer(Dispatcher):
     device = torch.device(config.device)
     camera_table = dataset.camera_table().to(device)
 
-    print(f"Initializing points from {dataset}")
+    print(f"Loading from {colored(dataset, 'light_green')}")
     initial_gaussians = get_initial_gaussians(config.cloud_init, dataset, device)
 
     if not isinstance(logger, LoggerWithState):

@@ -5,26 +5,24 @@ from typing import Dict, Optional
 from beartype import beartype
 from omegaconf import DictConfig
 
-from taichi_splatting.optim.visibility_aware import VisibilityOptimizer
-from tensordict import TensorDict
 import torch
 import torch.nn.functional as F
+from tensordict import TensorDict
 
-from splat_trainer.camera_table.camera_table import CameraTable, camera_scene_extents, camera_similarity
+from splat_trainer.camera_table import CameraTable, camera_scene_extents, camera_similarity
 from splat_trainer.config import Progress, VaryingFloat, eval_varyings
-from splat_trainer.logger.logger import Logger
+from splat_trainer.logger import Logger
 from splat_trainer.scene.transfer_sh import transfer_sh
 from splat_trainer.scene.color_model import ColorModel, ColorModelConfig, Colors, GLOTable
-from splat_trainer.scene.scene import GaussianSceneConfig, GaussianScene
+from splat_trainer.scene import GaussianSceneConfig, GaussianScene
 from splat_trainer.gaussians.split import point_basis, split_gaussians_uniform
 
 
-from taichi_splatting.optim import ParameterClass, VisibilityAwareAdam
+from taichi_splatting.optim import ParameterClass, VisibilityAwareAdam, VisibilityOptimizer
 from taichi_splatting import Gaussians3D, RasterConfig, Rendering, TaichiQueue
 
 from taichi_splatting.renderer import render_projected, project_to_image
 from taichi_splatting.perspective import CameraParams
-
 
 from splat_trainer.scene.util import pop_raster_config
 from splat_trainer.util.misc import saturate
@@ -256,15 +254,15 @@ class MLPScene(GaussianScene):
 
 
     # if the optimizer is visibility aware, use the visibility as a weight
-    weight = rendered_points.visibility 
-    # weight = (rendered_points.visibility if isinstance(self.points.optimizer, VisibilityOptimizer) 
-    #           else torch.tensor(1.0, device=self.device))
+    # weight = rendered_points.visibility 
+    weight = (rendered_points.visibility if isinstance(self.points.optimizer, VisibilityOptimizer) 
+              else torch.tensor(1.0, device=self.device))
 
     regs = self.compute_reg(rendered_points.opacity, log_scale, rendered_points.depths, 
                             rendered_points.attributes.specular, weight)
     
     weights = eval_varyings(self.config.reg_weight, progress.t)
-    weighted = {k: v * weights[k] for k, v in regs.items()}
+    weighted = {k: v * weights[k] for k, v in regs.items() if k in weights}
 
     if progress.logging_step:
       with torch.no_grad():

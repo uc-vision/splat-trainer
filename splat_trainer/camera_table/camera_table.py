@@ -458,16 +458,16 @@ class MultiCameraTable(CameraTable):
     self._camera_projection = TensorDictParams(projection.to_tensordict())
     self._camera_projection.requires_grad_(False)
 
-    self._camera_idx = camera_idx
     self.register_buffer("_camera_idx", camera_idx)
-    
+    self._camera_idx = camera_idx
+
     self._camera_t_world = PoseTable(camera_t_world)
     self._camera_t_world.requires_grad_(False)
 
     self._image_names = image_names
 
-    self._labels = labels
     self.register_buffer("_labels", labels)
+    self._labels = labels
 
 
 
@@ -492,6 +492,10 @@ class MultiCameraTable(CameraTable):
   @property
   def num_images(self) -> int:
     return len(self._camera_t_world)
+  
+  @property
+  def image_names(self) -> List[str]:
+    return self._image_names
 
   @property
   def projections(self) -> Projections:
