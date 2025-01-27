@@ -12,10 +12,8 @@ echo "Script started at $(date)" >> "$LOG_FILE"
 
 cd ${BASE_PATH}
 rm -rf ${BASE_PATH}/splat-trainer
-git clone -b multirun git@github.com:uc-vision/splat-trainer.git
+git clone --recursive -b multirun_test git@github.com:uc-vision/splat-trainer.git
 
-cd ${BASE_PATH}/splat-trainer
-git clone git@github.com:uc-vision/taichi-splatting.git
 
 cd ${BASE_PATH}/splat-trainer/taichi-splatting
 pip install -e .

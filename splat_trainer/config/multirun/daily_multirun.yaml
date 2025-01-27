@@ -5,10 +5,8 @@ defaults:
   - /multirun/conn: default
   - override /logger: wandb
   - override /controller: target
-  - override /scene: sh
-  - override /color_corrector: nil
+  - override /scene: mlp
   - override /trainer: default
-  - override /viewer: none
   - override /hydra/callbacks:
     - flush_db
     - push_stats
@@ -25,10 +23,9 @@ logger:
 trainer:
   save_checkpoints: False
   save_output: False
-  num_logged_images: -1
-  log_worst_images: -1
+  num_logged_images: 0
+  log_worst_images: 0
 
-  steps: 20000
 
 hydra:
   job: 
