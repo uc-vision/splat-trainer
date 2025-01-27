@@ -6,12 +6,12 @@ from beartype import beartype
 from omegaconf import DictConfig
 
 from taichi_splatting.optim.visibility_aware import VisibilityOptimizer
-from tensordict import TensorDict, tensorclass
+from tensordict import TensorDict
 import torch
 import torch.nn.functional as F
 
 from splat_trainer.camera_table.camera_table import CameraTable, camera_scene_extents, camera_similarity
-from splat_trainer.config import Progress, VaryingFloat, eval_varying,  eval_varyings
+from splat_trainer.config import Progress, VaryingFloat, eval_varyings
 from splat_trainer.logger.logger import Logger
 from splat_trainer.scene.transfer_sh import transfer_sh
 from splat_trainer.scene.color_model import ColorModel, ColorModelConfig, Colors, GLOTable
@@ -19,9 +19,8 @@ from splat_trainer.scene.scene import GaussianSceneConfig, GaussianScene
 from splat_trainer.gaussians.split import point_basis, split_gaussians_uniform
 
 
-from taichi_splatting.optim import ParameterClass, VisibilityAwareLaProp, VisibilityAwareAdam, SparseLaProp
+from taichi_splatting.optim import ParameterClass, VisibilityAwareAdam
 from taichi_splatting import Gaussians3D, RasterConfig, Rendering, TaichiQueue
-from taichi_splatting.misc.morton_sort import argsort
 
 from taichi_splatting.renderer import render_projected, project_to_image
 from taichi_splatting.perspective import CameraParams
@@ -36,6 +35,8 @@ class MLPSceneConfig(GaussianSceneConfig):
   parameters: DictConfig | Dict
   reg_weight: DictConfig | Dict 
   
+  color_model:ColorModelConfig = field(default_factory=ColorModelConfig)
+
   lr_glo_feature: VaryingFloat = 0.001
 
   image_features:int       = 8
@@ -50,7 +51,6 @@ class MLPSceneConfig(GaussianSceneConfig):
 
   autotune:bool = False
 
-  color_model:ColorModelConfig = field(default_factory=ColorModelConfig)
 
 
   def optim_options(self):

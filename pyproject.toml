@@ -38,7 +38,7 @@ dependencies = [
   'splatview>=0.2.0',
   'python-dispatch',
 
-  'tensordict >= 0.6',
+  'tensordict>=0.6',
   'pykeops'
 ]
 
@@ -55,9 +55,6 @@ exclude = ["profiles", "benchmarks"]
 requires = ["setuptools>=43.0.0",  "wheel", "setuptools-scm"]
 build-backend = "setuptools.build_meta"
 
-
-[options]
-dependency_links = ["https://pypi.taichi.graphics/simple/"]
 
 [project.scripts]  # Optional
 splat-trainer = "splat_trainer.scripts.train_scan:main"
@@ -94,3 +91,12 @@ filterwarnings = [
     # disable "UserWarning: The .grad attribute of a Tensor that is not a leaf Tensor"
     "ignore::UserWarning"  
 ]
+
+[tool.pixi.project]
+channels = ["conda-forge"]
+platforms = ["linux-64"]
+
+[tool.pixi.pypi-dependencies]
+splat-trainer = { path = ".", editable = true }
+
+[tool.pixi.tasks]
