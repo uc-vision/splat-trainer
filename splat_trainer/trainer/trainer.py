@@ -604,6 +604,7 @@ class Trainer(Dispatcher):
     self.pbar.close()
     
     result = {k.split('/')[-1]: self.logger[k].value for k in ["train/metrics/ssim", "train/metrics/psnr", "train/metrics/mse", "train/metrics/l1"]}
+    print(result)
     return result
   
 

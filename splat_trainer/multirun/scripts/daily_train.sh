@@ -14,6 +14,8 @@ cd ${BASE_PATH}
 rm -rf ${BASE_PATH}/splat-trainer
 git clone --recursive -b multirun_test git@github.com:uc-vision/splat-trainer.git
 
+source ~/.bashrc
+conda activate splat-trainer
 
 cd ${BASE_PATH}/splat-trainer/taichi-splatting
 pip install -e .
@@ -21,8 +23,6 @@ pip install -e .
 cd ${BASE_PATH}/splat-trainer
 pip install -e .
 
-source ~/.bashrc
-conda activate splat-trainer
 
 rm -rf $HOME/.cache/torch_extensions/py311_cu121_room347
 
