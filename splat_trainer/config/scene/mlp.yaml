@@ -14,7 +14,7 @@ trainer:
 
     reg_weight:
       scale:    ${log_decay:0.01, 0.01}   # avoid overly large points
-      opacity:  ${log_decay:1.0, 100.0}    # avoid large points with low opacity near the camera
+      opacity:  ${log_decay:0.1, 100.0}    # avoid large points with low opacity near the camera
       aspect:   1e-4   # try to prevent points becoming too elongated
       specular: 1e-5   # prevent the specular term (direction dependent) from compensating for the base color
 
@@ -35,6 +35,7 @@ trainer:
     color_model: 
       _target_: splat_trainer.scene.ColorModelConfig
       hidden_features: 32
+      hidden_layers: 1
       sh_degree: 5
       color_channels: 3
 

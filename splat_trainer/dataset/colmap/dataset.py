@@ -34,8 +34,10 @@ def colmap_projection(camera:pycolmap.Camera, image_scale:Optional[float]=None,
   assert camera.model == pycolmap.CameraModelId.PINHOLE, f"Only PINHOLE cameras are supported for now, got {camera.model}"   
 
   w, h = camera.width, camera.height
+  
   if resize_longest is not None:
     image_scale = resize_longest / max(w, h)
+
           
   fx = camera.focal_length_x
   fy = camera.focal_length_y
@@ -48,7 +50,6 @@ def colmap_projection(camera:pycolmap.Camera, image_scale:Optional[float]=None,
     proj *= image_scale
     (w, h) = (round(w * image_scale), round(h * image_scale))
   
-  w, h = camera.width, camera.height
 
   return Projections(
     intrinsics=torch.tensor(proj, dtype=torch.float32), 
@@ -73,6 +74,8 @@ class COLMAPDataset(Dataset):
         val_stride:int=10,
         depth_range:Tuple[float, float] = (0.1, 100.0)):
 
+
+    self._images = None
     self.image_scale = image_scale
     self.resize_longest = resize_longest
     self.camera_depth_range = [float(f) for f in depth_range]
@@ -107,7 +110,10 @@ class COLMAPDataset(Dataset):
       *[image_info(image) for image in self.reconstruction.images.values()])
     
     # Evenly distribute validation images
-    self.train_idx, self.val_idx = split_stride(np.arange(self.num_cameras), val_stride)
+    train_idx, val_idx = split_stride(np.arange(self.num_cameras), val_stride)
+    self.train_idx = torch.tensor(train_idx, dtype=torch.long)
+    self.val_idx = torch.tensor(val_idx, dtype=torch.long)
+
 
   def __repr__(self) -> str:
     args = []
@@ -130,10 +136,16 @@ class COLMAPDataset(Dataset):
     return cameras
   
   def load_images(self) -> List[CameraImage]:
+    """ Load images from disk - don't use this function unless you want to load images (an expensive operation)
+    """
     if self._images is None:
       self._images = self._load_camera_images()
 
     return self._images
+  
+  @property
+  def num_images(self) -> int:
+    return len(self.image_names)
 
 
   @beartype
@@ -149,7 +161,7 @@ class COLMAPDataset(Dataset):
 
 
   def camera_table(self) -> MultiCameraTable:
-    labels = torch.zeros(len(self.camera_images), dtype=np.int32)
+    labels = torch.zeros((self.num_images,), dtype=torch.int32)
     labels[self.train_idx] |= Label.Training.value
     labels[self.val_idx] |= Label.Validation.value
 
@@ -157,7 +169,9 @@ class COLMAPDataset(Dataset):
       camera_t_world = torch.tensor(np.array(self.camera_t_world), dtype=torch.float32),
       projection = self.projections,
       camera_idx = torch.tensor(self.camera_idx, dtype=torch.long),
-      labels=labels)
+      labels=labels,
+      image_names=self.image_names
+    )
   
 
 
