@@ -65,7 +65,7 @@ def main(cfg : DictConfig) -> None:
 
     assert average_result, "Error: f'Result not found or empty in Redis."
     
-    result = float(average_result['train_psnr'])
+    result = float(average_result['psnr'])
     
   return result
     

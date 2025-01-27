@@ -62,6 +62,7 @@ dependency_links = ["https://pypi.taichi.graphics/simple/"]
 [project.scripts]  # Optional
 splat-trainer = "splat_trainer.scripts.train_scan:main"
 splat-trainer-multirun = "splat_trainer.multirun.scripts.train_scan_multirun:main"
+shutdown-workers = "splat_trainer.multirun.scripts.shutdown_all_workers:main"
 to-colmap = "splat_trainer.scripts.to_colmap:main"
 
 grid-search-trainer = "splat_trainer.scripts.grid_search:main"

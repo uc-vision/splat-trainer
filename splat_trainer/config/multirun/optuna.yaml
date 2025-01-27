@@ -3,7 +3,7 @@
 defaults:
   - /multirun/conn: default
   - override /controller: target
-  - override /scene: tcnn
+  - override /scene: mlp
   - override /trainer: default
   - override /hydra/sweeper: optuna
   - override /hydra/sweeper/sampler: cmaes
@@ -43,6 +43,9 @@ hydra:
       trainer.scene.parameters.alpha_logit.lr: interval(0.001, 0.1)
       trainer.scene.parameters.feature.lr: interval(0.001, 0.1)
       trainer.scene.parameters.position.lr: interval(0.001, 0.1)
+      trainer.ssim_weight: interval(0.001, 100)
+      trainer.mse_weight: interval(0.001, 100)
+      trainer.ssim_levels: interval(0.001, 100)
 
 
 project: optuna_multirun__${now:%Y-%m-%d}__${now:%H-%M-%S}

@@ -47,7 +47,7 @@ class LogBestResult(Callback):
 
         current_step = config.hydra.job.num
 
-        if 'train_psnr' not in best_result or result['train_psnr'] > best_result['train_psnr']:
+        if 'psnr' not in best_result or result['psnr'] > best_result['psnr']:
             best_result = result
             redis_db.hset(f"{self.project}:best_result", mapping=best_result)
             
@@ -58,7 +58,7 @@ class LogBestResult(Callback):
 
         self.run.log({f"optuna_optimization_metric/{metric}": value for metric, value in result.items()}, step=current_step)
         self.run.log({f"optuna_optimization_param/{param_name}": float(param_value) for param_name, param_value in self.params.items()}, step=current_step)
-        self.run.log({f"optuna_optimization_best_value/best_train_psnr": best_result['train_psnr']}, step=current_step)
+        self.run.log({f"optuna_optimization_best_value/best_psnr": best_result['psnr']}, step=current_step)
 
     
     def on_multirun_end(self, config: DictConfig, **kwargs: Any) -> None: 

@@ -1,7 +1,7 @@
 groups:
   room347:
     # - cs24001kw
-    - cs24003kw
+    # - cs24003kw
     - cs24004kw
   # lab3:
   #   - cs19119bs
