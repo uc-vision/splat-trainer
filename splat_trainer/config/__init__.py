@@ -25,7 +25,7 @@ T = TypeVar('T')
 class Progress:
   step:int
   total_steps:int
-
+  logging_step:bool = False
   @property
   def t(self) -> float:
     return clamp(self.step / self.total_steps, 0.0, 1.0)
@@ -154,6 +154,7 @@ VaryingFloat = Varying[float] | float
 VaryingInt = Varying[int] | int
 
 
+@beartype
 def eval_varyings(value, t:float):
   
   if isinstance(value, IsDataclass):

@@ -1,0 +1,49 @@
+
+# @package _global_
+
+
+trainer:
+  scene: 
+    _target_: splat_trainer.scene.MLPSceneConfig
+    parameters:
+      position:     {lr: 0.3, type: local_vector}
+      log_scaling:  {lr: 0.08}
+      rotation:     {lr: 0.01, type: vector}
+      alpha_logit:  {lr: 0.1}
+      feature:      {lr: 5.0, type: vector}
+
+    reg_weight:
+      scale:    ${log_decay:0.01, 0.01}   # avoid overly large points
+      opacity:  ${log_decay:1.0, 100.0}    # avoid large points with low opacity near the camera
+      aspect:   1e-4   # try to prevent points becoming too elongated
+      specular: 1e-5   # prevent the specular term (direction dependent) from compensating for the base color
+
+    lr_glo_feature: 2.0
+    per_image: False   # Per image glo features (as opposed to per-camera features)
+
+    beta1: 0.8
+    beta2: 0.95
+
+    vis_beta: 0.9995
+    vis_smooth: 0.01
+
+    image_features: 32
+    point_features: 16
+
+    autotune: true
+
+    color_model: 
+      _target_: splat_trainer.scene.ColorModelConfig
+      hidden_features: 32
+      sh_degree: 5
+      color_channels: 3
+
+      lr_diffuse: ${log_decay:0.01, 0.0001}
+      lr_specular: ${log_decay:0.01, 0.0001}
+
+      hdr: false
+
+
+
+    
+

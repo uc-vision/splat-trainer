@@ -22,4 +22,5 @@ trainer:
       start: 50
       steps:
         - [0.1, 100]
+        # - [0.5, 200]
       scale: ${training_scale}

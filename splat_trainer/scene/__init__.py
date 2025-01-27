@@ -1,5 +1,5 @@
 from .scene import GaussianSceneConfig, GaussianScene
-from .tcnn_scene import TCNNScene, TCNNConfig
+from .mlp_scene import MLPScene, MLPSceneConfig
 
 from taichi_splatting import Gaussians3D
 from .color_model import ColorModelConfig, ColorModel
@@ -12,8 +12,8 @@ __all__ = [
   "ColorModelConfig",
 
   
-  "TCNNScene",
-  "TCNNConfig",
+  "MLPScene",
+  "MLPSceneConfig",
 
   "Gaussians3D"
 ]

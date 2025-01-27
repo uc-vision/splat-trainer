@@ -1,17 +1,20 @@
 from dataclasses import  dataclass, field, replace
+from functools import reduce
+import operator
 from typing import Dict, Optional
 from beartype import beartype
 from omegaconf import DictConfig
 
-from tensordict import TensorDict
+from taichi_splatting.optim.visibility_aware import VisibilityOptimizer
+from tensordict import TensorDict, tensorclass
 import torch
 import torch.nn.functional as F
 
 from splat_trainer.camera_table.camera_table import CameraTable, camera_scene_extents, camera_similarity
-from splat_trainer.config import Progress, VaryingFloat,  eval_varyings
+from splat_trainer.config import Progress, VaryingFloat, eval_varying,  eval_varyings
 from splat_trainer.logger.logger import Logger
 from splat_trainer.scene.transfer_sh import transfer_sh
-from splat_trainer.scene.color_model import ColorModel, ColorModelConfig, GLOTable
+from splat_trainer.scene.color_model import ColorModel, ColorModelConfig, Colors, GLOTable
 from splat_trainer.scene.scene import GaussianSceneConfig, GaussianScene
 from splat_trainer.gaussians.split import point_basis, split_gaussians_uniform
 
@@ -25,13 +28,15 @@ from taichi_splatting.perspective import CameraParams
 
 
 from splat_trainer.scene.util import pop_raster_config
+from splat_trainer.util.misc import saturate
 
 @beartype
 @dataclass(kw_only=True, frozen=True)
-class TCNNConfig(GaussianSceneConfig):  
-  parameters : DictConfig | Dict
+class MLPSceneConfig(GaussianSceneConfig):  
+  parameters: DictConfig | Dict
+  reg_weight: DictConfig | Dict 
   
-  lr_image_feature: VaryingFloat = 0.001
+  lr_glo_feature: VaryingFloat = 0.001
 
   image_features:int       = 8
   point_features:int       = 8
@@ -43,11 +48,9 @@ class TCNNConfig(GaussianSceneConfig):
   vis_smooth:float = 0.001
   per_image:bool = True
 
-  enable_specular:bool = True
   autotune:bool = False
 
   color_model:ColorModelConfig = field(default_factory=ColorModelConfig)
-
 
 
   def optim_options(self):
@@ -73,17 +76,15 @@ class TCNNConfig(GaussianSceneConfig):
     ).to(device)
 
     points = ParameterClass(point_tensors, parameter_groups=eval_varyings(self.parameters, 0.), **self.optim_options())   
-
-    return TCNNScene(points, self, camera_table, logger)
+    return MLPScene(points, self, camera_table, logger)
 
   
   def from_state_dict(self, state:dict, camera_table:CameraTable, logger:Logger):
 
     points = ParameterClass.from_state_dict(state['points'], **self.optim_options())
-    scene = TCNNScene(points, self, camera_table, logger)
+    scene = MLPScene(points, self, camera_table, logger)
 
     scene._color_model.load_state_dict(state['color_model'])
-
     scene.color_table.load_state_dict(state['color_table'])
     scene.color_opt.load_state_dict(state['color_opt'])
     scene.glo_opt.load_state_dict(state['glo_opt'])
@@ -92,10 +93,10 @@ class TCNNConfig(GaussianSceneConfig):
 
 
 @beartype
-class TCNNScene(GaussianScene):
+class MLPScene(GaussianScene):
   def __init__(self, 
           points: ParameterClass, 
-          config: TCNNConfig,       
+          config: MLPSceneConfig,       
           camera_table:CameraTable,   
           logger:Logger,
     ):
@@ -119,7 +120,7 @@ class TCNNScene(GaussianScene):
     # self.color_model = self._color_model
 
     self.color_table = GLOTable(num_glo_embeddings, config.image_features).to(self.device)
-    self.glo_opt = self.color_table.optimizer(config.lr_image_feature)
+    self.glo_opt = self.color_table.optimizer(config.lr_glo_feature)
     
     
     self.scene_extents = camera_scene_extents(camera_table.cameras)
@@ -135,7 +136,7 @@ class TCNNScene(GaussianScene):
     return self.points.position.shape[0]
 
   def __repr__(self):
-    return f"TCNNScene({self.num_points} points)"
+    return f"MLPScene({self.num_points} points)"
 
   def update_learning_rate(self, t:float):
     groups = eval_varyings(self.config.parameters, t)
@@ -143,7 +144,7 @@ class TCNNScene(GaussianScene):
 
     point_groups = self.points.update_groups(**groups)
     color_groups = self.color_model.schedule(self.color_opt, t)
-    glo_groups = self.color_table.schedule(self.glo_opt, self.config.lr_image_feature, t)
+    glo_groups = self.color_table.schedule(self.glo_opt, self.config.lr_glo_feature, t)
 
     # return a dict of all the learning rates
     return dict(**point_groups, 
@@ -191,7 +192,6 @@ class TCNNScene(GaussianScene):
     self.logger.log_histogram("params/opacity", opacity)
     self.logger.log_histogram("params/log_scale", self.points.log_scaling.detach())
     self.logger.log_histogram("params/feature", self.points.feature.detach())
-
     self.logger.log_histogram("params/glo_feature", self.color_table.weight.detach())
 
 
@@ -211,8 +211,11 @@ class TCNNScene(GaussianScene):
       self.log_optimizer_state()
       self.log_params()
 
-    vis_weight = self.points.visible[vis_idx]
-    self.points.step(visibility=vis_weight, indexes=vis_idx, basis=basis)
+    if isinstance(self.points.optimizer, VisibilityOptimizer):
+      vis_weight = self.points.visible[vis_idx]
+      self.points.step(visibility=vis_weight, indexes=vis_idx, basis=basis)
+    else:
+      self.points.step(indexes=vis_idx, basis=basis)
 
     self.color_opt.step()
     self.glo_opt.step()
@@ -227,6 +230,47 @@ class TCNNScene(GaussianScene):
   def add_rendering(self, image_idx:int, rendering:Rendering):
     points = rendering.points
     self.points.visible[points.idx] += points.visibility
+
+  @torch.compile
+  def compute_reg(self, opacity:torch.Tensor, log_scale:torch.Tensor, depths:torch.Tensor, 
+                  specular:torch.Tensor, weight:torch.Tensor) -> dict[str, torch.Tensor]:
+
+    scale = torch.exp(log_scale)
+    norm_scale =  (scale.pow(2).sum(1) / depths.pow(2).squeeze(-1))
+    
+    aspect_term = (scale.max(-1).values / (scale.min(-1).values + 1e-6))
+    opacity_term = saturate(opacity, gain=4.0, k=2.0) * norm_scale
+    spec_term = specular.abs().sum(1)
+
+    return dict(
+        scale=(norm_scale * weight).mean(), 
+        opacity=(opacity_term * weight).mean(), 
+        aspect=(aspect_term * weight).mean(), 
+        specular=(spec_term * weight).mean()
+      )
+
+
+  def reg_loss(self, rendering:Rendering, progress:Progress) -> torch.Tensor:
+    rendered_points = rendering.points.visible
+    log_scale = self.points.log_scaling[rendered_points.idx]
+
+
+    # if the optimizer is visibility aware, use the visibility as a weight
+    weight = rendered_points.visibility 
+    # weight = (rendered_points.visibility if isinstance(self.points.optimizer, VisibilityOptimizer) 
+    #           else torch.tensor(1.0, device=self.device))
+
+    regs = self.compute_reg(rendered_points.opacity, log_scale, rendered_points.depths, 
+                            rendered_points.attributes.specular, weight)
+    
+    weights = eval_varyings(self.config.reg_weight, progress.t)
+    weighted = {k: v * weights[k] for k, v in regs.items()}
+
+    if progress.logging_step:
+      with torch.no_grad():
+        self.logger.log_values("train/reg", {k:v.item() for k, v in weighted.items()} )
+
+    return reduce(operator.add, weighted.values())
 
 
   @property
@@ -263,10 +307,9 @@ class TCNNScene(GaussianScene):
                 )
   
 
-  def clone(self) -> 'TCNNScene':
+  def clone(self) -> 'MLPScene':
     return self.config.from_state_dict(self.state_dict(), self.camera_table, self.logger)
     
-
 
 
   @beartype
@@ -291,25 +334,28 @@ class TCNNScene(GaussianScene):
     return torch.sum(similarity * glo_feature, dim=0)
 
   @beartype
-  def eval_colors(self, point_indexes:torch.Tensor, camera_params:CameraParams, image_idx:int | None):
+  def eval_colors(self, point_indexes:torch.Tensor, camera_params:CameraParams, 
+                       image_idx:int | None) -> Colors:
     if image_idx is not None:
       glo_feature = self.lookup_glo_feature(image_idx).unsqueeze(0)
     else:
       glo_feature = self.interpolated_glo_feature(torch.inverse(camera_params.T_camera_world)).unsqueeze(0)
 
-
     with torch.autocast(device_type=self.device.type, dtype=torch.float16):
       feature = self.points.feature[point_indexes]
     
-      return self.color_model(feature, self.points.position[point_indexes], 
-                                                        camera_params.camera_position, glo_feature,
-                                                        enable_specular=self.config.enable_specular)
+      return self.color_model(feature, 
+            self.points.position[point_indexes], 
+            camera_params.camera_position, 
+            glo_feature)
+    
+      
 
   def query_visibility(self, camera_params:CameraParams) -> tuple[torch.Tensor, torch.Tensor]:
     config = RasterConfig(compute_visibility=True)
     
     gaussians2d, depth, indexes = project_to_image(self.gaussians, camera_params, config)
-    feature = torch.zeros((self.num_points, 1), device=self.device)
+    feature = torch.zeros((indexes.shape[0], 1), device=self.device)
     rendering = render_projected(indexes, gaussians2d, feature, depth, 
                             camera_params, config)
     
@@ -318,12 +364,12 @@ class TCNNScene(GaussianScene):
 
 
   def evaluate_sh_features(self):
-    def eval_colors(point_indexes, camera_params, image_idx):
+    def f(point_indexes, camera_params, image_idx):
       return self.color_model.post_activation(
-        self.eval_colors(point_indexes, camera_params, image_idx))
+        self.eval_colors(point_indexes, camera_params, image_idx).total())
 
     glo_features = self.lookup_glo_feature(torch.arange(self.camera_table.num_images, device=self.device))
-    return transfer_sh(eval_colors, self.query_visibility, self.camera_table, 
+    return transfer_sh(f, self.query_visibility, self.camera_table, 
                         self.points.position, glo_features, epochs=2, sh_degree=2)
       
 
@@ -345,18 +391,21 @@ class TCNNScene(GaussianScene):
 
   @beartype
   def render(self, camera_params:CameraParams,  
-             image_idx:Optional[int] = None, **options) -> Rendering:
+             image_idx:Optional[int] = None,   specular_weight:float = 1.0, **options) -> Rendering:
 
     config = pop_raster_config(options)
-    
     gaussians2d, depth, indexes = project_to_image(self.gaussians, camera_params, config)
 
-    colour = TaichiQueue.run_sync(self.eval_colors, indexes, camera_params, image_idx)
-    rendering = render_projected(indexes, gaussians2d, colour, depth, 
+    colors = TaichiQueue.run_sync(self.eval_colors, indexes, camera_params, image_idx)
+    rendering = render_projected(indexes, gaussians2d, colors.total(specular_weight), depth, 
                             camera_params, config, **options)
     
 
-    rendering = replace(rendering, image = self.color_model.post_activation(rendering.image))
+    rendering = replace(rendering, 
+                        points = rendering.points.replace(attributes=colors),
+                        image = self.color_model.post_activation(rendering.image))
+    
+
     return rendering
     
 

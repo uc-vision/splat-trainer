@@ -62,10 +62,6 @@ class TrainConfig:
   mse_weight: float = 0.0
   l1_weight: float = 0.0
   ssim_levels: int = 4
-  
-  scale_reg: VaryingFloat = 0.0
-  opacity_reg: VaryingFloat = 0.0
-  aspect_reg: VaryingFloat = 0.0
 
   # view similarity
   vis_clusters: int = 1024 # number of point clusters to use

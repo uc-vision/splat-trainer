@@ -28,6 +28,10 @@ class GaussianScene(metaclass=ABCMeta):
   @abstractmethod
   def add_rendering(self, image_idx:int, rendering:Rendering):
     raise NotImplementedError
+  
+  @abstractmethod
+  def reg_loss(self, rendering:Rendering, progress:Progress) -> torch.Tensor:
+    raise NotImplementedError
 
   @abstractmethod
   def step(self, progress:Progress, log_details:bool=False):

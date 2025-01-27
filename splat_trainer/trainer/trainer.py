@@ -119,7 +119,8 @@ class Trainer(Dispatcher):
       logger = LoggerWithState(logger)
 
     scene = config.scene.from_color_gaussians(initial_gaussians, camera_table, device, logger)
-    progress = Progress(step=0, total_steps=config.total_steps)
+    progress = Progress(step=0, total_steps=config.total_steps, logging_step=False)
+    
     controller = config.controller.make_controller(scene, config.target_points, progress, logger)
     view_selector = config.view_selection.create(camera_table)
 
@@ -242,7 +243,9 @@ class Trainer(Dispatcher):
 
   @property
   def progress(self) -> Progress:
-    return Progress(step=self.step, total_steps=self.config.total_steps)
+    return Progress(step=self.step, 
+                    total_steps=self.config.total_steps,
+                    logging_step=self.is_logging_step)
   
   @property
   def is_logging_step(self):
@@ -411,31 +414,7 @@ class Trainer(Dispatcher):
 
       return loss / levels, ssim.item()
 
-  def reg_loss(self, rendering:Rendering) -> Tuple[torch.Tensor, dict]:
-    points = rendering.points.visible
 
-    # Use the 3d scale of the points but scaled according the size in-camera 
-    # (dividing by focal length to be independent of image size)
-
-    scale = self.scene.gaussians.scale[points.idx]
-    norm_scale =  (scale.pow(2).sum(1) / points.depths.pow(2).squeeze(-1))
-    
-    aspect_term = (scale.max(-1).values / (scale.min(-1).values + 1e-6))
-
-    opacity_term = saturate(points.opacity, gain=4.0, k=2.0) * norm_scale
-
-    scale_weight, opacity_weight, aspect_weight = [eval_varying(x, self.progress) 
-          for x in [self.config.scale_reg, self.config.opacity_reg, self.config.aspect_reg]]
-    
-    
-    regs = dict(
-      # scale_reg     =  (points.visibility * norm_scale.pow(2).sum(1)).mean() * scale_weight,
-      opacity_reg   =  (points.visibility  * opacity_term).mean() * opacity_weight, 
-      aspect_reg    =  (points.visibility  * aspect_term).mean() * aspect_weight
-    )
-
-    metrics = {k:v.item() for k, v in regs.items()} 
-    return reduce(operator.add, regs.values()), metrics
 
   def compute_losses(self, rendering:Rendering, image:torch.Tensor):
     
@@ -459,17 +438,16 @@ class Trainer(Dispatcher):
 
     losses, metrics = zip(*loss_metrics)
 
-    reg_loss, reg_losses = self.reg_loss(rendering)
+    reg_loss = self.scene.reg_loss(rendering, self.progress)
     total = sum(losses) + reg_loss 
     
-    if self.step % self.config.log_interval == 0:
+    if self.is_logging_step:
       loss_dict = {k:v.item() for k, v in zip(loss_funcs.keys(), losses)}
       metrics_dict = dict(zip(loss_funcs.keys(), metrics))
       psnr = 10 * math.log10(1 / metrics_dict['mse'])  
 
       self.logger.log_values("train/loss", dict(**loss_dict, reg=reg_loss.item(), total=total.item()))
       self.logger.log_values("train/metrics", dict(**metrics_dict, psnr = psnr))
-      self.logger.log_values("train/reg", reg_losses)
     
     return total
 

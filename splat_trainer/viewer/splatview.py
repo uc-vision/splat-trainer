@@ -115,8 +115,8 @@ class SplatviewViewer(Viewer):
         self.antialias_checkbox = self.server.gui.add_checkbox("Antialias", initial_value=self.trainer.config.antialias)
         self.antialias_checkbox.on_update(self.on_set_antialias)
 
-        self.specular_checkbox = self.server.gui.add_checkbox("Enable Specular", initial_value=True)
-        self.specular_checkbox.on_update(self.on_set_specular)
+        self.specular_slider = self.server.gui.add_slider("Specular Weight", min=0.0, max=5.0, step=0.01, initial_value=1.0)
+        self.specular_slider.on_update(self.on_set_specular)
 
       with self.server.gui.add_folder("Scene") as self.scene_folder:
         self.quantile_slider = self.server.gui.add_slider("Depth quantile", min=0.0, max=1.0, step=0.01, initial_value=1.0)
@@ -171,16 +171,7 @@ class SplatviewViewer(Viewer):
     self.viewer.client(event.client.client_id).redraw()
 
   @with_traceback
-  def on_set_specular(self, event: viser.GuiEvent[viser.GuiCheckboxHandle]):
-    scene_config = self.trainer.config.scene
-
-    if not hasattr(scene_config, 'enable_specular'):
-      print("Warning: scene config does not have enable_specular field")
-      return
-    
-
-    self.trainer =self.trainer.replace(
-      scene=replace(scene_config, enable_specular=event.target.value))
+  def on_set_specular(self, event: viser.GuiEvent[viser.GuiSliderHandle]):
     self.viewer.client(event.client.client_id).redraw()
 
   @with_traceback
@@ -259,7 +250,7 @@ class SplatviewViewer(Viewer):
     camera_params = camera_params.to(device=self.trainer.device, dtype=torch.float32)
 
 
-    rendering = self.trainer.render(camera_params, image_idx=img_idx, render_median_depth=True)
+    rendering = self.trainer.render(camera_params, image_idx=img_idx, render_median_depth=True, specular_weight=self.specular_slider.value)
     return rendering.image.detach().cpu().numpy(), rendering.median_depth_image.detach().cpu().numpy()
   
 

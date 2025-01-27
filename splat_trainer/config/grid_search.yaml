@@ -3,7 +3,7 @@
 defaults:
   - logger: none
   - controller: target
-  - scene: tcnn
+  - scene: mlp
   - trainer: default
   - test_datasets: default
   - _self_

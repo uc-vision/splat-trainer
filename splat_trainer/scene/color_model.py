@@ -5,8 +5,8 @@ import torch.nn.functional as F
 import torch.nn as nn
 
 from splat_trainer.config import VaryingFloat, eval_varying, schedule_groups
-from splat_trainer.scene.mlp.torch_mlp import AffineMLP, glu_mlp
-
+from splat_trainer.scene.mlp.torch_mlp import AffineMLP, MLP
+from tensordict import tensorclass
 
 
 class GLOTable(torch.nn.Module):
@@ -46,25 +46,10 @@ class GLOTable(torch.nn.Module):
 
 
 
-def luminance_activation(rgbl:torch.Tensor, intensity_bias:float = 0.):
-    colors, intensity = rgbl[:, 1:], rgbl[:, 0:1]
-    return colors.sigmoid() * (intensity + intensity_bias).exp()
-
-
-class Luminance(torch.nn.Module):
-  def __init__(self, intensity_bias:float = 0.):
-    super().__init__()
-    self.intensity_bias = intensity_bias
-
-  def forward(self, outputs:torch.Tensor):
-    return luminance_activation(outputs, self.intensity_bias)
-
 
 @dataclass
 class ColorModelConfig:
-  hidden_features:int      = 32
-  hidden_layers:int        = 1
-  
+  hidden_features:int      = 32  
   sh_degree:int = 5
 
   lr_diffuse:VaryingFloat = 1e-3
@@ -79,6 +64,22 @@ class ColorModelConfig:
       glo_features=glo_features,
       point_features=point_features
     )
+
+
+def luminance_activation(rgbl:torch.Tensor, intensity_bias:float = 0.):
+    colors, intensity = rgbl[:, 1:], rgbl[:, 0:1]
+    lum = (intensity + intensity_bias).exp()
+    
+    return colors.sigmoid() * lum
+    # return torch.cat([F.sigmoid(colors) * lum, lum], dim=1)
+
+@tensorclass
+class Colors:
+  diffuse:torch.Tensor    # N, 4  rgb, luminance
+  specular:torch.Tensor   # N, 4  rgb, luminance
+
+  def total(self, specular_weight:float = 1.0):
+    return (self.diffuse + self.specular * specular_weight)
 
 
 
@@ -97,32 +98,32 @@ class ColorModel(torch.nn.Module):
 
     self.norm = nn.LayerNorm(self.feature_size, elementwise_affine=False)
 
+    n_out = config.color_channels + 1  # rgb + intensity
+
     self.directional_model = AffineMLP(
         inputs=self.feature_size,
-        outputs=(config.color_channels + 1),
+        outputs=n_out,
 
-        hidden_layers=config.hidden_layers, 
+        hidden_layers=1, 
         hidden=config.hidden_features,
         proj_hidden_layers=0,
         sh_degree=config.sh_degree
-
     )
 
-    self.base_model = glu_mlp(
+    self.base_model = MLP(
       inputs=self.feature_size, 
-      outputs=(config.color_channels + 1), 
+      outputs=n_out, 
 
       hidden=config.hidden_features, 
-      hidden_layers=config.hidden_layers
+      hidden_layers=1
     )
 
 
   def forward(self, point_features:torch.Tensor, # N, point_features
                 positions:torch.Tensor,          # N, 3
                 cam_pos:torch.Tensor,            # 3
-                glo_feature:torch.Tensor,         # 1, glo_features
-                enable_specular:bool = True
-              ):
+                glo_feature:torch.Tensor         # 1, glo_features
+              ) -> Colors:
 
     assert glo_feature.dim() == 2 and point_features.dim() == 2, f"got {glo_feature.dim()} and {point_features.dim()}"
     
@@ -131,25 +132,29 @@ class ColorModel(torch.nn.Module):
     feature = torch.cat([point_features, glo_feature], dim=1)
     feature = self.norm(feature)
 
-    base_feature = self.base_model(feature)
-    color = luminance_activation(base_feature)
+    diffuse = luminance_activation(
+      self.base_model(feature))
 
-    if enable_specular:
-      dir = F.normalize(positions.detach() - cam_pos.unsqueeze(0), dim=1)
+    dir = F.normalize(positions.detach() - cam_pos.unsqueeze(0), dim=1)
 
-      # Directional specular/reflected colors
-      specular = self.directional_model(dir, feature)
-      spec_color = luminance_activation(specular, intensity_bias=-2.0)
-
-      color += spec_color
-    return color
+    # Directional specular/reflected colors
+    specular = luminance_activation(
+      self.directional_model(dir, feature), intensity_bias=-2.0)
+    
+    return Colors(
+      diffuse=diffuse, 
+      specular=specular, 
+      batch_size=(positions.shape[0],))
 
       
     
 
-  def post_activation(self, image:torch.Tensor) -> torch.Tensor:      
+  def post_activation(self, image:torch.Tensor, eps:float = 1e-6) -> torch.Tensor:      
     if not self.config.hdr:
-      return image.clamp(0, 1) 
+      rgb = image[..., :3]
+      return rgb.clamp(0, 1)
+      # lum = image[..., 3:4]
+      # return (rgb / (lum + eps)).clamp(0, 1)
     else:
       return image
   
@@ -159,7 +164,7 @@ class ColorModel(torch.nn.Module):
       dict(params=self.directional_model.parameters(), lr=0.0, name="spec"),
       dict(params=[*self.base_model.parameters(), *self.norm.parameters()], lr=0.0, name="base"),
     ]
-    opt = torch.optim.Adam(param_groups, betas=(0.9, 0.99))
+    opt = torch.optim.Adam(param_groups, betas=(0.9, 0.999))
     self.schedule(opt, t)
 
     return opt
