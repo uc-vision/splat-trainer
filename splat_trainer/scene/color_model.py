@@ -153,8 +153,7 @@ class ColorModel(torch.nn.Module):
     if not self.config.hdr:
       rgb = image[..., :3]
       return rgb.clamp(0, 1)
-      # lum = image[..., 3:4]
-      # return (rgb / (lum + eps)).clamp(0, 1)
+
     else:
       return image
   
