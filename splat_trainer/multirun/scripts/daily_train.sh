@@ -17,6 +17,8 @@ git clone --recursive -b multirun_test git@github.com:uc-vision/splat-trainer.gi
 source ~/.bashrc
 conda activate splat-trainer
 
+export TORCH_EXTENSIONS_DIR=~/.cache/torch_extensions/py311_cu121_daily_multirun
+
 cd ${BASE_PATH}/splat-trainer/taichi-splatting
 pip install -e .
 
@@ -24,7 +26,7 @@ cd ${BASE_PATH}/splat-trainer
 pip install -e .
 
 
-rm -rf $HOME/.cache/torch_extensions/py311_cu121_room347
+rm -rf $HOME/.cache/torch_extensions/py311_cu121_daily_multirun
 
 splat-trainer-multirun +multirun=daily_multirun logger.group=${DATE} >> "$LOG_FILE" 2>&1
 
