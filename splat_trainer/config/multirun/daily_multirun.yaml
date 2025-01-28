@@ -8,7 +8,6 @@ defaults:
   - override /scene: mlp
   - override /trainer: default
   - override /hydra/callbacks:
-    - flush_db
     - push_stats
     - average_results
     - log_job_result

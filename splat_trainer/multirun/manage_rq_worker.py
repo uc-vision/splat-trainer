@@ -46,6 +46,7 @@ class ManageRQWorkers(Callback):
 
     def on_multirun_start(self, config: DictConfig, **kwargs: Any) -> None:
         shutdown_all_workers(self.redis_url)
+        flush_db(self.redis_url)
         
         try:
             result = deploy_workers(self.args)

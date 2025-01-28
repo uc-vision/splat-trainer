@@ -11,6 +11,8 @@ from omegaconf import DictConfig
 import redis
 import socket
 
+from splat_trainer.multirun.deploy import flush_db
+
 
 
 log = logging.getLogger(__name__)
@@ -32,18 +34,16 @@ class PushStats(Callback):
         self.local_port = local_port
         self.remote_port = remote_port
         
-        self.redis_host = socket.gethostname()
-        self.redis_port = redis_port
-        self.redis_db_num = redis_db_num
-        
         self.result_key = result_key
+        self.redis_url = f"redis://{socket.gethostname()}:{redis_port}/{redis_db_num}"
         
         self.log = logging.getLogger(f"{__name__}.{self.__class__.__name__}")
         
-
+    def on_multirun_start(self, config: DictConfig, **kwargs: Any) -> None: 
+        flush_db(self.redis_url)
         
     def on_multirun_end(self, config: DictConfig, **kwargs: Any) -> None: 
-        redis_client = redis.Redis(host=self.redis_host, port=self.redis_port, db=self.redis_db_num, decode_responses=True)
+        redis_client = redis.from_url(self.redis_url, decode_responses=True)
         averaged_results = redis_client.hgetall(self.result_key)
         assert averaged_results, "Error: result data not found or empty in Redis."
 

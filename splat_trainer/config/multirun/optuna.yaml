@@ -10,7 +10,6 @@ defaults:
   - override /dataset: null
   - override /hydra/callbacks:
     - manage_rq_workers
-    - flush_db
     - log_best_result
     - log_job_result
   - _self_
