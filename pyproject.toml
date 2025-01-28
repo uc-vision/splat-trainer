@@ -39,7 +39,24 @@ dependencies = [
   'python-dispatch',
 
   'tensordict>=0.6',
-  'pykeops'
+  'pykeops',
+
+  'redis',
+  'paramiko',
+  'pandas',
+  'cloudpickle',
+  'fabric',
+  'uuid',
+  'keyring',
+  'yaml',
+  'flask',
+  'grafana-analytics',
+  'filelock',
+  'hydra-rq-launcher == 1.2.1',
+  'rq',
+  'rq-dashboard',
+  'hydra-optuna-sweeper',
+  'optuna-dashboard'
 ]
 
 
