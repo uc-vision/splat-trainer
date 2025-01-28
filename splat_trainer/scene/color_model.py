@@ -1,5 +1,4 @@
 from dataclasses import dataclass
-from functools import partial
 import torch
 import torch.nn.functional as F
 import torch.nn as nn

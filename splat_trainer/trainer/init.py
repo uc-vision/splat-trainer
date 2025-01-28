@@ -21,28 +21,26 @@ def get_initial_gaussians(config:CloudInitConfig, dataset:Dataset, device:torch.
       num_dataset_points = points.batch_size[0]
 
       points = crop_cloud(cameras, points)
-      if points.batch_size[0] == 0:
+      if points.num_points == 0:
         raise ValueError("No points visible in dataset images, check input data!")
-
+      
       print(colored(f"Found {points.batch_size[0]} visible points from original {num_dataset_points}", 'yellow'))
-      limit = points.batch_size[0]
+
+      limit = points.num_points if config.limit_points is None else config.limit_points
       if config.initial_points is not None:
         limit = min(limit, config.initial_points)
 
-      if config.limit_points is not None:
-        limit = min(limit, config.limit_points)
-
-        random_indices = torch.randperm(points.batch_size[0])[:limit]
+      if limit < points.num_points:
+        random_indices = torch.randperm(points.num_points)[:limit]
         points = points[random_indices]
 
     if config.initial_points is not None or points is None:
       n = config.initial_points or 0
       n_dataset = points.batch_size[0] if points is not None else 0
-      n_random = n - n_dataset
+      n_random = max(0, n - n_dataset)
       
       print(f"Initializing with {n} total points, from dataset {n_dataset}, random {n_random}")
       cameras = cameras.clamp_near(config.clamp_near)
-
       points = balanced_cloud(cameras, n, config.min_view_overlap, points)
 
 

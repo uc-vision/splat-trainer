@@ -1,23 +1,23 @@
-from functools import cached_property, partial
+from functools import partial
+import numpy as np
+import torch
+from tqdm import tqdm
 
 from pathlib import Path
-from typing import Iterable, List, Optional, Sequence
+from typing import Optional, Sequence
 from beartype import beartype
-from beartype.typing import Iterator, Tuple
+from beartype.typing import Tuple
 
 from camera_geometry import FrameSet
 from camera_geometry.camera_models import optimal_undistorted
 
-import numpy as np
-import torch
-from tqdm import tqdm
 from splat_trainer.camera_table.camera_table import CameraRigTable, Label
-from splat_trainer.dataset.dataset import  ImageView, Dataset
-from splat_trainer.util.misc import split_stride
-
-
-from .loading import  CameraImage, PreloadedImages, camera_rig_table, preload_images
 from splat_trainer.util.pointcloud import PointCloud
+
+from splat_trainer.dataset.dataset import  ImageView, Dataset
+from .loading import  PreloadedImages, camera_rig_table, preload_images
+
+from splat_trainer.dataset.util import split_train_val
 
 
 class ScanDataset(Dataset):
@@ -54,10 +54,8 @@ class ScanDataset(Dataset):
     self.cameras = cameras
     self.scan = scan.copy(cameras=cameras)
 
-    # Evenly distribute validation images
-    train_idx, val_idx = split_stride(np.arange(scan.num_frames * len(cameras)), val_stride)
-    self.train_idx = torch.tensor(train_idx, dtype=torch.long)
-    self.val_idx = torch.tensor(val_idx, dtype=torch.long)
+
+    self.train_idx, self.val_idx = split_train_val(self.num_images, val_stride)
     
   def load_images(self) -> PreloadedImages:
     if self._images is None:

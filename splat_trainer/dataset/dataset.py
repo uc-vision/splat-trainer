@@ -1,11 +1,8 @@
 
 from abc import ABCMeta, abstractmethod
-from collections import namedtuple
 from dataclasses import dataclass
 from typing import Sequence
 from beartype import beartype
-from beartype.typing import Iterator
-import numpy as np
 import torch
 
 

@@ -13,6 +13,7 @@ from beartype.typing import Callable, Iterator, List, Optional, Sequence, Tuple
 
 # Third party packages
 from beartype import beartype
+from camera_geometry import FrameSet
 from fused_ssim import fused_ssim
 import numpy as np
 from pydispatch import Dispatcher
@@ -130,6 +131,9 @@ class Trainer(Dispatcher):
       to_pointcloud(initial_gaussians).save_ply(output_path / "input.ply")
       with open(output_path / "cameras.json", "w") as f:
         json.dump(camera_json(camera_table), f)
+
+    FrameSet.save(dataset.scan, "undistorted.json")
+
 
     return Trainer(config, scene, controller, dataset, logger, view_selector)
       
@@ -307,7 +311,7 @@ class Trainer(Dispatcher):
     point_visible = torch.zeros(self.scene.num_points, dtype=torch.int, device=self.device)
 
     rng = np.random.RandomState(random_seed)
-    log_indices = set(rng.choice(len(image_views), self.config.num_logged_images, replace=False))
+    log_indices = set(rng.choice(len(image_views), min(self.config.num_logged_images, len(image_views)), replace=False))
 
     pbar = tqdm(total=len(image_views), desc=f"Evaluating {name}", leave=False)
     for i, image_view in enumerate(image_views):

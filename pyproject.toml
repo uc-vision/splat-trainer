@@ -22,7 +22,6 @@ dependencies = [
   'tabulate',
   'fused-ssim',
 
-  'python-dispatch',
   'markdown_strings',
   'colored_traceback',
   'pandas',
@@ -39,7 +38,8 @@ dependencies = [
   'python-dispatch',
 
   'tensordict>=0.6',
-  'pykeops'
+  'pykeops',
+
 ]
 
 
