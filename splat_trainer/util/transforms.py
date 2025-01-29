@@ -25,6 +25,12 @@ def join_rt(r, t):
   T[..., 0:3, 0:3] = r
   T[..., 0:3, 3] = t
   return T
+
+
+def transpose_negate(m:torch.Tensor) -> torch.Tensor:
+  """ Inverse of rigid transform without explicit inverse """
+  r, t = split_rt(m)
+  return join_rt(r.transpose(-1, -2), -(r.transpose(-1, -2) @ t))
   
 
 def make_homog(points):

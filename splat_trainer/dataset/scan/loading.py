@@ -18,6 +18,8 @@ from tqdm import tqdm
 
 from splat_trainer.camera_table.camera_table import CameraRigTable, Projections
 from splat_trainer.dataset import ImageView
+from splat_trainer.dataset.util import concat_lists
+
 
 @dataclass
 class CameraImage:
@@ -37,7 +39,7 @@ class CameraImage:
 
 def load_scan(scan_file:str, image_scale:Optional[float]=None, 
               resize_longest:Optional[int]=None) -> Tuple[FrameSet, List[CameraImage]]:
-    scan = FrameSet.load_file(Path(scan_file))
+    scan = FrameSet.load_file(Path(scan_file))[:2]
 
     cameras = {k: optimal_undistorted(camera, alpha=0)
                  for k, camera in scan.cameras.items()}
@@ -74,6 +76,7 @@ def camera_rig_table(scan:FrameSet, depth_range:Tuple[float, float], labels:torc
     world_t_rig = torch.from_numpy(np.array(scan.rig_poses)).to(torch.float32)
     image_names = [image_set[k] for k in scan.camera_names for image_set in scan.image_sets.rgb]
 
+
     return CameraRigTable(
       rig_t_world=torch.linalg.inv(world_t_rig),
       camera_t_rig=torch.from_numpy(camera_t_rig).to(torch.float32),
@@ -81,9 +84,6 @@ def camera_rig_table(scan:FrameSet, depth_range:Tuple[float, float], labels:torc
       image_names=image_names,
       labels=labels)
 
-
-def concat_lists(xs):
-  return [x for x in xs for x in x]
 
 
 @beartype
@@ -99,7 +99,7 @@ def preload_images(scan:FrameSet, undistorted:Dict[str, Camera], progress=None) 
     image = scan.loader.rgb.load_image(image_file)
     image = undistortion.undistort(image)
     image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-
+    
     camera_id = camera_names.index(camera_name)
     return CameraImage(
         camera=undistortion.undistorted.transform(rig_pose),

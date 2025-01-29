@@ -1,31 +1,35 @@
 from functools import cached_property, partial
+import numpy as np
+import torch
+from tqdm import tqdm
 
 from pathlib import Path
-from typing import Iterable, List, Optional, Sequence
+from typing import Optional, Sequence
 from beartype import beartype
-from beartype.typing import Iterator, Tuple
+from beartype.typing import Tuple
 
 from camera_geometry import FrameSet
 from camera_geometry.camera_models import optimal_undistorted
 
-import numpy as np
-import torch
-from tqdm import tqdm
 from splat_trainer.camera_table.camera_table import CameraRigTable, Label
-from splat_trainer.dataset.dataset import  ImageView, Dataset
-from splat_trainer.util.misc import split_stride
-
-
-from .loading import  CameraImage, PreloadedImages, camera_rig_table, preload_images
 from splat_trainer.util.pointcloud import PointCloud
+
+from splat_trainer.dataset.dataset import  ImageView, Dataset
+from .loading import  PreloadedImages, camera_rig_table, preload_images
+
+from splat_trainer.dataset.util import scene_normalization, split_train_val
 
 
 class ScanDataset(Dataset):
+  @beartype
   def __init__(self, scan_file:str,                
         image_scale:Optional[float]=None,
         resize_longest:Optional[int]=None,
         val_stride:int=0,
-        depth_range:Tuple[float, float] = (0.1, 100.0)):
+        depth_range:Sequence[float] = (0.1, 100.0),
+        normalize_scale:bool=False,
+        centering:bool=True,
+        ):
 
     self.scan_file = scan_file
     self.image_scale = image_scale
@@ -36,6 +40,23 @@ class ScanDataset(Dataset):
     self.loaded_scan = scan
 
     self.camera_depth_range = [float(f) for f in depth_range]
+    center, scale = scene_normalization([cam.location for cam in scan.expand_cameras()])
+
+    self.centering = np.zeros(3, dtype=np.float32)
+    self.scaling = 1.0
+
+    if centering is True:
+      scan = scan.translated(-center)
+      self.centering = center
+
+    if normalize_scale is True:
+      scan = scan.scaled(1 / scale)
+      self.scaling = scale
+
+
+    print("Scan cameras:")
+    for k, camera in scan.cameras.items():
+        print(k, camera)
 
     cameras = {k: optimal_undistorted(camera, alpha=0)
                  for k, camera in scan.cameras.items()}
@@ -54,10 +75,7 @@ class ScanDataset(Dataset):
     self.cameras = cameras
     self.scan = scan.copy(cameras=cameras)
 
-    # Evenly distribute validation images
-    train_idx, val_idx = split_stride(np.arange(scan.num_frames * len(cameras)), val_stride)
-    self.train_idx = torch.tensor(train_idx, dtype=torch.long)
-    self.val_idx = torch.tensor(val_idx, dtype=torch.long)
+    self.train_idx, self.val_idx = split_train_val(self.num_images, val_stride)
     
   def load_images(self) -> PreloadedImages:
     if self._images is None:
@@ -76,8 +94,15 @@ class ScanDataset(Dataset):
     args += [f"near={self.camera_depth_range[0]:.3f}", f"far={self.camera_depth_range[1]:.3f}"]
     args += [f"pointcloud={self.pointcloud_file()}"]
 
+    centre, scale = self.scene_transform
+    centre = [f"{c:.3f}" for c in centre.tolist()]
+    args += [f"centering={centre}", f"scaling={scale:.3f}"]
+
     return f"ScanDataset({self.scan_file} {', '.join(args)})"
 
+  @property
+  def scene_transform(self) -> tuple[torch.Tensor, float]:
+    return torch.from_numpy(self.centering).to(torch.float32), self.scaling
 
   @property
   def num_images(self) -> int:
@@ -98,6 +123,7 @@ class ScanDataset(Dataset):
   def val(self) -> Sequence[ImageView]:
     return self.loader(self.val_idx)
   
+  @cached_property
   def camera_table(self) -> CameraRigTable:
     labels = torch.zeros((self.num_images, ), dtype=torch.int32)
 
@@ -112,8 +138,12 @@ class ScanDataset(Dataset):
 
   def pointcloud(self) -> Optional[PointCloud]:
     pcd_filename = self.pointcloud_file()  
-    return PointCloud.load_cloud(pcd_filename) if pcd_filename is not None else None
+    if pcd_filename is None:
+      return None
 
+    pcd = PointCloud.load_cloud(pcd_filename)
+    centering, scaling = self.scene_transform
+    return pcd.translated(-centering).scaled(1.0/scaling)
 
 
 def find_cloud(scan:FrameSet) -> Tuple[np.ndarray, np.ndarray]:

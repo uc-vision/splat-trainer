@@ -137,7 +137,7 @@ def main():
       paths = trainer.paths()
       out_file = paths.workspace / args.output
       with open(out_file, "w") as f:
-        json.dump(evals, f)
+        json.dump(evals, f, indent=2, sort_keys=True)
 
       print(f"Saved to {out_file}")
 
