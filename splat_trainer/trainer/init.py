@@ -4,14 +4,14 @@ from termcolor import colored
 import torch
 from splat_trainer.camera_table.camera_table import Cameras
 from splat_trainer.dataset.dataset import Dataset
-from splat_trainer.gaussians.loading import estimate_scale, from_pointcloud, from_scaled_pointcloud
+from splat_trainer.gaussians.loading import estimate_scale, from_scaled_pointcloud
 from splat_trainer.trainer.config import CloudInitConfig
 from splat_trainer.util.pointcloud import PointCloud
-from splat_trainer.visibility.query_points import balanced_cloud, crop_cloud, projections, random_cloud
+from splat_trainer.visibility.query_points import balanced_cloud, crop_cloud
 
 
 def get_initial_gaussians(config:CloudInitConfig, dataset:Dataset, device:torch.device) -> Gaussians3D:
-    camera_table = dataset.camera_table().to(device)
+    camera_table = dataset.camera_table.to(device)
     cameras:Cameras = camera_table.cameras
 
     points:Optional[PointCloud] = dataset.pointcloud()

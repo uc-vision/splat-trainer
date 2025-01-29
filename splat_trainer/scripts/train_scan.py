@@ -192,7 +192,7 @@ def train_with_config(cfg) -> dict | str:
   from splat_trainer.trainer import Trainer
 
   torch.set_grad_enabled(False)
-  torch.set_float32_matmul_precision('high')
+  torch.set_float32_matmul_precision('highest')
   
   # suppress triton and torch dynamo verbosity
   # torch._logging.set_logs(dynamo=logging.CRITICAL, inductor=logging.CRITICAL)
@@ -216,7 +216,7 @@ def train_with_config(cfg) -> dict | str:
     TaichiQueue.init(arch=ti.cuda, debug=cfg.debug, device_memory_GB=0.1, threaded=True)
     
     train_config = hydra.utils.instantiate(cfg.trainer, _convert_="object")
-    dataset = hydra.utils.instantiate(cfg.dataset)
+    dataset = hydra.utils.instantiate(cfg.dataset, _convert_="object")
   
     trainer = Trainer.initialize(train_config, dataset, logger)
     viewer:Viewer = hydra.utils.instantiate(cfg.viewer).create_viewer(trainer, enable_training=True)

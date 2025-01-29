@@ -1,19 +1,17 @@
 # Python standard library
 from dataclasses import replace
 from enum import Enum
-from functools import partial, reduce
+from functools import partial
 import json
 import math
-import operator
 from pathlib import Path
 import time
 from types import SimpleNamespace
-from beartype.typing import Callable, Iterator, List, Optional, Sequence, Tuple
+from beartype.typing import Callable, Iterator, List, Optional, Sequence
 
 
 # Third party packages
 from beartype import beartype
-from camera_geometry import FrameSet
 from fused_ssim import fused_ssim
 import numpy as np
 from pydispatch import Dispatcher
@@ -33,23 +31,22 @@ from splat_trainer.camera_table.camera_table import Camera, camera_json
 from splat_trainer.dataset import Dataset
 from splat_trainer.dataset.dataset import ImageView
 
-from splat_trainer.config import Progress, eval_varying
+from splat_trainer.config import Progress
 from splat_trainer.controller.controller import Controller
 
 from splat_trainer.gaussians.loading import to_pointcloud
 from splat_trainer.logger import Logger
-from splat_trainer.logger.logger import CompositeLogger, LoggerWithState, StateLogger
+from splat_trainer.logger.logger import LoggerWithState
 
 from splat_trainer.scene.io import read_gaussians, write_gaussians
 from splat_trainer.scene.scene import GaussianScene
 
-from splat_trainer.util.colors import mse_to_psnr
 from splat_trainer.visibility import cluster
 
 from splat_trainer.util.colorize import colorize, get_cv_colormap
-from splat_trainer.util.containers import mean_rows, transpose_rows
+from splat_trainer.util.containers import transpose_rows
 
-from splat_trainer.util.misc import Heap, format_dict, saturate, soft_gt, soft_lt
+from splat_trainer.util.misc import Heap, format_dict
 
 
 from .config import TrainConfig
@@ -80,13 +77,17 @@ class Trainer(Dispatcher):
 
                 view_clustering:Optional[cluster.ViewClustering] = None,
       ):
+    
+    assert torch.get_float32_matmul_precision() == 'highest', \
+      f"lower precision causes inaccuracy in 4x4 transforms {torch.get_float32_matmul_precision()}"
+        
 
     self.device = torch.device(config.device)
     self.controller = controller
     self.scene = scene
     self.dataset = dataset
 
-    self.camera_table = dataset.camera_table().to(self.device)
+    self.camera_table = dataset.camera_table.to(self.device)
 
     self.config = config
     self.logger = logger
@@ -111,7 +112,7 @@ class Trainer(Dispatcher):
   def initialize(config:TrainConfig, dataset:Dataset, logger:Logger):
 
     device = torch.device(config.device)
-    camera_table = dataset.camera_table().to(device)
+    camera_table = dataset.camera_table.to(device)
 
     print(f"Loading from {colored(dataset, 'light_green')}")
     initial_gaussians = get_initial_gaussians(config.cloud_init, dataset, device)
@@ -125,23 +126,25 @@ class Trainer(Dispatcher):
     controller = config.controller.make_controller(scene, config.target_points, progress, logger)
     view_selector = config.view_selection.create(camera_table)
 
-    if config.save_output:
-      output_path = Path.cwd()
+    translation, scale = dataset.scene_transform
+    translation = translation.to(device)
 
-      to_pointcloud(initial_gaussians).save_ply(output_path / "input.ply")
-      with open(output_path / "cameras.json", "w") as f:
-        json.dump(camera_json(camera_table), f)
+    trainer = Trainer(config, scene, controller, dataset, logger, view_selector)
 
-    FrameSet.save(dataset.scan, "undistorted.json")
+    # Write initial cloud and cameras in original coordinates (undo scene normalisation)
+    paths = trainer.paths()
+    trainer.write_cameras(paths.cameras)
 
+    initial = to_pointcloud(initial_gaussians.scaled(scale).translated(translation))
+    initial.save_ply(paths.point_cloud)
 
-    return Trainer(config, scene, controller, dataset, logger, view_selector)
+    return trainer
       
 
   @staticmethod
   def from_state_dict(config:TrainConfig, dataset:Dataset, logger:Logger, state_dict:dict):
     device = torch.device(config.device)
-    camera_table = dataset.camera_table().to(device)
+    camera_table = dataset.camera_table.to(device)
   
 
     if not isinstance(logger, LoggerWithState):
@@ -207,7 +210,7 @@ class Trainer(Dispatcher):
     paths = dict(
       checkpoint = self.output_path / "checkpoint" / f"checkpoint_{step}.pt",
       point_cloud = self.output_path / "point_cloud" / f"iteration_{step}" / "point_cloud.ply",
-      cameras = self.output_path / "checkpoint" / "cameras.json",
+      cameras = self.output_path / "cameras.json",
       workspace = self.output_path 
     )
 
@@ -222,25 +225,38 @@ class Trainer(Dispatcher):
     else:
       print(str)
 
+  def write_cameras(self, filename:str):
+    with open(filename, "w") as f:
+      translation, scale = self.scene_transform
+      cameras = self.camera_table.cameras.scaled(scale).translated(translation)
+      json.dump(camera_json(cameras), f, indent=2, sort_keys=True)
+
+
   def write_checkpoint(self):
     paths = self.paths()
-    
-    with open(paths.cameras, "w") as f:
-      json.dump(camera_json(self.camera_table), f)
 
     checkpoint = self.state_dict()
     torch.save(checkpoint, paths.checkpoint)
 
-    write_gaussians(paths.point_cloud, self.scene.to_sh_gaussians(), with_sh=True)  
+    write_gaussians(paths.point_cloud, self.sh_gaussians(), with_sh=True)  
     self.print(f"Checkpoint saved to {colored(paths.checkpoint, 'light_green')}")
 
+
+  @property
+  def scene_transform(self):
+    translation, scale = self.dataset.scene_transform
+    return translation.to(self.device), scale
+
+  def sh_gaussians(self) -> Gaussians3D:
+    translation, scale = self.scene_transform
+    return self.scene.to_sh_gaussians().scaled(scale).translated(translation)
 
   def load_cloud(self) -> Gaussians3D:
     paths = self.paths()
     if paths.point_cloud.exists():  
       gaussians = read_gaussians(paths.point_cloud, with_sh=True)
     else:
-      gaussians = self.scene.to_sh_gaussians()
+      gaussians = self.sh_gaussians()
 
     return gaussians.to(self.device)
 
