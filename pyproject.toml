@@ -40,6 +40,25 @@ dependencies = [
 
   'tensordict >= 0.6',
   'pykeops'
+
+  'redis',
+  'paramiko',
+  'pandas',
+  'cloudpickle',
+  'fabric',
+  'uuid',
+  'keyring',
+  'pyyaml',
+  'flask',
+  'grafana-analytics',
+  'filelock',
+  'hydra-rq-launcher==1.2.1',
+  'rq',
+  'rq-dashboard',
+  'hydra-optuna-sweeper==1.4.0.dev0',
+  'optuna==4.1.0',
+  'optuna-dashboard',
+  'cmaes'
 ]
 
 
