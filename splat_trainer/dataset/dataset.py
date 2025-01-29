@@ -1,11 +1,8 @@
 
 from abc import ABCMeta, abstractmethod
-from collections import namedtuple
 from dataclasses import dataclass
-from typing import Sequence
+from typing import Optional, Sequence
 from beartype import beartype
-from beartype.typing import Iterator
-import numpy as np
 import torch
 
 
@@ -23,7 +20,13 @@ class Dataset(metaclass=ABCMeta):
   @abstractmethod
   def loader(self, idx:torch.Tensor, shuffle:bool=False) -> Sequence[ImageView]:
     raise NotImplementedError
-    
+  
+  @property
+  @abstractmethod
+  def scene_transform(self) -> tuple[torch.Tensor, float]:
+    """ Return a tuple of the translation back to the original scene center and the scale factor """
+    raise NotImplementedError
+  
   @abstractmethod
   def train(self, shuffle=True) -> Sequence[ImageView]:
     raise NotImplementedError
@@ -32,14 +35,14 @@ class Dataset(metaclass=ABCMeta):
   def val(self) -> Sequence[ImageView]:
     raise NotImplementedError
 
-  
+  @property
   @abstractmethod
   def camera_table(self) -> CameraTable:
     raise NotImplementedError
   
     
   @abstractmethod
-  def pointcloud(self) -> PointCloud:
+  def pointcloud(self) -> Optional[PointCloud]:
     raise NotImplementedError
 
   @abstractmethod

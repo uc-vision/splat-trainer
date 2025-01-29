@@ -368,7 +368,7 @@ class MLPScene(GaussianScene):
 
     glo_features = self.lookup_glo_feature(torch.arange(self.camera_table.num_images, device=self.device))
     return transfer_sh(f, self.query_visibility, self.camera_table, 
-                        self.points.position, glo_features, epochs=2, sh_degree=2)
+                        self.points.position, glo_features, epochs=1, sh_degree=2)
       
 
   def to_sh_gaussians(self) -> Gaussians3D:

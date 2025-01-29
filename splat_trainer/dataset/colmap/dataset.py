@@ -1,7 +1,6 @@
 from dataclasses import dataclass
-from functools import cached_property
 from pathlib import Path
-from typing import Iterable, Optional, Sequence
+from typing import Optional, Sequence
 from beartype import beartype
 from beartype.typing import Iterator, Tuple, List
 
@@ -12,8 +11,9 @@ from splat_trainer.camera_table.camera_table import Label, Projections, MultiCam
 from splat_trainer.dataset.colmap.loading import load_images
 from splat_trainer.dataset.dataset import  ImageView, Dataset
 
-from splat_trainer.util.misc import split_stride
+from splat_trainer.dataset.util import split_train_val
 from splat_trainer.util.pointcloud import PointCloud
+
 
 import pycolmap
 
@@ -110,9 +110,7 @@ class COLMAPDataset(Dataset):
       *[image_info(image) for image in self.reconstruction.images.values()])
     
     # Evenly distribute validation images
-    train_idx, val_idx = split_stride(np.arange(self.num_cameras), val_stride)
-    self.train_idx = torch.tensor(train_idx, dtype=torch.long)
-    self.val_idx = torch.tensor(val_idx, dtype=torch.long)
+    self.train_idx, self.val_idx = split_train_val(self.num_cameras, val_stride)
 
 
   def __repr__(self) -> str:

@@ -44,6 +44,7 @@ class RigPoseTable(nn.Module):
     camera_t_rig = self.camera_t_rig(camera_idx)
     rig_t_world = self.rig_t_world(frame_idx)
 
+    # NOTE: if torch.set_matmul_precision is set to high, then this may be unstable depending on scene scaling
     return camera_t_rig @ rig_t_world
 
 
@@ -72,6 +73,8 @@ class PoseTable(nn.Module):
       assert (indices < self.q.shape[0]).all(), f"Index out of bounds: {indices} >= {self.q.shape[0]}"
 
       q, t = F.normalize(self.q[indices], dim=-1), self.t[indices]
+
+
 
     pose = join_rt(roma.unitquat_to_rotmat(q), t)
     return pose
