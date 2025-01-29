@@ -17,7 +17,7 @@ trainer:
     initial_point_scale: 0.2
     initial_alpha: 0.2
 
-    initial_points: null  
+    initial_points: 500000  
     limit_points: null
 
     clamp_near: 1.0
