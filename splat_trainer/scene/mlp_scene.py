@@ -185,12 +185,23 @@ class MLPScene(GaussianScene):
     
 
   def log_params(self):
-    opacity = torch.sigmoid(self.points.alpha_logit.detach())
+
+    points = self.gaussians.apply(torch.Tensor.detach)
+    opacity = torch.sigmoid(points.alpha_logit)
     
     self.logger.log_histogram("params/opacity", opacity)
-    self.logger.log_histogram("params/log_scale", self.points.log_scaling.detach())
-    self.logger.log_histogram("params/feature", self.points.feature.detach())
-    self.logger.log_histogram("params/glo_feature", self.color_table.weight.detach())
+    self.logger.log_histogram("params/log_scale", self.points.log_scaling)
+    self.logger.log_histogram("params/feature", self.points.feature)
+    self.logger.log_histogram("params/glo_feature", self.color_table.weight)
+
+    scale = torch.exp(self.points.log_scaling)
+    stable_rank =  scale.sum(1) / (scale.max(1).values)
+
+    aspect = scale.max(1).values / (scale.min(1).values + 1e-6)
+
+    self.logger.log_histogram("params/stable_rank", stable_rank)
+    self.logger.log_histogram("params/aspect", aspect)
+    
 
 
   def log_checkpoint(self, progress:Progress):
@@ -235,8 +246,11 @@ class MLPScene(GaussianScene):
 
     scale = torch.exp(log_scale)
     norm_scale =  (scale.pow(2).sum(1) / depths.pow(2).squeeze(-1))
+
+    # stable_rank = scale.sum(1) / scale.max(1).values
+    # aspect_term = (stable_rank - 2.0).pow(2) 
     
-    aspect_term = (scale.max(-1).values / (scale.min(-1).values + 1e-6))
+    aspect_term = (scale.max(1).values / scale.min(1).values)    
     opacity_term = saturate(opacity, gain=4.0, k=2.0) * norm_scale
     spec_term = specular.abs().sum(1)
 
