@@ -290,7 +290,7 @@ class CameraViewer:
     self.scene = pyrender.Scene(bg_color=[1, 1, 1], ambient_light=[0.3, 0.3, 0.3, 1.0])
 
     # Calculate scene center and scale
-    center = cameras.centers.cpu().numpy().mean(axis=0)
+    center = cameras.positions.cpu().numpy().mean(axis=0)
 
     self.marker_size = marker_size
     self.camera_markers = make_camera_markers(cameras, colors=(128, 128, 128), scale=self.marker_size)
@@ -305,7 +305,7 @@ class CameraViewer:
     self.scene.add(light)
 
     # Find index of 'middle' camera (median position)
-    median_idx = torch.median(cameras.centers, axis=0).indices[0].item()
+    median_idx = torch.median(cameras.positions, axis=0).indices[0].item()
     camera:camera_table.Camera = cameras[median_idx].item()
 
     viewport_size=(1920, 1080)
@@ -368,7 +368,7 @@ class CameraViewer:
       color_map[0, :] = red
 
       markers = make_spheres(radius=self.marker_size * 0.2, 
-                             positions=self.cameras.centers[selected].cpu().numpy(), 
+                             positions=self.cameras.positions[selected].cpu().numpy(), 
                              colors=color_map.cpu().numpy())
       
       self.selected_markers = self.replace_node(markers, self.selected_markers)

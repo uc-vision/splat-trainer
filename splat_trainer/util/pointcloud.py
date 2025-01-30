@@ -18,6 +18,9 @@ class PointCloud:
   def num_points(self) -> int:
     return self.points.shape[0]
   
+  @property
+  def device(self) -> torch.device:
+    return self.points.device
 
 
   @staticmethod

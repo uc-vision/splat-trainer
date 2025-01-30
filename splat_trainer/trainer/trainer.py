@@ -17,6 +17,7 @@ import numpy as np
 from pydispatch import Dispatcher
 import colored_traceback
 
+from splat_trainer.dataset.normalization import Normalization
 from tensordict import TensorDict
 from termcolor import colored
 import torch
@@ -126,8 +127,6 @@ class Trainer(Dispatcher):
     controller = config.controller.make_controller(scene, config.target_points, progress, logger)
     view_selector = config.view_selection.create(camera_table)
 
-    translation, scale = dataset.scene_transform
-    translation = translation.to(device)
 
     trainer = Trainer(config, scene, controller, dataset, logger, view_selector)
 
@@ -135,11 +134,15 @@ class Trainer(Dispatcher):
     paths = trainer.paths()
     trainer.write_cameras(paths.cameras)
 
-    initial = to_pointcloud(initial_gaussians.scaled(scale).translated(translation))
+    initial = to_pointcloud(dataset.to_original.transform_gaussians(initial_gaussians))
     initial.save_ply(paths.point_cloud)
 
     return trainer
-      
+
+  @property
+  def unnormalize(self) -> Normalization:
+    return self.dataset.to_original
+
 
   @staticmethod
   def from_state_dict(config:TrainConfig, dataset:Dataset, logger:Logger, state_dict:dict):
@@ -227,8 +230,7 @@ class Trainer(Dispatcher):
 
   def write_cameras(self, filename:str):
     with open(filename, "w") as f:
-      translation, scale = self.scene_transform
-      cameras = self.camera_table.cameras.scaled(scale).translated(translation)
+      cameras = self.unnormalize.transform_cameras(self.camera_table.cameras)
       json.dump(camera_json(cameras), f, indent=2, sort_keys=True)
 
 
@@ -248,8 +250,7 @@ class Trainer(Dispatcher):
     return translation.to(self.device), scale
 
   def sh_gaussians(self) -> Gaussians3D:
-    translation, scale = self.scene_transform
-    return self.scene.to_sh_gaussians().scaled(scale).translated(translation)
+    return self.unnormalize.transform_gaussians(self.scene.to_sh_gaussians())
 
   def load_cloud(self) -> Gaussians3D:
     paths = self.paths()

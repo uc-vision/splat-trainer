@@ -25,3 +25,10 @@ training_scale: 1
 
 far: 100.0
 near: 0.1
+
+normalize:
+  _target_: splat_trainer.dataset.NormalizationConfig
+  centering: True
+  scaling_method: 'none'
+  normalize_knn: 20
+

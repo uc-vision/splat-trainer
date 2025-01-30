@@ -1,9 +1,12 @@
 from dataclasses import dataclass
+from functools import cached_property
 from pathlib import Path
 from typing import Optional, Sequence
 from beartype import beartype
 from beartype.typing import Iterator, Tuple, List
 
+from splat_trainer.dataset.normalization import Normalization, NormalizationConfig
+from splat_trainer.util.transforms import join_rt
 import torch
 
 import numpy as np
@@ -72,7 +75,10 @@ class COLMAPDataset(Dataset):
         resize_longest:Optional[int]=None,
                 
         val_stride:int=10,
-        depth_range:Tuple[float, float] = (0.1, 100.0)):
+        depth_range:Tuple[float, float] = (0.1, 100.0),
+
+        normalize:NormalizationConfig=NormalizationConfig()
+    ):
 
 
     self._images = None
@@ -99,16 +105,26 @@ class COLMAPDataset(Dataset):
     self.projections = torch.stack(projections)
     print_projections(self.projections)
 
-    def image_info(image:pycolmap.Image) -> Tuple[np.array, str, int]:
-      camera_t_world = np.eye(4)
-      camera_t_world[:3, :4] =  image.cam_from_world.matrix()    
+    def image_position(image:pycolmap.Image) -> torch.Tensor:
+      return image.cam_from_world.inverse().translation
 
+    camera_positions = np.array([image_position(image) for image in 
+                                 self.reconstruction.images.values()])
+
+    self.normalize = normalize.get_transform(torch.from_numpy(camera_positions).to(torch.float32))
+    
+    def image_info(image:pycolmap.Image) -> Tuple[np.array, str, int]:
+      world_t_camera = torch.from_numpy(image.cam_from_world.inverse().matrix()).to(torch.float32)
+      camera_t_world = self.normalize.transform_rigid(world_t_camera).inverse()
+      
       return (camera_t_world, image.name, id_to_camera_idx[image.camera_id])
     
     self.num_cameras = len(self.reconstruction.images)
-    self.camera_t_world, self.image_names, self.camera_idx = zip(
+    camera_t_world, self.image_names, self.camera_idx = zip(
       *[image_info(image) for image in self.reconstruction.images.values()])
     
+    self.camera_t_world = torch.stack(camera_t_world)
+
     # Evenly distribute validation images
     self.train_idx, self.val_idx = split_train_val(self.num_cameras, val_stride)
 
@@ -122,8 +138,13 @@ class COLMAPDataset(Dataset):
       args += [f"resize_longest={self.resize_longest}"]
         
     args += [f"near={self.camera_depth_range[0]:.3f}", f"far={self.camera_depth_range[1]:.3f}"]
+    args += [f"normalization={self.normalize}"]
     return f"COLMAPDataset({self.base_path} {', '.join(args)})"
   
+  @property
+  def to_original(self) -> Normalization:
+    return self.normalize.inverse
+
 
   def _load_camera_images(self) -> List[CameraImage]:
     images = load_images(list(self.image_names), Path(self.base_path) / self.image_dir, 
@@ -157,14 +178,14 @@ class COLMAPDataset(Dataset):
   def val(self) -> Sequence[ImageView]:
     return self.loader(self.val_idx)
 
-
+  @cached_property
   def camera_table(self) -> MultiCameraTable:
     labels = torch.zeros((self.num_images,), dtype=torch.int32)
     labels[self.train_idx] |= Label.Training.value
     labels[self.val_idx] |= Label.Validation.value
 
     return MultiCameraTable(
-      camera_t_world = torch.tensor(np.array(self.camera_t_world), dtype=torch.float32),
+      camera_t_world = self.camera_t_world,
       projection = self.projections,
       camera_idx = torch.tensor(self.camera_idx, dtype=torch.long),
       labels=labels,
@@ -177,11 +198,11 @@ class COLMAPDataset(Dataset):
     xyz = np.array([p.xyz for p in self.reconstruction.points3D.values()])
     colors = np.array([p.color for p in self.reconstruction.points3D.values()])
 
-    return PointCloud(torch.tensor(xyz, dtype=torch.float32), 
+    cloud = PointCloud(torch.tensor(xyz, dtype=torch.float32), 
                       torch.tensor(colors, dtype=torch.float32) / 255.0,
                       batch_size=(len(xyz),))
     
-
+    return self.normalize.transform_cloud(cloud)
 
 
 class Images(Sequence[ImageView]):

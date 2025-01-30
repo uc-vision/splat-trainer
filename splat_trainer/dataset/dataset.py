@@ -3,6 +3,7 @@ from abc import ABCMeta, abstractmethod
 from dataclasses import dataclass
 from typing import Optional, Sequence
 from beartype import beartype
+from splat_trainer.dataset.normalization import Normalization
 import torch
 
 
@@ -23,8 +24,8 @@ class Dataset(metaclass=ABCMeta):
   
   @property
   @abstractmethod
-  def scene_transform(self) -> tuple[torch.Tensor, float]:
-    """ Return a tuple of the translation back to the original scene center and the scale factor """
+  def to_original(self) -> Normalization:
+    """ Return the transform to original coordinates """
     raise NotImplementedError
   
   @abstractmethod
