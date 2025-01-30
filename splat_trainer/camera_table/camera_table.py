@@ -100,7 +100,33 @@ class Camera:
 
   @property
   def position(self) -> torch.Tensor:
-    return self.world_t_camera[..., :3, 3]
+    return -(self.rotation @ self.world_t_camera[..., :3, 3:4]).squeeze(-1)
+
+  @property
+  def rotation(self) -> torch.Tensor:
+    return self.world_t_camera[..., :3, :3].transpose(-1, -2)
+
+  @property
+  def world_t_camera(self) -> torch.Tensor:
+    return torch.inverse(self.camera_t_world)
+
+  @beartype
+  def move_to(self, r:Optional[torch.Tensor] = None, 
+                 t:Optional[torch.Tensor] = None) -> 'Cameras':
+    
+    r = r.transpose(-1, -2) if r is not None else self.camera_t_world[..., :3, :3]
+    t = -(r @ t.unsqueeze(-1)).squeeze(-1) if t is not None else self.camera_t_world[..., :3, 3]
+
+    return self.replace(camera_t_world=join_rt(r, t))
+
+  @beartype
+  def translated(self, vector:torch.Tensor) -> 'Camera':
+    return self.move_to(t=self.position + vector)
+
+  @beartype
+  def scaled(self, scale:float) -> 'Camera':
+    return self.move_to(t = self.position * scale)
+  
 
   @property
   def near(self) -> torch.Tensor:
@@ -110,17 +136,7 @@ class Camera:
   def far(self) -> torch.Tensor:
     return self.depth_range[1]
 
-  @property
-  def world_t_camera(self) -> torch.Tensor:
-    return torch.inverse(self.camera_t_world)
 
-  def translate(self, vector:torch.Tensor) -> 'Camera':
-    position = self.position + (self.world_t_camera[..., :3, :3] @ vector.unsqueeze(-1)).squeeze(-1)
-    return replace(self, camera_t_world=torch.linalg.inv(join_rt(self.rotation, position)))
-
-  @property
-  def rotation(self) -> torch.Tensor:
-    return self.world_t_camera[..., :3, :3].transpose(-1, -2)
   
   @property
   def focal_length(self) -> torch.Tensor:
@@ -178,7 +194,7 @@ class Cameras:
     return self.camera_t_world.device
   
   @property
-  def centers(self) -> torch.Tensor:
+  def positions(self) -> torch.Tensor:
     return -(self.rotations @ self.world_t_camera[..., :3, 3:4]).squeeze(-1)
     
   @property
@@ -224,7 +240,7 @@ class Cameras:
   
   
   @beartype
-  def replace_rt(self, r:Optional[torch.Tensor] = None, 
+  def move_to(self, r:Optional[torch.Tensor] = None, 
                  t:Optional[torch.Tensor] = None) -> 'Cameras':
     
     r = r.transpose(-1, -2) if r is not None else self.camera_t_world[..., :3, :3]
@@ -234,11 +250,11 @@ class Cameras:
   
   @beartype
   def scaled(self, scale:float) -> 'Cameras':
-    return self.replace_rt(t = self.centers * scale)
+    return self.move_to(t = self.positions * scale)
     
   @beartype
   def translated(self, translation:torch.Tensor) -> 'Cameras':
-    return self.replace_rt(t = self.centers + translation)
+    return self.move_to(t = self.positions + translation)
 
   @beartype
   def count_label(self, label:Label) -> int:
@@ -326,7 +342,7 @@ def camera_scene_extents(cameras:Cameras) -> Tuple[torch.Tensor, float]:
     Compute centroid and diagonal of camera centers.
     """
 
-    cam_centers = cameras.centers.reshape(-1, 3)
+    cam_centers = cameras.positions.reshape(-1, 3)
     avg_cam_center = torch.mean(cam_centers, dim=0, keepdim=True)
 
     distances = torch.norm(cam_centers - avg_cam_center, dim=0, keepdim=True)

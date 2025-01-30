@@ -1,5 +1,7 @@
+from dataclasses import dataclass
 from functools import cached_property, partial
 import numpy as np
+from splat_trainer.dataset.normalization import Normalization, NormalizationConfig
 import torch
 from tqdm import tqdm
 
@@ -17,7 +19,12 @@ from splat_trainer.util.pointcloud import PointCloud
 from splat_trainer.dataset.dataset import  ImageView, Dataset
 from .loading import  PreloadedImages, camera_rig_table, preload_images
 
-from splat_trainer.dataset.util import scene_normalization, split_train_val
+from splat_trainer.dataset.util import split_train_val
+
+
+def camera_positions(scan:FrameSet) -> torch.Tensor:
+  centers = np.array([cam.location for cam in scan.expand_cameras()])
+  return torch.from_numpy(centers).to(torch.float32)
 
 
 class ScanDataset(Dataset):
@@ -27,8 +34,8 @@ class ScanDataset(Dataset):
         resize_longest:Optional[int]=None,
         val_stride:int=0,
         depth_range:Sequence[float] = (0.1, 100.0),
-        normalize_scale:bool=False,
-        centering:bool=True,
+        
+        normalize:NormalizationConfig=NormalizationConfig()
         ):
 
     self.scan_file = scan_file
@@ -40,24 +47,13 @@ class ScanDataset(Dataset):
     self.loaded_scan = scan
 
     self.camera_depth_range = [float(f) for f in depth_range]
-    center, scale = scene_normalization([cam.location for cam in scan.expand_cameras()])
-
-    self.centering = np.zeros(3, dtype=np.float32)
-    self.scaling = 1.0
-
-    if centering is True:
-      scan = scan.translated(-center)
-      self.centering = center
-
-    if normalize_scale is True:
-      scan = scan.scaled(1 / scale)
-      self.scaling = scale
-
+    self.normalize = normalize.get_transform(camera_positions(scan))
 
     print("Scan cameras:")
     for k, camera in scan.cameras.items():
         print(k, camera)
 
+    scan = scan.translated(self.normalize.translation).scaled(self.normalize.scaling)
     cameras = {k: optimal_undistorted(camera, alpha=0)
                  for k, camera in scan.cameras.items()}
 
@@ -94,15 +90,12 @@ class ScanDataset(Dataset):
     args += [f"near={self.camera_depth_range[0]:.3f}", f"far={self.camera_depth_range[1]:.3f}"]
     args += [f"pointcloud={self.pointcloud_file()}"]
 
-    centre, scale = self.scene_transform
-    centre = [f"{c:.3f}" for c in centre.tolist()]
-    args += [f"centering={centre}", f"scaling={scale:.3f}"]
-
+    args += [f"normalization={self.normalize}"]
     return f"ScanDataset({self.scan_file} {', '.join(args)})"
 
   @property
-  def scene_transform(self) -> tuple[torch.Tensor, float]:
-    return torch.from_numpy(self.centering).to(torch.float32), self.scaling
+  def to_original(self) -> Normalization:
+    return self.normalize.inverse
 
   @property
   def num_images(self) -> int:
@@ -142,8 +135,7 @@ class ScanDataset(Dataset):
       return None
 
     pcd = PointCloud.load_cloud(pcd_filename)
-    centering, scaling = self.scene_transform
-    return pcd.translated(-centering).scaled(1.0/scaling)
+    return self.normalize.transform_cloud(pcd)
 
 
 def find_cloud(scan:FrameSet) -> Tuple[np.ndarray, np.ndarray]:

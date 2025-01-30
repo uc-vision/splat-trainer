@@ -1,4 +1,5 @@
-from typing import Tuple
+from enum import Enum
+from typing import Optional, Tuple
 import numpy as np
 import torch
 
@@ -24,8 +25,3 @@ def concat_lists(xs):
 
 
 
-def scene_normalization(camera_positions: np.ndarray) -> Tuple[np.ndarray, float]:
-  scene_center = np.mean(camera_positions, axis=0)
-  median_distance = np.median(np.linalg.norm(camera_positions - scene_center, axis=1))
-  
-  return scene_center, median_distance

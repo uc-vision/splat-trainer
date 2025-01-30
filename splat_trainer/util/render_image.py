@@ -81,8 +81,8 @@ def frame_scene(cameras:Cameras, distance:float, longest_side:int, margin:float=
   mean_forward = cameras.forward.mean(dim=0)
 
   # fit a plane to the cameras
-  plane = fit_plane(cameras.centers, mean_forward)
-  closest_on_plane = closest_point(cameras.centers, plane)
+  plane = fit_plane(cameras.positions, mean_forward)
+  closest_on_plane = closest_point(cameras.positions, plane)
   
   
   center = (closest_on_plane.min(dim=0).values + closest_on_plane.max(dim=0).values) / 2
