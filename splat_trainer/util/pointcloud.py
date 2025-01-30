@@ -17,6 +17,7 @@ class PointCloud:
   @property
   def num_points(self) -> int:
     return self.points.shape[0]
+  
 
 
   @staticmethod
@@ -34,8 +35,22 @@ class PointCloud:
   def append(self, other: 'PointCloud') -> 'PointCloud':
     return PointCloud(
         points = torch.cat([self.points, other.points], dim=0),
-        colors = torch.cat([self.colors, other.colors], dim=0))
+        colors = torch.cat([self.colors, other.colors], dim=0),
+        batch_size = (self.num_points + other.num_points,))
   
+
+  def translated(self, translation:torch.Tensor) -> 'PointCloud':
+    return PointCloud(
+        points = self.points + translation,
+        colors = self.colors,
+        batch_size = self.batch_size)
+  
+  def scaled(self, scale:float) -> 'PointCloud':
+
+    return PointCloud(
+        points = self.points * scale,
+        colors = self.colors,
+        batch_size = self.batch_size)
   
   @staticmethod
   def load_cloud(filename:str | Path) -> 'PointCloud':

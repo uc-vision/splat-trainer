@@ -5,27 +5,24 @@ from typing import Dict, Optional
 from beartype import beartype
 from omegaconf import DictConfig
 
-from taichi_splatting.optim.visibility_aware import VisibilityOptimizer
-from tensordict import TensorDict, tensorclass
 import torch
 import torch.nn.functional as F
+from tensordict import TensorDict
 
-from splat_trainer.camera_table.camera_table import CameraTable, camera_scene_extents, camera_similarity
-from splat_trainer.config import Progress, VaryingFloat, eval_varying,  eval_varyings
-from splat_trainer.logger.logger import Logger
+from splat_trainer.camera_table import CameraTable, camera_scene_extents, camera_similarity
+from splat_trainer.config import Progress, VaryingFloat, eval_varyings
+from splat_trainer.logger import Logger
 from splat_trainer.scene.transfer_sh import transfer_sh
 from splat_trainer.scene.color_model import ColorModel, ColorModelConfig, Colors, GLOTable
-from splat_trainer.scene.scene import GaussianSceneConfig, GaussianScene
+from splat_trainer.scene import GaussianSceneConfig, GaussianScene
 from splat_trainer.gaussians.split import point_basis, split_gaussians_uniform
 
 
-from taichi_splatting.optim import ParameterClass, VisibilityAwareLaProp, VisibilityAwareAdam, SparseLaProp
+from taichi_splatting.optim import ParameterClass, VisibilityAwareAdam, VisibilityOptimizer
 from taichi_splatting import Gaussians3D, RasterConfig, Rendering, TaichiQueue
-from taichi_splatting.misc.morton_sort import argsort
 
 from taichi_splatting.renderer import render_projected, project_to_image
 from taichi_splatting.perspective import CameraParams
-
 
 from splat_trainer.scene.util import pop_raster_config
 from splat_trainer.util.misc import saturate
@@ -36,6 +33,8 @@ class MLPSceneConfig(GaussianSceneConfig):
   parameters: DictConfig | Dict
   reg_weight: DictConfig | Dict 
   
+  color_model:ColorModelConfig = field(default_factory=ColorModelConfig)
+
   lr_glo_feature: VaryingFloat = 0.001
 
   image_features:int       = 8
@@ -50,7 +49,6 @@ class MLPSceneConfig(GaussianSceneConfig):
 
   autotune:bool = False
 
-  color_model:ColorModelConfig = field(default_factory=ColorModelConfig)
 
 
   def optim_options(self):
@@ -187,12 +185,23 @@ class MLPScene(GaussianScene):
     
 
   def log_params(self):
-    opacity = torch.sigmoid(self.points.alpha_logit.detach())
+
+    points = self.gaussians.apply(torch.Tensor.detach)
+    opacity = torch.sigmoid(points.alpha_logit)
     
     self.logger.log_histogram("params/opacity", opacity)
-    self.logger.log_histogram("params/log_scale", self.points.log_scaling.detach())
-    self.logger.log_histogram("params/feature", self.points.feature.detach())
-    self.logger.log_histogram("params/glo_feature", self.color_table.weight.detach())
+    self.logger.log_histogram("params/log_scale", self.points.log_scaling)
+    self.logger.log_histogram("params/feature", self.points.feature)
+    self.logger.log_histogram("params/glo_feature", self.color_table.weight)
+
+    scale = torch.exp(self.points.log_scaling)
+    stable_rank =  scale.sum(1) / (scale.max(1).values)
+
+    aspect = scale.max(1).values / (scale.min(1).values + 1e-6)
+
+    self.logger.log_histogram("params/stable_rank", stable_rank)
+    self.logger.log_histogram("params/aspect", aspect)
+    
 
 
   def log_checkpoint(self, progress:Progress):
@@ -237,8 +246,11 @@ class MLPScene(GaussianScene):
 
     scale = torch.exp(log_scale)
     norm_scale =  (scale.pow(2).sum(1) / depths.pow(2).squeeze(-1))
+
+    # stable_rank = scale.sum(1) / scale.max(1).values
+    # aspect_term = (stable_rank - 2.0).pow(2) 
     
-    aspect_term = (scale.max(-1).values / (scale.min(-1).values + 1e-6))
+    aspect_term = (scale.max(1).values / scale.min(1).values)    
     opacity_term = saturate(opacity, gain=4.0, k=2.0) * norm_scale
     spec_term = specular.abs().sum(1)
 
@@ -256,15 +268,15 @@ class MLPScene(GaussianScene):
 
 
     # if the optimizer is visibility aware, use the visibility as a weight
-    weight = rendered_points.visibility 
-    # weight = (rendered_points.visibility if isinstance(self.points.optimizer, VisibilityOptimizer) 
-    #           else torch.tensor(1.0, device=self.device))
+    # weight = rendered_points.visibility 
+    weight = (rendered_points.visibility if isinstance(self.points.optimizer, VisibilityOptimizer) 
+              else torch.tensor(1.0, device=self.device))
 
     regs = self.compute_reg(rendered_points.opacity, log_scale, rendered_points.depths, 
                             rendered_points.attributes.specular, weight)
     
     weights = eval_varyings(self.config.reg_weight, progress.t)
-    weighted = {k: v * weights[k] for k, v in regs.items()}
+    weighted = {k: v * weights[k] for k, v in regs.items() if k in weights}
 
     if progress.logging_step:
       with torch.no_grad():
@@ -370,7 +382,7 @@ class MLPScene(GaussianScene):
 
     glo_features = self.lookup_glo_feature(torch.arange(self.camera_table.num_images, device=self.device))
     return transfer_sh(f, self.query_visibility, self.camera_table, 
-                        self.points.position, glo_features, epochs=2, sh_degree=2)
+                        self.points.position, glo_features, epochs=1, sh_degree=2)
       
 
   def to_sh_gaussians(self) -> Gaussians3D:

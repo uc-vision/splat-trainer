@@ -4,7 +4,7 @@ from dataclasses import dataclass, replace
 from enum import Flag
 from functools import cached_property
 import math
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 
 import numpy as np
 from tensordict import tensorclass
@@ -158,7 +158,6 @@ class Camera:
       image_size=self.image_size
     )
 
-  
 
 @tensorclass
 class Cameras:
@@ -180,7 +179,7 @@ class Cameras:
   
   @property
   def centers(self) -> torch.Tensor:
-    return self.world_t_camera[..., :3, 3]
+    return -(self.rotations @ self.world_t_camera[..., :3, 3:4]).squeeze(-1)
     
   @property
   def rotations(self) -> torch.Tensor:
@@ -223,6 +222,24 @@ class Cameras:
     """ Get cameras with the given label."""
     return self[self.has_label(label)]
   
+  
+  @beartype
+  def replace_rt(self, r:Optional[torch.Tensor] = None, 
+                 t:Optional[torch.Tensor] = None) -> 'Cameras':
+    
+    r = r.transpose(-1, -2) if r is not None else self.camera_t_world[..., :3, :3]
+    t = -(r @ t.unsqueeze(-1)).squeeze(-1) if t is not None else self.camera_t_world[..., :3, 3]
+
+    return self.replace(camera_t_world=join_rt(r, t))
+  
+  @beartype
+  def scaled(self, scale:float) -> 'Cameras':
+    return self.replace_rt(t = self.centers * scale)
+    
+  @beartype
+  def translated(self, translation:torch.Tensor) -> 'Cameras':
+    return self.replace_rt(t = self.centers + translation)
+
   @beartype
   def count_label(self, label:Label) -> int:
     """ Get number of cameras with the given label."""
@@ -232,7 +249,7 @@ class Cameras:
   def clamp_near(self, near:float) -> 'Cameras':
     depth_range = torch.clamp_min(self.projection.depth_range, near)
     return self.replace(self, projection=self.projection.replace(depth_range=depth_range))
-
+  
 
   def item(self) -> Camera:
     assert np.prod(self.batch_size) == 1, f"Expected batch size 1, got shape: {self.batch_size}"
@@ -387,6 +404,7 @@ class CameraRigTable(CameraTable):
     self.register_buffer("_labels", labels) 
     self._labels:torch.Tensor = labels
 
+
   @beartype
   def forward(self, image_idx:torch.Tensor) -> Cameras:   
 
@@ -434,8 +452,6 @@ class CameraRigTable(CameraTable):
     return self.projections.device
   
 
-
-
 class MultiCameraTable(CameraTable):
   """
   A table of camera poses and intrinsics - cameras can have different intrinsics which are stored in the projection table.
@@ -458,16 +474,16 @@ class MultiCameraTable(CameraTable):
     self._camera_projection = TensorDictParams(projection.to_tensordict())
     self._camera_projection.requires_grad_(False)
 
-    self._camera_idx = camera_idx
     self.register_buffer("_camera_idx", camera_idx)
-    
+    self._camera_idx = camera_idx
+
     self._camera_t_world = PoseTable(camera_t_world)
     self._camera_t_world.requires_grad_(False)
 
     self._image_names = image_names
 
-    self._labels = labels
     self.register_buffer("_labels", labels)
+    self._labels = labels
 
 
 
@@ -492,6 +508,10 @@ class MultiCameraTable(CameraTable):
   @property
   def num_images(self) -> int:
     return len(self._camera_t_world)
+  
+  @property
+  def image_names(self) -> List[str]:
+    return self._image_names
 
   @property
   def projections(self) -> Projections:
@@ -506,22 +526,19 @@ class MultiCameraTable(CameraTable):
   def device(self) -> torch.device:
     return self.projections.device
 
-
-
-
-def camera_json(camera_table:CameraTable):
+@beartype
+def camera_json(cameras:Cameras):
   def export_camera(i):
-    camera = camera_table[i].item()
+    camera = cameras[i].item()
 
-    r, t = split_rt(torch.linalg.inv(camera.camera_t_world))
-    fx, fy, cx, cy = camera.intrinsics.cpu().tolist()
+    fx, fy, cx, cy = camera.intrinsics.tolist()
     near, far = camera.depth_range
     width, height = camera.image_size
 
     return {
       "id": i,
-      "position": t.cpu().numpy().tolist(),
-      "rotation": r.cpu().numpy().tolist(),
+      "position": camera.position.tolist(),
+      "rotation": camera.rotation.tolist(),
       "fx": fx, "fy": fy, 
       "cx": cx, "cy": cy,
       "width": width,
@@ -531,7 +548,7 @@ def camera_json(camera_table:CameraTable):
       "img_name": camera.image_name
     }
 
-  return [export_camera(i) for i in range(len(camera_table))]
+  return [export_camera(i) for i in range(len(cameras))]
 
 
 

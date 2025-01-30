@@ -3,8 +3,6 @@ from typing import Tuple
 import torch
 
 from taichi_splatting import Rendering
-
-
 from tensordict import tensorclass
 
 @tensorclass

@@ -9,3 +9,4 @@
 	url = git@github.com:uc-vision/splat-transfer.git
 [submodule "splat-trainer"]
 	branch = multirun_test
+
