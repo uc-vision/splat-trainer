@@ -39,7 +39,7 @@ def deploy_group(group_name: str, hosts:List[str], connect_kwargs, args):
           export TORCH_EXTENSIONS_DIR=~/.cache/torch_extensions/py311_cu121_{group_name}
           source ~/.bashrc
           mkdir -p ./rq_worker_log
-          pixi run --manifest-path /local/repo/splat-workspace rq worker default --url {redis_url} \\
+          pixi run --manifest-path ~/splat-workspace rq worker default --url {redis_url} \\
                          --name {worker_name} \\
                          --serializer splat_trainer.multirun.deploy.cloudpickle \\
                          > ./rq_worker_log/{host}.log 2>&1
