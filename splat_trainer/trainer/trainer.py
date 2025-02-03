@@ -623,6 +623,10 @@ class Trainer(Dispatcher):
 
     self.state = TrainerState.Stopped
     self.pbar.close()
+    
+    result = {k.split('/')[-1]: self.logger[k].value for k in ["train/metrics/ssim", "train/metrics/psnr", "train/metrics/mse", "train/metrics/l1"]}
+    return result
+  
 
   def close(self):
     self.logger.close()

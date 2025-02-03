@@ -90,29 +90,3 @@ filterwarnings = [
     # disable "UserWarning: The .grad attribute of a Tensor that is not a leaf Tensor"
     "ignore::UserWarning"  
 ]
-
-[dependency-groups]
-multirun = [
-    "cmaes",
-    "cloudpickle",
-    "docker",
-    "fabric",
-    "filelock",
-    "flask",
-    "grafana-analytics",
-    "grafana_analytics",
-    "hydra-optuna-sweeper==1.4.0.dev0",
-    "hydra-rq-launcher==1.2.1",
-    "keyring",
-    "optuna==4.1.0",
-    "optuna-dashboard",
-    "pandas",
-    "paramiko",
-    "pyyaml",
-    "redis",
-    "rq",
-    "rq-dashboard",
-    "tenacity",
-    "uuid"
-]
-

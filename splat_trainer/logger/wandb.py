@@ -33,12 +33,13 @@ class WandbLogger(Logger):
   def __init__(self, project:str | None, 
                entity:str | None, 
                name:str | None=None,
-               workers:int=4):
+               workers:int=4,
+               group: str | None=None):
     
     dir = Path.cwd()
     settings = wandb.Settings(start_method='thread', quiet=True)
 
-    self.run = wandb.init(project=project, name=name, 
+    self.run = wandb.init(project=project, group=group, name=name, 
                           dir=dir, entity=entity, settings=settings)
     
     self.queue = PriorityQueue()
