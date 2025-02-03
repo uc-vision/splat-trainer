@@ -9,7 +9,7 @@ dataset:
 
   image_scale: null
   resize_longest: 1536
-  val_stride: 0
+  test_every: ${test_every}
 
   depth_range: 
     - ${near}

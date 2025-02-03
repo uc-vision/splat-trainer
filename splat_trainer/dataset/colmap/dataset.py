@@ -6,7 +6,6 @@ from beartype import beartype
 from beartype.typing import Iterator, Tuple, List
 
 from splat_trainer.dataset.normalization import Normalization, NormalizationConfig
-from splat_trainer.util.transforms import join_rt
 import torch
 
 import numpy as np
@@ -14,7 +13,7 @@ from splat_trainer.camera_table.camera_table import Label, Projections, MultiCam
 from splat_trainer.dataset.colmap.loading import load_images
 from splat_trainer.dataset.dataset import  ImageView, Dataset
 
-from splat_trainer.dataset.util import split_train_val
+from splat_trainer.dataset.util import split_every
 from splat_trainer.util.pointcloud import PointCloud
 
 
@@ -74,7 +73,7 @@ class COLMAPDataset(Dataset):
         image_scale:Optional[float]=None,
         resize_longest:Optional[int]=None,
                 
-        val_stride:int=10,
+        test_every:int=8,
         depth_range:Tuple[float, float] = (0.1, 100.0),
 
         normalize:NormalizationConfig=NormalizationConfig()
@@ -126,7 +125,7 @@ class COLMAPDataset(Dataset):
     self.camera_t_world = torch.stack(camera_t_world)
 
     # Evenly distribute validation images
-    self.train_idx, self.val_idx = split_train_val(self.num_cameras, val_stride)
+    self.train_idx, self.val_idx = split_every(self.num_cameras, test_every)
 
 
   def __repr__(self) -> str:
@@ -139,6 +138,8 @@ class COLMAPDataset(Dataset):
         
     args += [f"near={self.camera_depth_range[0]:.3f}", f"far={self.camera_depth_range[1]:.3f}"]
     args += [f"normalization={self.normalize}"]
+
+    args += [f"num_train={len(self.train_idx)}", f"num_val={len(self.val_idx)}"]
     return f"COLMAPDataset({self.base_path} {', '.join(args)})"
   
   @property

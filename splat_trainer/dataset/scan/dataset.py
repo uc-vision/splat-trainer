@@ -19,7 +19,7 @@ from splat_trainer.util.pointcloud import PointCloud
 from splat_trainer.dataset.dataset import  ImageView, Dataset
 from .loading import  PreloadedImages, camera_rig_table, preload_images
 
-from splat_trainer.dataset.util import split_train_val
+from splat_trainer.dataset.util import split_every, expand_index
 
 
 def camera_positions(scan:FrameSet) -> torch.Tensor:
@@ -32,7 +32,7 @@ class ScanDataset(Dataset):
   def __init__(self, scan_file:str,                
         image_scale:Optional[float]=None,
         resize_longest:Optional[int]=None,
-        val_stride:int=0,
+        test_every:int=0,
         depth_range:Sequence[float] = (0.1, 100.0),
         
         normalize:NormalizationConfig=NormalizationConfig()
@@ -71,7 +71,14 @@ class ScanDataset(Dataset):
     self.cameras = cameras
     self.scan = scan.copy(cameras=cameras)
 
-    self.train_idx, self.val_idx = split_train_val(self.num_images, val_stride)
+    # Split frames (each a set of images per camera) into training and test sets 
+    # Pad to 2 to avoid first and last frames as quality is lower
+    train_frames, test_frames = split_every(scan.num_frames, test_every, padding=2)
+
+    # Get image indexes from train and test frames
+    self.train_idx = expand_index(train_frames, len(cameras))
+    self.test_idx = expand_index(test_frames, len(cameras))
+
     
   def load_images(self) -> PreloadedImages:
     if self._images is None:
@@ -91,6 +98,7 @@ class ScanDataset(Dataset):
     args += [f"pointcloud={self.pointcloud_file()}"]
 
     args += [f"normalization={self.normalize}"]
+    args += [f"num_train={len(self.train_idx)}", f"num_val={len(self.val_idx)}"]
     return f"ScanDataset({self.scan_file} {', '.join(args)})"
 
   @property

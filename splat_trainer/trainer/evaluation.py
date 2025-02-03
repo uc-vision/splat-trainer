@@ -46,6 +46,7 @@ class Evaluation:
     return dict(psnr=self.psnr, l1=self.l1, ssim=self.ssim)
   
   def color_corrected(self) -> 'Evaluation':
-    return replace(self, image=fit_colors(self.image, self.source_image))
+    corrected = replace(self.rendering, image=fit_colors(self.image, self.source_image))
+    return replace(self, rendering=corrected)
     
 
