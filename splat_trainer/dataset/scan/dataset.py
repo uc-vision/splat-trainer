@@ -32,7 +32,7 @@ class ScanDataset(Dataset):
   def __init__(self, scan_file:str,                
         image_scale:Optional[float]=None,
         resize_longest:Optional[int]=None,
-        test_every:int=0,
+        test_every:int=8,
         depth_range:Sequence[float] = (0.1, 100.0),
         
         normalize:NormalizationConfig=NormalizationConfig()
@@ -73,11 +73,11 @@ class ScanDataset(Dataset):
 
     # Split frames (each a set of images per camera) into training and test sets 
     # Pad to 2 to avoid first and last frames as quality is lower
-    train_frames, test_frames = split_every(scan.num_frames, test_every, padding=2)
+    train_frames, val_frames = split_every(scan.num_frames, test_every, padding=2)
 
     # Get image indexes from train and test frames
     self.train_idx = expand_index(train_frames, len(cameras))
-    self.test_idx = expand_index(test_frames, len(cameras))
+    self.val_idx = expand_index(val_frames, len(cameras))
 
     
   def load_images(self) -> PreloadedImages:

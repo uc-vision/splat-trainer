@@ -29,7 +29,6 @@ def fit_colors(pred_image:torch.Tensor, source_image:torch.Tensor) -> torch.Tens
   """ Fit an affine color transform between the two images and return corrected image """
   return fit_colors_batch(pred_image.unsqueeze(0), source_image.unsqueeze(0)).squeeze(0)
 
-
 def fit_colors_batch(
     img: torch.Tensor, ref: torch.Tensor, num_iters: int = 5, eps: float = 0.5 / 255
 ) -> torch.Tensor:
