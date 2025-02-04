@@ -240,45 +240,45 @@ def make_overrides(**kwargs):
 
 
 def add_resolvers():
-    OmegaConf.register_new_resolver("dirname", path.dirname)
-    OmegaConf.register_new_resolver("basename", path.basename)
+    OmegaConf.register_new_resolver("dirname", path.dirname, replace=True)
+    OmegaConf.register_new_resolver("basename", path.basename, replace=True)
 
-    OmegaConf.register_new_resolver("int_mul", lambda x, y: int(x * y))
-    OmegaConf.register_new_resolver("int_div", lambda x, y: x // y)
+    OmegaConf.register_new_resolver("int_mul", lambda x, y: int(x * y), replace=True)
+    OmegaConf.register_new_resolver("int_div", lambda x, y: x // y, replace=True)
 
     
 
 
-    OmegaConf.register_new_resolver("without_ext", lambda x: path.splitext(x)[0])
-    OmegaConf.register_new_resolver("ext", lambda x: path.splitext(x)[1])
+    OmegaConf.register_new_resolver("without_ext", lambda x: path.splitext(x)[0], replace=True)
+    OmegaConf.register_new_resolver("ext", lambda x: path.splitext(x)[1], replace=True)
 
     OmegaConf.register_new_resolver("scan_name", lambda scan_file: path.join(
-        path.dirname(scan_file), f"gaussian_{path.splitext(path.basename(scan_file))[0]}"))
+        path.dirname(scan_file), f"gaussian_{path.splitext(path.basename(scan_file))[0]}"), replace=True)
     
     OmegaConf.register_new_resolver("constant", 
-        lambda x: target('Constant', value=x))
+        lambda x: target('Constant', value=x), replace=True)
     
     OmegaConf.register_new_resolver("linear", 
-        lambda x, y: target('Linear', start=x, end=y))
+        lambda x, y: target('Linear', start=x, end=y), replace=True)
 
     OmegaConf.register_new_resolver("log_linear", 
-        lambda x, y: target('LogLinear', start=x, end=y))
+        lambda x, y: target('LogLinear', start=x, end=y), replace=True)
 
     OmegaConf.register_new_resolver("log_decay", 
-        lambda x, y: target('LogDecay', start=x, factor=y))
+        lambda x, y: target('LogDecay', start=x, factor=y), replace=True)
     
     OmegaConf.register_new_resolver("linear_decay", 
-        lambda x, y: target('Linear', start=x, end=x * y))
+        lambda x, y: target('Linear', start=x, end=x * y), replace=True)
 
     OmegaConf.register_new_resolver("piecewise", 
-        lambda init,values: target('Piecewise', init=init, values=values))
+        lambda init,values: target('Piecewise', init=init, values=values), replace=True)
     
     OmegaConf.register_new_resolver("between", 
         lambda t_start,t_end,varying: target('Between', 
-            dict(t_start=t_start, t_end=t_end, varying=varying)))
+            dict(t_start=t_start, t_end=t_end, varying=varying)), replace=True)
 
     OmegaConf.register_new_resolver("smoothstep", 
-        lambda start,end: target('SmoothStep', start=start, end=end))
+        lambda start,end: target('SmoothStep', start=start, end=end), replace=True)
 
 
 def pretty(cfg):
