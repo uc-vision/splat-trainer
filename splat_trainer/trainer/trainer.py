@@ -384,6 +384,10 @@ class Trainer(Dispatcher):
     self.log_evaluation_table(name, metrics)
     self.log_evaluation_table(f"{name}_cc", metrics_cc)
 
+    means = self.latest_metrics()
+    self.print(f"{name} step={self.step:<6d} n={self.scene.num_points:<7} {format_dict(means,  precision=4)}")
+
+
 
   def log_colormapped(self, name, values):
     colorized = colorize(self.color_map, values)
@@ -410,7 +414,6 @@ class Trainer(Dispatcher):
         self.logger.log_value(f"eval_{name}/{k}", means[k])
         self.logger.log_histogram(f"eval_{name}/{k}_hist", torch.tensor(v))
 
-    self.print(f"{name} step={self.step:<6d} n={self.scene.num_points:<7} {format_dict(means,  precision=4)}")
 
 
   def evaluate(self):
@@ -594,7 +597,6 @@ class Trainer(Dispatcher):
 
   def train(self, state:TrainerState = TrainerState.Training):
     self.state = state
-
     # Explicitly load images to avoid progress bars being messed up
     self.dataset.load_images()
 
@@ -622,13 +624,18 @@ class Trainer(Dispatcher):
 
         self.update_progress()
 
-
     self.state = TrainerState.Stopped
     self.pbar.close()
-    
-    result = {k.split('/')[-1]: self.logger[k].value for k in ["train/metrics/ssim", "train/metrics/psnr", "train/metrics/mse", "train/metrics/l1"]}
-    return result
   
+    return self.latest_metrics()
+  
+  def latest_metrics(self, metrics:tuple[str, ...]=("ssim", "psnr")):
+    result = {}
+    for category in ["train", "val", "val_cc"]:
+      values = self.logger[f"{category}/metrics"]
+      result.update({f"{category}_{k}": v.value for k, v in values.items() if k in metrics})
+
+    return result
 
   def close(self):
     self.logger.close()
