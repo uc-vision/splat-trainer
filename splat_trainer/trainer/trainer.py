@@ -132,10 +132,12 @@ class Trainer(Dispatcher):
 
     # Write initial cloud and cameras in original coordinates (undo scene normalisation)
     paths = trainer.paths()
-    trainer.write_cameras(paths.cameras)
 
-    initial = to_pointcloud(dataset.to_original.transform_gaussians(initial_gaussians))
-    initial.save_ply(paths.point_cloud)
+    if config.save_output:
+      trainer.write_cameras(paths.cameras)
+
+      initial = to_pointcloud(dataset.to_original.transform_gaussians(initial_gaussians))
+      initial.save_ply(paths.point_cloud)
 
     return trainer
 
