@@ -98,6 +98,9 @@ def with_trainer(f:Callable[[Trainer], None], args:Namespace):
   args.base_path, run_path, args.run = setup_project(config.project, args.run or config.run_name, 
         workspace_path.parent.parent if args.base_path is None else args.base_path)
   
+  if args.non_interactive:
+    os.environ["TQDM_DISABLE"] = "True"
+  
   overrides += make_overrides(run_name=args.run,  base_path=args.base_path)
 
   for override in overrides:
@@ -147,6 +150,8 @@ def arguments():
   parser.add_argument("--scale_images", type=float, default=None, help="Scale images relative to training size")
   parser.add_argument("--run", type=str, default=None, help="Name for this run")
   parser.add_argument("--enable_logging", action="store_true", help="Enable logging")
+
+  parser.add_argument("--non_interactive", action="store_true", help="Disable progress bars")
   
   parser.add_argument("--override", type=str, nargs="*", help="Override config values")
   return parser

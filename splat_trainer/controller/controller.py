@@ -4,7 +4,7 @@ from taichi_splatting import Rendering
 
 from splat_trainer.config import Progress
 from splat_trainer.logger.logger import Logger
-from splat_trainer.scene import GaussianScene
+from splat_trainer.scene.scene import GaussianScene
 
 class ControllerConfig(metaclass=ABCMeta):
 

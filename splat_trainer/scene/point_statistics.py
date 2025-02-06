@@ -31,7 +31,7 @@ class PointStatistics:
   def add_rendering(self, rendering:Rendering):    
     # Only accumulate for points that were in view for this rendering
     points = rendering.points
-    
+
     # Add loss term from point_heuristic
     self.prune_cost[points.idx] += points.prune_cost
     self.split_score[points.idx] += points.split_score

@@ -1,4 +1,5 @@
 # Python standard library
+from collections import deque
 from dataclasses import replace
 from enum import Enum
 from functools import partial
@@ -49,6 +50,8 @@ from splat_trainer.util.containers import transpose_rows
 
 from splat_trainer.util.misc import Heap, format_dict
 
+from taichi_splatting.torch_lib.util import count_nonfinite
+from . import exception
 
 from .config import TrainConfig
 from .evaluation import Evaluation
@@ -63,6 +66,7 @@ class TrainerState(Enum):
   Training = 1
   Paused = 2
 
+
 class Trainer(Dispatcher):
   _events_ = ["on_update"]
 
@@ -75,6 +79,7 @@ class Trainer(Dispatcher):
                 
                 view_selection:ViewSelection,
                 step = 0,
+                evaluation_log:Optional[List[dict]] = None,
 
                 view_clustering:Optional[cluster.ViewClustering] = None,
       ):
@@ -107,7 +112,10 @@ class Trainer(Dispatcher):
     self.pbar = None
 
     self.view_clustering = view_clustering
-
+    self.evaluation_log = evaluation_log or []
+    
+    self.running_time = deque(maxlen=10)
+    self.last_time = None
 
   @staticmethod
   def initialize(config:TrainConfig, dataset:Dataset, logger:Logger):
@@ -127,12 +135,10 @@ class Trainer(Dispatcher):
     controller = config.controller.make_controller(scene, config.target_points, progress, logger)
     view_selector = config.view_selection.create(camera_table)
 
-
     trainer = Trainer(config, scene, controller, dataset, logger, view_selector)
 
     # Write initial cloud and cameras in original coordinates (undo scene normalisation)
     paths = trainer.paths()
-
     if config.save_output:
       trainer.write_cameras(paths.cameras)
 
@@ -151,7 +157,6 @@ class Trainer(Dispatcher):
     device = torch.device(config.device)
     camera_table = dataset.camera_table.to(device)
   
-
     if not isinstance(logger, LoggerWithState):
       logger = LoggerWithState(logger)
 
@@ -172,9 +177,11 @@ class Trainer(Dispatcher):
     else:
       view_clustering = None
 
+    evaluation_log = state_dict.get('evaluation_log', None)
+
     return Trainer(config, scene, controller, dataset, logger, 
                    view_selection=view_selection,
-                   step=step,
+                   step=step, evaluation_log=evaluation_log,
                    view_clustering=view_clustering)
 
   def state_dict(self):
@@ -309,7 +316,7 @@ class Trainer(Dispatcher):
     rendering = self.render(camera_params, image_view.image_idx, render_median_depth=True)
     return Evaluation(image_view.filename, rendering.detach(), image_view.image)
 
-  def evaluations(self, image_views:Sequence[ImageView]) -> Iterator[Evaluation]:
+  def iter_evaluations(self, image_views:Sequence[ImageView]) -> Iterator[Evaluation]:
     for image_view in image_views:
       yield self.evaluate_image(image_view)
 
@@ -360,12 +367,16 @@ class Trainer(Dispatcher):
     
 
   
-  def evaluate_dataset(self, name:str, image_views:Sequence[ImageView]):
+  def evaluate_dataset(self, name:str, image_views:Sequence[ImageView], random_seed:int=0):
     """ Evaluate dataset, log images and color corrected images.
     """
     # Track metrics for all images
     metrics = {}
     metrics_cc = {}
+
+    rng = np.random.RandomState(random_seed)
+    log_indices = set(rng.choice(len(image_views), min(self.config.num_logged_images, len(image_views)), replace=False))
+
 
     pbar = tqdm(total=len(image_views), desc=f"Evaluating {name}", leave=False)
     for i, image_view in enumerate(image_views):
@@ -375,7 +386,8 @@ class Trainer(Dispatcher):
         metrics[eval.filename] = eval.metrics
         metrics_cc[eval_cc.filename] = eval_cc.metrics
 
-        self.log_evaluation_images(f"{name}_images/{eval_cc.image_id}", eval_cc, log_source=self.step == 0)
+        if i in log_indices:
+          self.log_evaluation_images(f"{name}_images/{eval_cc.image_id}", eval_cc, log_source=self.step == 0)
 
         pbar.update(1)
         pbar.set_postfix_str(format_dict(eval_cc.metrics, precision=3))
@@ -384,6 +396,7 @@ class Trainer(Dispatcher):
     self.log_evaluation_table(name, metrics)
     self.log_evaluation_table(f"{name}_cc", metrics_cc)
 
+  
 
   def log_colormapped(self, name, values):
     colorized = colorize(self.color_map, values)
@@ -391,13 +404,14 @@ class Trainer(Dispatcher):
 
 
   def log_evaluation_images(self, name:str, eval:Evaluation, log_source:bool=True):
-    self.logger.log_image(f"{name}/render", eval.rendering.image, 
-                    caption=f"{eval.filename} PSNR={eval.psnr:.3f} L1={eval.l1:.2f} ssim={eval.ssim:.2f}")
-    self.logger.log_image(f"{name}/depth", 
-        colorize(self.color_map, eval.rendering.median_ndc_image), caption=eval.filename)
-    
-    if log_source:
-      self.logger.log_image(f"{name}/image", eval.source_image, caption=eval.filename)
+    if self.config.log_images:
+      self.logger.log_image(f"{name}/render", eval.rendering.image, 
+                      caption=f"{eval.filename} PSNR={eval.psnr:.3f} L1={eval.l1:.2f} ssim={eval.ssim:.2f}")
+      self.logger.log_image(f"{name}/depth", 
+          colorize(self.color_map, eval.rendering.median_ndc_image), caption=eval.filename)
+      
+      if log_source:
+        self.logger.log_image(f"{name}/image", eval.source_image, caption=eval.filename)
 
 
   def log_evaluation_table(self, name:str, metrics:dict):
@@ -410,16 +424,22 @@ class Trainer(Dispatcher):
         self.logger.log_value(f"eval_{name}/{k}", means[k])
         self.logger.log_histogram(f"eval_{name}/{k}_hist", torch.tensor(v))
 
-    self.print(f"{name} step={self.step:<6d} n={self.scene.num_points:<7} {format_dict(means,  precision=4)}")
 
 
   def evaluate(self):
+
+
     self.evaluate_training("train", self.dataset.train(shuffle=False))
     val = self.dataset.val()
     if len(val) > 0:
       self.evaluate_dataset("val", val)
 
+    means = self.eval_metrics()
+    self.print(f"step={self.step:<6d} n={self.scene.num_points:<7} {format_dict(means,  precision=4)}")
+
     self.update_progress()
+
+    return means
   
 
   def compute_ssim_loss(self, pred:torch.Tensor, ref:torch.Tensor, levels:int=4):
@@ -434,9 +454,7 @@ class Trainer(Dispatcher):
         ref = F.avg_pool2d(ref, kernel_size=2, stride=2)
 
         loss += (1.0 - self.ssim(pred, ref)) 
-
       return loss / levels, ssim.item()
-
 
 
   def compute_losses(self, rendering:Rendering, image:torch.Tensor):
@@ -481,6 +499,10 @@ class Trainer(Dispatcher):
       with torch.enable_grad():
         rendering = self.render(camera_params, image_view.image_idx)
 
+        if rendering.points.num_visible == 0:
+          filename = image_view.filename
+          raise exception.TrainingException(f"No visible points: {filename} - check training parameters or dataset camera poses")
+
         loss = self.compute_losses(rendering, image_view.image) 
         loss.backward()
 
@@ -499,7 +521,6 @@ class Trainer(Dispatcher):
     log_scale_histogram("rendering/log10_split_score", points.split_score, min_val=1e-10)
     log_scale_histogram("rendering/log10_max_scale_px", points.screen_scale, min_val=1e-6)
     log_scale_histogram("rendering/log10_visibility", points.visibility, min_val=1e-10)
-
 
 
   def training_step(self, batch:List[ImageView]):
@@ -552,10 +573,30 @@ class Trainer(Dispatcher):
 
   
   def checkpoint(self, save:bool=True):
-    self.evaluate()
+    def check_nan(t, name):
+      d = count_nonfinite(t, name)
+      if len(d) > 0:
+        raise exception.NaNParameterException(f'Non-finite entries detected: {d}')
+      
+    check_nan(self.scene.state_dict(), "scene")
     
-    self.scene.log_checkpoint(self.progress)
 
+    self.scene.log_checkpoint(self.progress)
+    metrics = self.evaluate()
+
+    if len(self.evaluation_log) > 0:
+      ssim = metrics['train_ssim']
+      prev_ssim = self.evaluation_log[-1]['train_ssim']
+      initial_ssim = self.evaluation_log[0]['train_ssim']
+
+      if ssim < initial_ssim:
+        raise exception.NoProgressException("Training aborted - ssim is worse than untrained ssim")
+      
+      if prev_ssim > ssim + self.config.max_ssim_regression:
+        raise exception.NoProgressException(f"Training aborted - ssim regression exceeded {prev_ssim:4f} - {ssim:4f} > {self.config.max_ssim_regression:4f}")
+
+    self.evaluation_log.append(dict(step = self.step, **metrics))
+    
     if save and self.config.save_output:
       self.write_checkpoint()
 
@@ -585,16 +626,31 @@ class Trainer(Dispatcher):
     return desc
 
   def update_progress(self):
-    if self.pbar is None:
-      return
+    if self.pbar is not None:
+      
+      self.pbar.update(self.progress.step - self.pbar.n)
+      self.pbar.set_postfix_str(" ".join(self.pbar_metrics()))
 
-    self.pbar.update(self.progress.step - self.pbar.n)
-    self.pbar.set_postfix_str(" ".join(self.pbar_metrics()))
+      current_time = time.time()
 
+      # Start timing after the first logging interval (or evaluation) to avoid startup time
+      if self.last_time is not None:  
+        self.running_time.append(current_time - self.last_time)
+
+        step_rate = self.config.log_interval / np.mean(self.running_time)
+        self.logger.log_value("train/step_rate", step_rate)
+
+        # Check for excessively slow training
+        if self.config.min_step_rate is not None and len(self.running_time)  == self.running_time.maxlen:
+
+          # give some extra leeway near the start
+          if step_rate < self.config.min_step_rate:
+            raise exception.TrainingTimeoutException(f"Step rate lower than config.min_step_rate: {step_rate:.3f} < {self.config.min_step_rate:.3f}")
+
+      self.last_time = current_time
 
   def train(self, state:TrainerState = TrainerState.Training):
     self.state = state
-
     # Explicitly load images to avoid progress bars being messed up
     self.dataset.load_images()
 
@@ -604,13 +660,15 @@ class Trainer(Dispatcher):
     self.loader = ThreadedLoader(self.iter_batches())
     self.pbar = tqdm(initial=self.step, total=self.config.total_steps, desc=self.state.name)
 
+
     while self.step < self.config.total_steps:
 
       images = self.loader.next()
       self.training_step(images)
 
       if self.last_checkpoint + self.config.eval_steps <= self.step:
-          self.checkpoint(self.config.save_checkpoints or self.step == self.config.total_steps)        
+          self.checkpoint(self.config.save_checkpoints or self.step == self.config.total_steps)     
+          self.last_time = None 
 
       self.controller.step(self.progress)
 
@@ -622,13 +680,18 @@ class Trainer(Dispatcher):
 
         self.update_progress()
 
-
     self.state = TrainerState.Stopped
     self.pbar.close()
-    
-    result = {k.split('/')[-1]: self.logger[k].value for k in ["train/metrics/ssim", "train/metrics/psnr", "train/metrics/mse", "train/metrics/l1"]}
-    return result
   
+    return self.eval_metrics()
+  
+  def eval_metrics(self, metrics:tuple[str, ...]=("ssim", "psnr")):
+    result = {}
+    for category in ["train", "val", "val_cc"]:
+      values = self.logger[f"eval_{category}"]
+      result.update({f"{category}_{k}": v.value for k, v in values.items() if k in metrics})
+
+    return result
 
   def close(self):
     self.logger.close()

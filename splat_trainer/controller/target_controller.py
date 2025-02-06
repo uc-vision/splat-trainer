@@ -78,7 +78,6 @@ class TargetController(Controller):
     prune_schedule = int(math.ceil(config.prune_rate * n * (1 - t)))
 
     prune_cost, split_score = self.points.masked_heuristics(config.min_views)
-    
     prune_mask = take_n(prune_cost, prune_schedule, descending=False) | exceeds_scale 
 
     target_split = (target_points - n) + prune_mask.sum().item()

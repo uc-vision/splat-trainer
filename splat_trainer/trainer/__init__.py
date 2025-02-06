@@ -5,6 +5,7 @@ from .evaluation import Evaluation
 from splat_trainer.dataset.dataset import ImageView
 from splat_trainer.config import Progress, eval_varying
 from .view_selection import TargetOverlapConfig, RandomSamplerConfig, ViewSelectionConfig, ViewSelection, BatchOverlapSamplerConfig
+from splat_trainer.trainer.exception import NaNParameterException, TrainingException
 
 
 __all__ = ["Trainer", 
@@ -22,4 +23,7 @@ __all__ = ["Trainer",
            "BatchOverlapSamplerConfig",
 
            "Progress",     
-           "eval_varying"]
+           "eval_varying",
+
+           "NaNParameterException",
+           "TrainingException"]

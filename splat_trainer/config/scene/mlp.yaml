@@ -1,7 +1,6 @@
 
 # @package _global_
 
-
 trainer:
   scene: 
     _target_: splat_trainer.scene.MLPSceneConfig

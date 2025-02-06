@@ -44,6 +44,7 @@ def cfg_from_args():
   training_group.add_argument("--target_points", type=int, default=None, help="Target point count")
   training_group.add_argument("--total_steps", type=int, default=None, help="Number of total training steps")
   training_group.add_argument("--training_scale", type=float, default=1.0, help="Scale the number of steps by a constant factor")
+  training_group.add_argument("--eval_steps", type=int, default=None, help="Number of steps between evaluations")
   
   training_group.add_argument("--initial_points", type=int, default=None, help="Start with N points in the point cloud (add random points to make up the difference)")
   training_group.add_argument("--limit_points", type=int, default=None, help="Limit the number of points from the dataset to N")
@@ -72,6 +73,9 @@ def cfg_from_args():
   output_group.add_argument("--run", type=str, default=None, help="Name for this run")
   output_group.add_argument("--base_path", type=str, default=None, help="Base output path")
   output_group.add_argument("--checkpoint", action="store_true", help="Save checkpoints")
+
+  output_group.add_argument("--non_interactive", action="store_true", help="Disable progress bars")
+
 
 
   output_group.add_argument("--wandb", action="store_true", help="Use wandb logging")
@@ -117,6 +121,9 @@ def cfg_from_args():
 
   if args.total_steps is not None:
     overrides.append(f"trainer.total_steps={args.total_steps}")
+
+  if args.eval_steps is not None:
+    overrides.append(f"trainer.eval_steps={args.eval_steps}")
 
   if args.training_scale is not None:
     overrides.append(f"training_scale={args.training_scale}")
@@ -170,6 +177,9 @@ def cfg_from_args():
 
   if args.checkpoint:
     overrides.append("trainer.save_checkpoints=true")
+
+  if args.non_interactive:
+    overrides.append("trainer.interactive=false")
   
   base_path = Path(args.base_path) if args.base_path is not None else Path.cwd()
   args.base_path, run_path, args.run = config.setup_project(args.project, args.run, base_path=base_path)
@@ -208,6 +218,10 @@ def train_with_config(cfg) -> dict | str:
 
   logger:Logger = hydra.utils.instantiate(cfg.logger)
   logger.log_config(OmegaConf.to_container(cfg, resolve=True))
+
+  if not cfg.interactive:
+    os.environ["TQDM_DISABLE"] = "True"
+
 
   trainer = None
   result = None

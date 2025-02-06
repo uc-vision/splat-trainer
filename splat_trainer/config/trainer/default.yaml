@@ -17,8 +17,8 @@ trainer:
     initial_point_scale: 0.2
     initial_alpha: 0.2
 
-    initial_points: 500000  
-    limit_points: null
+    initial_points: 200_000  
+    limit_points: 100_000
 
     clamp_near: 1.0
     min_view_overlap: 4 # minimum number of views a point must be visible in when adding random points
@@ -36,7 +36,16 @@ trainer:
   num_logged_images: 8
   log_worst_images: 2
 
+
+  # Add detailed histogram logging for debug purposes
   log_details: False
+
+
+  # Early stopping settings
+
+  # Maximum (average) time for a training step, if exceeded over 10 log_intervals training will be aborted
+  min_step_rate: 10.0 # steps per second
+  max_ssim_regression: 0.01 # if ssim regression exceeds this value, training will be aborted
 
   # Loss function settings
   ssim_weight: 1.0 # ssim is expensive but converges faster than just l1 loss
@@ -53,9 +62,19 @@ trainer:
 
   # General settings
   device: "cuda:0"
-  save_checkpoints: False
-  save_output: True
 
+  # Save intermediate checkpoints (can generate a lot of data)
+  save_checkpoints: False
+
+  # If false, disables saving any outputs (initial point cloud, cameras, output cloud etc.)
+  save_output: True  
+
+  # If false, disables logging any images to logger
+  log_images: True
+
+
+# If true, enables progress bars - if false, disables all progress bars which polute log files 
+interactive: True
 
 training_scale: 1
 test_every: 8

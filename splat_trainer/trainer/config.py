@@ -19,6 +19,9 @@ from splat_trainer.scene.scene import GaussianSceneConfig
 from splat_trainer.trainer.view_selection import ViewSelectionConfig
 
 
+
+
+
 @dataclass(kw_only=True, frozen=True)
 class CloudInitConfig:
   num_neighbors:int  
@@ -48,13 +51,16 @@ class TrainConfig:
   log_interval: int  = 10
 
   target_points: int
-
   densify_interval: VaryingInt = 100
 
-  # Evaluation settings
+  # Minimum steps per second for a training step, if exceeded training will be aborted
+  # this will be checked over 10 log_intervals (running mean)
+  min_step_rate : Optional[float] = None
+  max_ssim_regression: float = 0.01
+
+  # Evaluation settings - note no images are logged if log_images is False
   num_logged_images: int = 8
   log_worst_images: int  = 2
-
   log_details: bool = False
 
   # Loss function settings
@@ -74,4 +80,6 @@ class TrainConfig:
   device: str
 
   save_checkpoints: bool = False
-  save_output: bool = True
+
+  save_output: bool = True  # Save outputs (initial point cloud, cameras, output cloud etc.)
+  log_images: bool = True  # If false, disable logging any images to logger

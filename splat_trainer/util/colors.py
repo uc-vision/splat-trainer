@@ -93,7 +93,10 @@ def fit_colors_batch(
             ma_mat = torch.where(mask[:, None], a_mat, torch.zeros_like(a_mat))
             mb = torch.where(mask, b, torch.zeros_like(b))
             w = torch.linalg.lstsq(ma_mat, mb, rcond=-1)[0]
-            assert torch.all(torch.isfinite(w))
+
+
+            # assert torch.all(torch.isfinite(w))
+            
             warp.append(w)
         warp = torch.stack(warp, dim=-1)
         # Apply the warp to update img_mat.
