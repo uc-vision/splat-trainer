@@ -99,7 +99,7 @@ def with_trainer(f:Callable[[Trainer], None], args:Namespace):
         workspace_path.parent.parent if args.base_path is None else args.base_path)
   
   if args.non_interactive:
-    os.environ["TQDM_DISABLE"] = "True"
+    os.environ["TQDM_DISABLE"] = "1"
   
   overrides += make_overrides(run_name=args.run,  base_path=args.base_path)
 

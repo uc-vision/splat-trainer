@@ -3,6 +3,7 @@ from pathlib import Path
 import hydra
 import numpy as np
 from omegaconf import OmegaConf
+from tqdm import tqdm
 from taichi_splatting import TaichiQueue
 from termcolor import colored
 import termcolor
@@ -179,7 +180,7 @@ def cfg_from_args():
     overrides.append("trainer.save_checkpoints=true")
 
   if args.non_interactive:
-    overrides.append("trainer.interactive=false")
+    overrides.append("interactive=false")
   
   base_path = Path(args.base_path) if args.base_path is not None else Path.cwd()
   args.base_path, run_path, args.run = config.setup_project(args.project, args.run, base_path=base_path)
@@ -220,8 +221,10 @@ def train_with_config(cfg) -> dict | str:
   logger.log_config(OmegaConf.to_container(cfg, resolve=True))
 
   if not cfg.interactive:
-    os.environ["TQDM_DISABLE"] = "True"
+    print("Interactive is False, disabling progress bars")
+    os.environ["TQDM_DISABLE"] = "1"
 
+  
 
   trainer = None
   result = None

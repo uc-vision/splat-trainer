@@ -2,6 +2,7 @@ from functools import partial
 import math
 from multiprocessing import cpu_count, get_logger
 from multiprocessing.pool import ThreadPool
+import os
 from pathlib import Path
 from typing import Optional
 from beartype.typing import List
@@ -36,13 +37,13 @@ class LogExceptions(object):
         return result
 
 
-def parmap_list(f, xs, j=cpu_count() // 2, chunksize=1, pool=ThreadPool, progress=partial(tqdm, desc="Processing images")):
+def parmap_list(f, xs, j=cpu_count() // 2, chunksize=1, pool=ThreadPool, progress=partial(tqdm, desc="Loading images")):
 
   with pool(processes=j) as pool:
     iter = pool.imap(LogExceptions(f), xs, chunksize=chunksize)
     
     if progress is not None:
-      iter = progress(iter, total=len(xs))
+      iter = progress(iter, total=len(xs), disable=os.environ.get("TQDM_DISABLE", False))
 
     return list(iter)
 
@@ -70,5 +71,6 @@ def load_image(filename:Path, image_scale:Optional[float]=1.0, resize_longest:Op
 def load_images(filenames:List[str], base_path:Path, 
                 image_scale:Optional[float], resize_longest:Optional[int], **map_options):
   
+  print(f"Loading {len(filenames)} images")
   return parmap_list(partial(load_image, image_scale=image_scale, resize_longest=resize_longest), 
                      [base_path / f for f in filenames], **map_options)  

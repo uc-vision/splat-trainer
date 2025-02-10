@@ -1,6 +1,7 @@
 
 from dataclasses import dataclass
 from functools import partial
+import os
 from pathlib import Path
 from typing import Optional, Sequence, Tuple
 from beartype.typing import Dict, Iterator, List
@@ -56,7 +57,8 @@ def load_scan(scan_file:str, image_scale:Optional[float]=None,
     for k, camera in cameras.items():
         print(k, camera)
 
-    all_cameras = preload_images(scan, cameras, progress=partial(tqdm, desc="Loading images"))
+    all_cameras = preload_images(scan, cameras, progress=partial(tqdm, desc="Loading images", 
+                                                                 disable=os.environ.get("TQDM_DISABLE", False)))
     return scan.copy(cameras=cameras), all_cameras
 
 

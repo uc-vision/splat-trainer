@@ -1,5 +1,6 @@
 from dataclasses import replace
 import json
+import os
 from taichi_splatting import Gaussians3D
 import torch
 from tqdm import tqdm
@@ -44,7 +45,8 @@ def evaluate_with_training(trainer:Trainer, train:bool) -> dict:
 
 
   train = trainer.dataset.train(shuffle=False)
-  metrics = [eval.metrics for eval in tqdm(trainer.evaluations(train), desc="Evaluating", total=len(train))]
+  metrics = [eval.metrics for eval in tqdm(trainer.evaluations(train), desc="Evaluating", total=len(train), 
+                                           disable=os.environ.get("TQDM_DISABLE", False))]
 
   return mean_rows(metrics)
 

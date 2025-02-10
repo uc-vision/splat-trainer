@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from functools import cached_property, partial
+import os
 import numpy as np
 from splat_trainer.dataset.normalization import Normalization, NormalizationConfig
 import torch
@@ -82,7 +83,9 @@ class ScanDataset(Dataset):
     
   def load_images(self) -> PreloadedImages:
     if self._images is None:
-      self._images = preload_images(self.loaded_scan, self.cameras, progress=partial(tqdm, desc="Loading images"))
+      print(f"Loading {len(self.cameras)} images...")
+      self._images = preload_images(self.loaded_scan, self.cameras, 
+                progress=partial(tqdm, desc="Loading images", disable=os.environ.get("TQDM_DISABLE", False)))
 
     return self._images
     

@@ -5,6 +5,7 @@ from enum import Enum
 from functools import partial
 import json
 import math
+import os
 from pathlib import Path
 import time
 from types import SimpleNamespace
@@ -232,7 +233,9 @@ class Trainer(Dispatcher):
     return SimpleNamespace(**paths)
   
   def print(self, str:str):
-    if self.pbar is not None:
+
+    interactive = os.environ.get("TQDM_DISABLE", False)
+    if self.pbar is not None and interactive:
       self.pbar.write(str)
     else:
       print(str)
@@ -339,7 +342,8 @@ class Trainer(Dispatcher):
     rng = np.random.RandomState(random_seed)
     log_indices = set(rng.choice(len(image_views), min(self.config.num_logged_images, len(image_views)), replace=False))
 
-    pbar = tqdm(total=len(image_views), desc=f"Evaluating {name}", leave=False)
+    pbar = tqdm(total=len(image_views), desc=f"Evaluating {name}", leave=False, 
+                disable=os.environ.get("TQDM_DISABLE", False))
     for i, image_view in enumerate(image_views):
         eval = self.evaluate_image(image_view)
 
@@ -378,7 +382,8 @@ class Trainer(Dispatcher):
     log_indices = set(rng.choice(len(image_views), min(self.config.num_logged_images, len(image_views)), replace=False))
 
 
-    pbar = tqdm(total=len(image_views), desc=f"Evaluating {name}", leave=False)
+    pbar = tqdm(total=len(image_views), desc=f"Evaluating {name}", leave=False, 
+                disable=os.environ.get("TQDM_DISABLE", False))
     for i, image_view in enumerate(image_views):
         eval = self.evaluate_image(image_view)
         eval_cc = eval.color_corrected()
@@ -427,7 +432,7 @@ class Trainer(Dispatcher):
 
 
   def evaluate(self):
-
+    self.print(f"Performing evaluation at step {self.step}")
 
     self.evaluate_training("train", self.dataset.train(shuffle=False))
     val = self.dataset.val()
@@ -658,9 +663,10 @@ class Trainer(Dispatcher):
 
     # Create batch loader that loads log_interval batches at a time
     self.loader = ThreadedLoader(self.iter_batches())
-    self.pbar = tqdm(initial=self.step, total=self.config.total_steps, desc=self.state.name)
+    self.pbar = tqdm(initial=self.step, total=self.config.total_steps, desc=self.state.name,
+                     disable=os.environ.get("TQDM_DISABLE", False))
 
-
+    self.print(f"Beginning training for {self.config.total_steps - self.step} steps, eval_steps={self.config.eval_steps}")
     while self.step < self.config.total_steps:
 
       images = self.loader.next()
