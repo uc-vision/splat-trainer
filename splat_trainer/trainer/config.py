@@ -56,7 +56,7 @@ class TrainConfig:
   # Minimum steps per second for a training step, if exceeded training will be aborted
   # this will be checked over 10 log_intervals (running mean)
   min_step_rate : Optional[float] = None
-  max_ssim_regression: float = 0.01
+  max_ssim_regression: float = 0.04
 
   # Evaluation settings - note no images are logged if log_images is False
   num_logged_images: int = 8

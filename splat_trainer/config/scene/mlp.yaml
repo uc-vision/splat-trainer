@@ -25,8 +25,10 @@ trainer:
     beta1: 0.8
     beta2: 0.95
 
-    vis_beta: 0.9995
+    vis_beta: 0.999
     vis_smooth: 0.01
+
+    grad_clip: 2.0
 
     image_features: 32
     point_features: 16

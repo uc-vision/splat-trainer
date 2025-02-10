@@ -49,7 +49,7 @@ class MLPSceneConfig(GaussianSceneConfig):
   vis_smooth:float = 0.001
   per_image:bool = True
 
-  grad_clip:Optional[float] = 1.0
+  grad_clip:Optional[float] = 2.0
 
   autotune:bool = False
 
@@ -57,7 +57,7 @@ class MLPSceneConfig(GaussianSceneConfig):
 
   def optim_options(self):
     return dict(optimizer=VisibilityAwareLaProp, betas=(self.beta1, self.beta2), vis_beta=self.vis_beta,
-                bias_correction=True, vis_smooth=self.vis_smooth) 
+                bias_correction=True, vis_smooth=self.vis_smooth, grad_clip=self.grad_clip) 
   # def optim_options(self):
   #   return dict(optimizer=SparseLaProp, betas=(self.beta1, self.beta2), bias_correction=True)
 
@@ -356,8 +356,9 @@ class MLPScene(GaussianScene):
     if image_idx is not None and camera.count_label(Label.Training) > 0:
       glo_feature = self.lookup_glo_feature(image_idx).unsqueeze(0)
     else:
-      glo_feature = self.interpolated_glo_feature(torch.inverse(camera_params.T_camera_world)).unsqueeze(0)
-
+      # glo_feature = self.interpolated_glo_feature(torch.inverse(camera_params.T_camera_world)).unsqueeze(0)
+      glo_feature = torch.zeros((1, self.config.image_features), device=self.device)
+      
     with torch.autocast(device_type=self.device.type, dtype=torch.float16):
       feature = self.points.feature[point_indexes]
     

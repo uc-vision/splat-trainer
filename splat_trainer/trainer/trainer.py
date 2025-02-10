@@ -661,12 +661,14 @@ class Trainer(Dispatcher):
 
     self.checkpoint(self.config.save_checkpoints)
 
+    self.print(f"Beginning training for {self.config.total_steps - self.step} steps, eval_steps={self.config.eval_steps}")
+
+
     # Create batch loader that loads log_interval batches at a time
     self.loader = ThreadedLoader(self.iter_batches())
     self.pbar = tqdm(initial=self.step, total=self.config.total_steps, desc=self.state.name,
                      disable=os.environ.get("TQDM_DISABLE", False))
 
-    self.print(f"Beginning training for {self.config.total_steps - self.step} steps, eval_steps={self.config.eval_steps}")
     while self.step < self.config.total_steps:
 
       images = self.loader.next()

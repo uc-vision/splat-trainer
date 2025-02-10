@@ -12,7 +12,8 @@ class GLOTable(torch.nn.Module):
   def __init__(self, n:int, glo_features:int):
     super().__init__()
     self.embeddings = nn.Embedding(n, glo_features, sparse=True)
-    torch.nn.init.normal_(self.embeddings.weight, mean=0.0, std=1.0)
+    # torch.nn.init.normal_(self.embeddings.weight, mean=0.0, std=1.0)
+    torch.nn.init.zeros_(self.embeddings.weight)
 
 
   @property
@@ -35,7 +36,7 @@ class GLOTable(torch.nn.Module):
   def optimizer(self, lr_glo:VaryingFloat):
     lr_glo = eval_varying(lr_glo, 0.)
     param_groups = [
-      dict(params=self.embeddings.parameters(), lr=lr_glo, name="glo"),
+      dict(params=self.embeddings.parameters(), lr=lr_glo, name="glo", weight_decay=1e-2),
     ]
 
     return torch.optim.SparseAdam(param_groups, betas=(0.8, 0.95))

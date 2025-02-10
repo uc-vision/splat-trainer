@@ -25,7 +25,7 @@ class TargetConfig(ControllerConfig):
   target_count_t:float = 0.8
 
   # minimum number of times point is in view before it is able to be pruned
-  min_views:int = 10
+  min_views:int = 5
 
   # maximum screen-space size for a floater point (otherwise pruned)
   max_scale_px:float = 200

@@ -8,7 +8,7 @@ trainer:
     # rate of splitting proportional to current size
     prune_rate: 0.025
 
-    # hit target count at time t
+    # hit target (point) count at time t
     target_count_t: 0.8
 
     # minimum number of times point is in view before it is able to be pruned
@@ -22,5 +22,5 @@ trainer:
       start: 50
       steps:
         - [0.1, 100]
-        # - [0.6, 200]
+        - [0.5, 200]
       scale: ${training_scale}

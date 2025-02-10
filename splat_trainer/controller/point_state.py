@@ -37,7 +37,7 @@ class PointState:
         image_scale_px = points.screen_scale.max(1).values
 
         self.max_scale_px[points.idx] = torch.maximum(self.max_scale_px[points.idx], image_scale_px)
-        self.points_in_view[points.idx] += 1
+        self.points_in_view[points.visible.idx] += 1
 
         self.visibility[points.idx] += points.visibility
 
@@ -53,7 +53,8 @@ class PointState:
         
         # only prune points which have been seen enough times
         prune_cost = torch.where(self.points_in_view >= min_views, self.prune_cost, torch.inf)
-        return prune_cost, self.split_score
+        split_score = torch.where(self.points_in_view >= min_views, self.split_score, 0.0)
+        return prune_cost, split_score
     
 
 
