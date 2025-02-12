@@ -279,6 +279,9 @@ def add_resolvers():
 
     OmegaConf.register_new_resolver("smoothstep", 
         lambda start,end: target('SmoothStep', start=start, end=end), replace=True)
+    
+    OmegaConf.register_new_resolver("add", 
+        lambda *numbers: sum(numbers), replace=True)
 
 
 def pretty(cfg):
