@@ -696,8 +696,10 @@ class Trainer(Dispatcher):
   def eval_metrics(self, metrics:tuple[str, ...]=("ssim", "psnr")):
     result = {}
     for category in ["train", "val", "val_cc"]:
-      values = self.logger[f"eval_{category}"]
-      result.update({f"{category}_{k}": v.value for k, v in values.items() if k in metrics})
+      name = f"eval_{category}"
+      if name in self.logger:
+        values = self.logger[name]
+        result.update({f"{category}_{k}": v.value for k, v in values.items() if k in metrics})
 
     return result
 
