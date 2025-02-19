@@ -24,8 +24,8 @@ trainer:
     min_view_overlap: 4 # minimum number of views a point must be visible in when adding random points
 
   # Scheduling settings
-  total_steps: ${int_mul:20000,${training_scale}}
-  eval_steps: ${int_mul:2000,${training_scale}}
+  total_steps: ${int_mul:10000,${training_scale}}
+  eval_steps: ${int_mul:1000,${training_scale}}
   log_interval: 10
 
   # target point cloud size 
