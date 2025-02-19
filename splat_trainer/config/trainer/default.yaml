@@ -15,10 +15,10 @@ trainer:
     # initial scale is (mean distance to num_neighbors) * initial_point_scale
     num_neighbors: 5
     initial_point_scale: 0.2
-    initial_alpha: 0.2
+    initial_alpha: 0.4
 
-    initial_points: 200_000  
-    limit_points: 100_000
+    initial_points: ${int_mul:300_000,${training_scale}}  
+    limit_points: ${int_div:${.initial_points},2}
 
     clamp_near: 1.0
     min_view_overlap: 4 # minimum number of views a point must be visible in when adding random points
@@ -30,6 +30,7 @@ trainer:
 
   # target point cloud size 
   target_points: ${int_mul:1000000,${training_scale}}
+  
 
 
   # Evaluation settings

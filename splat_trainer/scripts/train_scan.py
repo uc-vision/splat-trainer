@@ -49,6 +49,7 @@ def cfg_from_args():
   
   training_group.add_argument("--initial_points", type=int, default=None, help="Start with N points in the point cloud (add random points to make up the difference)")
   training_group.add_argument("--limit_points", type=int, default=None, help="Limit the number of points from the dataset to N")
+  training_group.add_argument("--no_val", action="store_true", help="Disable validation set")
   
   
   training_group.add_argument("--random_points", type=int, default=None, help="Use N random points only")
@@ -136,6 +137,9 @@ def cfg_from_args():
 
   if args.limit_points is not None:
     overrides.append(f"trainer.cloud_init.limit_points={args.limit_points}")
+
+  if args.no_val:
+    overrides.append("test_every=0")
 
   if args.random_points is not None:
     assert not args.limit_points, "Cannot use both --limit_points and --random_points"

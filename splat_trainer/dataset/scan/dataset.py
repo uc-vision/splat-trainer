@@ -83,7 +83,7 @@ class ScanDataset(Dataset):
     
   def load_images(self) -> PreloadedImages:
     if self._images is None:
-      print(f"Loading {len(self.cameras)} images...")
+      print(f"Loading {self.num_images} images...")
       self._images = preload_images(self.loaded_scan, self.cameras, 
                 progress=partial(tqdm, desc="Loading images", disable=os.environ.get("TQDM_DISABLE", False)))
 
