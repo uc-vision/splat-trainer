@@ -45,8 +45,8 @@ trainer:
   # Early stopping settings
 
   # Maximum (average) time for a training step, if exceeded over 10 log_intervals training will be aborted
-  min_step_rate: 5.0 # steps per second
-  max_ssim_regression: 0.02 # if ssim regression exceeds this value, training will be aborted
+  min_step_rate: null # steps per second
+  max_ssim_regression: 0.05 # if ssim regression exceeds this value, training will be aborted
 
   # Loss function settings
   ssim_weight: 1.0 # ssim is expensive but converges faster than just l1 loss
